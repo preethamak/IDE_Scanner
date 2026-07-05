@@ -1,0 +1,13 @@
+[project]
+name = "ide-scanner"
+version = "0.1.0"
+description = "Evidence-first VS Code extension security scanner."
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+
+[project.scripts]
+ide-scanner = "ide_scanner.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

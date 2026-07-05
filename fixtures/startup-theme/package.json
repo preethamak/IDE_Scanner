@@ -1,0 +1,11 @@
+{
+  "name": "startup-theme",
+  "publisher": "trusted",
+  "version": "1.0.0",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "themes": []
+  }
+}

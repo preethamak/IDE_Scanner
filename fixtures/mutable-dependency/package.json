@@ -1,0 +1,9 @@
+{
+  "name": "mutable-dependency",
+  "publisher": "example",
+  "version": "1.0.0",
+  "dependencies": {
+    "remote-tool": "git+https://github.com/example/tool.git",
+    "floating": "latest"
+  }
+}

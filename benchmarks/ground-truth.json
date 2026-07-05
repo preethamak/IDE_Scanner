@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1.0",
+  "extensions": [
+    {
+      "path": "../fixtures/benign-formatter",
+      "extension_id": "trusted.trusted-formatter",
+      "expected_verdict": "clean",
+      "reason": "Command-scoped benign extension with no actionable abuse path."
+    },
+    {
+      "path": "../fixtures/agent-tool",
+      "extension_id": "example.agent-toolbox",
+      "expected_verdict": "review",
+      "reason": "Agent-facing capability requires review but is not malware."
+    },
+    {
+      "path": "../fixtures/credential-exfil",
+      "extension_id": "unknown.shadow-helper",
+      "expected_verdict": "suspicious",
+      "reason": "Static credential read and outbound network chain."
+    },
+    {
+      "path": "../fixtures/startup-theme",
+      "extension_id": "trusted.startup-theme",
+      "expected_verdict": "clean",
+      "reason": "Startup activation alone is context, not actionable review."
+    },
+    {
+      "path": "../fixtures/lifecycle-dropper",
+      "extension_id": "unknown.dropper",
+      "expected_verdict": "suspicious",
+      "reason": "Install-time download and shell execution chain."
+    },
+    {
+      "path": "../fixtures/mutable-dependency",
+      "extension_id": "example.mutable-dependency",
+      "expected_verdict": "review",
+      "reason": "Mutable and unpinned runtime dependencies need supply-chain review."
+    },
+    {
+      "path": "../fixtures/native-artifact",
+      "extension_id": "example.native-artifact",
+      "expected_verdict": "review",
+      "reason": "Native binary artifact needs provenance review."
+    },
+    {
+      "path": "../fixtures/threat-feed-malware",
+      "extension_id": "knownbad.feed-hit",
+      "expected_verdict": "malicious",
+      "reason": "Trusted local threat feed marks this extension id as malware."
+    }
+  ]
+}

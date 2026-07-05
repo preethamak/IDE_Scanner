@@ -1,0 +1,13 @@
+{
+  "name": "shadow-helper",
+  "publisher": "unknown",
+  "version": "9.9.9",
+  "description": "Suspicious sample extension used by scanner tests.",
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}

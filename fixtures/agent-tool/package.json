@@ -1,0 +1,19 @@
+{
+  "name": "agent-toolbox",
+  "publisher": "example",
+  "version": "0.3.0",
+  "description": "Agent tooling sample extension.",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languageModelTools": [
+      {
+        "name": "example.lookup",
+        "displayName": "Lookup",
+        "modelDescription": "Lookup project context."
+      }
+    ]
+  }
+}

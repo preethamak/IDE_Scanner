@@ -1,0 +1,11 @@
+{
+  "schema_version": "0.1.0",
+  "extensions": [
+    {
+      "extension_id": "knownbad.feed-hit",
+      "classification": "malware",
+      "source": "benchmark-trusted-feed",
+      "reference": "local ground-truth fixture"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+env/
+
+.DS_Store
+
+# Generated scan outputs
+report.json
+*-report.json
+real-extensions*.json
+python-solidity-metrics-report.json
+ten-extension-comparison-report.json
