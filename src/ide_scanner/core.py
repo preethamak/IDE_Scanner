@@ -125,6 +125,7 @@ def _inventory_item(target: dict[str, str]) -> dict[str, Any]:
         "publisher": publisher,
         "version": str(manifest.get("version") or "unknown"),
         "description": str(manifest.get("description") or ""),
+        "icon_path": _icon_path(path, manifest),
         "modified_at": modified_at,
     }
 
@@ -138,6 +139,20 @@ def _read_inventory_manifest(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _icon_path(path: Path, manifest: dict[str, Any]) -> str:
+    icon = manifest.get("icon")
+    if not isinstance(icon, str) or not icon.strip() or path.suffix.lower() == ".vsix":
+        return ""
+    icon_path = (path / icon).resolve()
+    try:
+        icon_path.relative_to(path.resolve())
+    except ValueError:
+        return ""
+    if icon_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".svg", ".webp"}:
+        return ""
+    return str(icon_path) if icon_path.exists() else ""
 
 
 def _finding_summary(finding: dict[str, Any]) -> dict[str, Any]:

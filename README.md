@@ -24,6 +24,7 @@ PYTHONPATH=src python -m ide_scanner sandbox --path extension-folder --out obser
 PYTHONPATH=src python -m ide_scanner sandbox --path extension-folder --out observations.json --allow-execute
 PYTHONPATH=src python -m ide_scanner benchmark
 PYTHONPATH=src python -m ide_scanner inventory --all
+PYTHONPATH=src python -m ide_scanner agent --server http://127.0.0.1:8765 --all
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
@@ -32,6 +33,17 @@ Optional online checks:
 ```bash
 PYTHONPATH=src python -m ide_scanner scan --all --online
 ```
+
+Upload a local machine report to a hosted or LAN web console:
+
+```bash
+IDE_SCANNER_AGENT_TOKEN=<shared-token> \
+PYTHONPATH=src python -m ide_scanner agent \
+  --server https://your-ide-scanner-web.example \
+  --all
+```
+
+The `agent` command runs on the machine being scanned. It reads that machine's local IDE extension folders, builds the normal scanner report, and uploads it to `POST /api/agent/reports`.
 
 Known-bad hash feeds can be JSON or line-based SHA-256 files:
 

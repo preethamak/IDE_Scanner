@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from .agent import build_agent_report, upload_agent_report
 from .discovery import discover_from_path, discover_local_installations
 from .sandbox_runner import run_sandbox
 from .scanner import scan_targets
@@ -39,6 +41,16 @@ def main(argv: list[str] | None = None) -> int:
     benchmark = subparsers.add_parser("benchmark", help="Run scanner against bundled ground-truth fixtures.")
     benchmark.add_argument("--out", help="Write benchmark JSON result to this file.")
 
+    agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
+    agent.add_argument("--server", required=True, help="Base URL of the web app, for example http://127.0.0.1:8765.")
+    agent.add_argument("--token", help="Bearer token for the web app. Defaults to IDE_SCANNER_AGENT_TOKEN.")
+    agent.add_argument("--all", action="store_true", help="Scan local VS Code-compatible extension installs.")
+    agent.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
+    agent.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
+    agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
+    agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
+    agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
+
     args = parser.parse_args(argv)
     if args.command == "scan":
         report = scan_targets(
@@ -69,6 +81,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "benchmark":
         result = _run_benchmark()
         _emit(result, args.out)
+        return 0
+    if args.command == "agent":
+        if not args.all and not args.path:
+            parser.error("agent requires --all or at least one --path")
+        payload = build_agent_report(
+            paths=[Path(item) for item in args.path],
+            all_local=args.all,
+            online=args.online,
+            previous_report_file=args.previous_report,
+        )
+        if args.out:
+            _emit(payload, args.out)
+        result = upload_agent_report(
+            args.server,
+            payload,
+            token=args.token or os.environ.get("IDE_SCANNER_AGENT_TOKEN"),
+            timeout=args.timeout,
+        )
+        _emit(_agent_upload_receipt(args.server, result), None)
         return 0
     return 2
 
@@ -126,4 +157,19 @@ def _run_benchmark() -> dict[str, Any]:
         "malicious_recall": round(len(malicious_detected) / len(malicious_expected), 4) if malicious_expected else 0,
         "rows": rows,
         "scanner_summary": report["summary"],
+    }
+
+
+def _agent_upload_receipt(server: str, result: dict[str, Any]) -> dict[str, Any]:
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    totals = summary.get("summary") if isinstance(summary.get("summary"), dict) else {}
+    report_id = str(result.get("id") or "")
+    return {
+        "id": report_id,
+        "status": result.get("status"),
+        "source": result.get("source"),
+        "report_url": f"{server.rstrip('/')}/api/scans/{report_id}/report" if report_id else "",
+        "total_extensions": totals.get("total_extensions", 0),
+        "max_risk_score": totals.get("max_risk_score", 0),
+        "max_malware_score": totals.get("max_malware_score", 0),
     }
