@@ -1,0 +1,1813 @@
+{
+  "created_at": "2026-07-06T15:02:38.993321Z",
+  "extensions": [
+    {
+      "artifact_hash": "2b26de9441a17ac0df5a2c84",
+      "artifact_inventory": {
+        "files_hashed": 21,
+        "hash_algorithm": "sha256",
+        "known_bad_matches": [],
+        "package_hash": "2e980331b0e380c4346f4ecfad8e2797c608f6032c96ca5ae1c3f7356ff5cb88",
+        "risky_artifacts": [],
+        "total_bytes_hashed": 3034456,
+        "vsix_signature": {
+          "present": false,
+          "reason": "not-vsix",
+          "verified": false
+        }
+      },
+      "capabilities": [
+        {
+          "evidence": [
+            "onCommand:solidity-metrics.workspace.report",
+            "onCommand:solidity-metrics.contextMenu.report",
+            "onCommand:solidity-metrics.activeFile.report",
+            "onCommand:solidity-metrics.activeFile.exportHtml",
+            "onCommand:solidity-metrics.useScopeFile"
+          ],
+          "id": "activation"
+        },
+        {
+          "evidence": [
+            "src/extension.js",
+            "src/features/interactiveWebview.js"
+          ],
+          "id": "filesystem"
+        },
+        {
+          "evidence": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "id": "network"
+        },
+        {
+          "evidence": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "id": "obfuscation"
+        }
+      ],
+      "dependencies": {
+        "solidity-code-metrics": "0.0.28"
+      },
+      "description": "Solidity Metrics",
+      "extension_id": "tintinweb.solidity-metrics",
+      "findings": [
+        {
+          "category": "repository-posture",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "reputation"
+          },
+          "evidence_summary": "No local security policy file was found in the packaged artifact.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [],
+          "finding_id": "0a7c8af02a16dc0a",
+          "recommendation": "Treat as posture context only; small extensions may not ship security policy files.",
+          "rule_id": "security-policy-missing",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.26"
+        },
+        {
+          "category": "filesystem",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension reads or writes local files. Expected for many developer tools.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/extension.js"
+          ],
+          "finding_id": "36b84da9d6ae432a",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "filesystem-access",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.26"
+        },
+        {
+          "category": "filesystem",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension reads or writes local files. Expected for many developer tools.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/features/interactiveWebview.js"
+          ],
+          "finding_id": "450c28c47070a798",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "filesystem-access",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.26"
+        },
+        {
+          "category": "webview",
+          "confidence": 0.6,
+          "evidence": {
+            "evidence_class": "capability"
+          },
+          "evidence_summary": "Extension creates a webview in src/features/interactiveWebview.js without a detected Content-Security-Policy meta tag.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/features/interactiveWebview.js"
+          ],
+          "finding_id": "738f7ebc78c6fcc1",
+          "recommendation": "Add a strict Content-Security-Policy meta tag to every webview HTML document, scoping script-src/style-src to the webview's own origin and the webview.cspSource.",
+          "rule_id": "webview-csp-missing",
+          "score": 37,
+          "severity": "MEDIUM",
+          "version": "0.0.26"
+        },
+        {
+          "category": "network",
+          "confidence": 0.48,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension performs network requests. Not malicious by itself.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "finding_id": "0c422e87035f877d",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "network-access",
+          "score": 14,
+          "severity": "LOW",
+          "version": "0.0.26"
+        },
+        {
+          "category": "code",
+          "confidence": 0.46,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension contains obfuscation indicators.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "finding_id": "428275435d280cdb",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "obfuscation",
+          "score": 14,
+          "severity": "LOW",
+          "version": "0.0.26"
+        }
+      ],
+      "install_path": "/home/akprajwal/.vscode/extensions/tintinweb.solidity-metrics-0.0.26",
+      "instance_id": "e67d34f61a44be4a",
+      "malware_authority": "none",
+      "malware_score": 0,
+      "name": "solidity-metrics",
+      "publisher": "tintinweb",
+      "repository": "https://github.com/ConsenSys/vscode-solidity-metrics",
+      "risk_score": 41,
+      "scanned_files": 7,
+      "score_details": {
+        "basis": "sensitive_capability",
+        "components": {
+          "confirmed_intelligence": 0,
+          "correlated_behavior": 0,
+          "dependency": 0,
+          "observed_behavior": 0,
+          "posture": 0,
+          "provenance": 0,
+          "reputation": 6,
+          "sensitive_capability": 28,
+          "weak_context": 8
+        },
+        "confidence": "medium",
+        "counts": {
+          "capability": 1,
+          "confirmed": 0,
+          "correlated": 0,
+          "dependency": 0,
+          "observed": 0,
+          "posture": 0,
+          "provenance": 0,
+          "reputation": 1,
+          "weak": 4
+        },
+        "malware_score": 0,
+        "risk_score": 41,
+        "score": 41,
+        "suppressors": []
+      },
+      "severity": "MEDIUM",
+      "source": "vscode",
+      "verdict": "review",
+      "verdict_reason": "The extension exposes sensitive capabilities or non-confirmed risk evidence that needs context.",
+      "version": "0.0.26"
+    },
+    {
+      "artifact_hash": "0d7664d5826f6656aeebb09b",
+      "artifact_inventory": {
+        "files_hashed": 21,
+        "hash_algorithm": "sha256",
+        "known_bad_matches": [],
+        "package_hash": "82a617851a66626a6589469d658e6c1560ef84953f1063ffde98bde76ce2321e",
+        "risky_artifacts": [],
+        "total_bytes_hashed": 3032950,
+        "vsix_signature": {
+          "present": false,
+          "reason": "not-vsix",
+          "verified": false
+        }
+      },
+      "capabilities": [
+        {
+          "evidence": [
+            "onCommand:solidity-metrics.workspace.report",
+            "onCommand:solidity-metrics.contextMenu.report",
+            "onCommand:solidity-metrics.activeFile.report",
+            "onCommand:solidity-metrics.activeFile.exportHtml",
+            "onCommand:solidity-metrics.useScopeFile"
+          ],
+          "id": "activation"
+        },
+        {
+          "evidence": [
+            "src/extension.js",
+            "src/features/interactiveWebview.js"
+          ],
+          "id": "filesystem"
+        },
+        {
+          "evidence": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "id": "network"
+        },
+        {
+          "evidence": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "id": "obfuscation"
+        }
+      ],
+      "dependencies": {
+        "solidity-code-metrics": "0.0.28"
+      },
+      "description": "Solidity Metrics",
+      "extension_id": "tintinweb.solidity-metrics",
+      "findings": [
+        {
+          "category": "repository-posture",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "reputation"
+          },
+          "evidence_summary": "No local security policy file was found in the packaged artifact.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [],
+          "finding_id": "72c2f120213e5a1c",
+          "recommendation": "Treat as posture context only; small extensions may not ship security policy files.",
+          "rule_id": "security-policy-missing",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.25"
+        },
+        {
+          "category": "filesystem",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension reads or writes local files. Expected for many developer tools.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/extension.js"
+          ],
+          "finding_id": "83fb3b5d4d2947ba",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "filesystem-access",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.25"
+        },
+        {
+          "category": "filesystem",
+          "confidence": 0.42,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension reads or writes local files. Expected for many developer tools.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/features/interactiveWebview.js"
+          ],
+          "finding_id": "c11d44850bc3daa6",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "filesystem-access",
+          "score": 13,
+          "severity": "LOW",
+          "version": "0.0.25"
+        },
+        {
+          "category": "webview",
+          "confidence": 0.6,
+          "evidence": {
+            "evidence_class": "capability"
+          },
+          "evidence_summary": "Extension creates a webview in src/features/interactiveWebview.js without a detected Content-Security-Policy meta tag.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "src/features/interactiveWebview.js"
+          ],
+          "finding_id": "f46e1b249857d2c8",
+          "recommendation": "Add a strict Content-Security-Policy meta tag to every webview HTML document, scoping script-src/style-src to the webview's own origin and the webview.cspSource.",
+          "rule_id": "webview-csp-missing",
+          "score": 37,
+          "severity": "MEDIUM",
+          "version": "0.0.25"
+        },
+        {
+          "category": "network",
+          "confidence": 0.48,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension performs network requests. Not malicious by itself.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "finding_id": "13fb6607d2472ae6",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "network-access",
+          "score": 14,
+          "severity": "LOW",
+          "version": "0.0.25"
+        },
+        {
+          "category": "code",
+          "confidence": 0.46,
+          "evidence": {
+            "evidence_class": "weak"
+          },
+          "evidence_summary": "Extension contains obfuscation indicators.",
+          "evidence_type": "static",
+          "extension_id": "tintinweb.solidity-metrics",
+          "file_refs": [
+            "content/js/d3graphviz/viz.js"
+          ],
+          "finding_id": "82423de5c74e5b2f",
+          "recommendation": "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+          "rule_id": "obfuscation",
+          "score": 14,
+          "severity": "LOW",
+          "version": "0.0.25"
+        }
+      ],
+      "install_path": "/home/akprajwal/.cursor/extensions/tintinweb.solidity-metrics-0.0.25-universal",
+      "instance_id": "73bb1193ab814afd",
+      "malware_authority": "none",
+      "malware_score": 0,
+      "name": "solidity-metrics",
+      "publisher": "tintinweb",
+      "repository": "https://github.com/ConsenSys/vscode-solidity-metrics",
+      "risk_score": 41,
+      "scanned_files": 7,
+      "score_details": {
+        "basis": "sensitive_capability",
+        "components": {
+          "confirmed_intelligence": 0,
+          "correlated_behavior": 0,
+          "dependency": 0,
+          "observed_behavior": 0,
+          "posture": 0,
+          "provenance": 0,
+          "reputation": 6,
+          "sensitive_capability": 28,
+          "weak_context": 8
+        },
+        "confidence": "medium",
+        "counts": {
+          "capability": 1,
+          "confirmed": 0,
+          "correlated": 0,
+          "dependency": 0,
+          "observed": 0,
+          "posture": 0,
+          "provenance": 0,
+          "reputation": 1,
+          "weak": 4
+        },
+        "malware_score": 0,
+        "risk_score": 41,
+        "score": 41,
+        "suppressors": []
+      },
+      "severity": "MEDIUM",
+      "source": "vscode",
+      "verdict": "review",
+      "verdict_reason": "The extension exposes sensitive capabilities or non-confirmed risk evidence that needs context.",
+      "version": "0.0.25"
+    }
+  ],
+  "human_summary": [
+    "Scanned 2 extension(s): 0 malicious, 0 suspicious, 2 review, 0 clean.",
+    "IDE/client posture: failure with score 78/100 (1 failures, 10 warnings).",
+    "Highest-priority items: tintinweb.solidity-metrics=review/M0/R41; tintinweb.solidity-metrics=review/M0/R41"
+  ],
+  "posture": [
+    {
+      "category": "summary",
+      "client": "system",
+      "evidence": {
+        "clients": [
+          "cursor",
+          "vscode",
+          "windsurf"
+        ],
+        "counts": {
+          "failure": 1,
+          "skipped": 0,
+          "success": 22,
+          "warning": 10
+        },
+        "max_metric_score": 78,
+        "score": 78,
+        "status": "failure",
+        "top_findings": [
+          {
+            "client": "vscode",
+            "id": "sideloaded-extensions",
+            "reason": "1 sideloaded VSIX extension(s) bypass marketplace update and vetting flows.",
+            "recommendation": "Remove untrusted sideloaded extensions or replace them with reviewed, signed, marketplace/internal-registry builds.",
+            "score": 78,
+            "status": "failure"
+          },
+          {
+            "client": "vscode",
+            "id": "agentic-extensions",
+            "reason": "12 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+            "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+            "score": 52,
+            "status": "warning"
+          },
+          {
+            "client": "cursor",
+            "id": "agentic-extensions",
+            "reason": "4 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+            "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+            "score": 52,
+            "status": "warning"
+          },
+          {
+            "client": "windsurf",
+            "id": "agentic-extensions",
+            "reason": "6 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+            "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+            "score": 52,
+            "status": "warning"
+          },
+          {
+            "client": "vscode",
+            "id": "extension-startup",
+            "reason": "24 extension(s) activate at startup or for every workspace.",
+            "recommendation": "Review startup and wildcard activation extensions; disable ones that are not required for daily work.",
+            "score": 44,
+            "status": "warning"
+          }
+        ],
+        "total_metrics": 33,
+        "weighted_score": 13
+      },
+      "id": "client-risk-summary",
+      "reason": "IDE/client posture has 1 failure metric(s) and 10 warning metric(s).",
+      "recommendation": "Fix failure metrics first, then warnings that increase execution or agent autonomy.",
+      "score": 78,
+      "status": "failure",
+      "weight": 3.0
+    },
+    {
+      "category": "client-discovery",
+      "client": "vscode",
+      "evidence": {
+        "installed_extensions": 81,
+        "settings_found": true
+      },
+      "id": "client-detected",
+      "reason": "VS Code local configuration was found.",
+      "recommendation": "",
+      "score": 0,
+      "status": "success",
+      "weight": 1.0
+    },
+    {
+      "category": "filesystem-isolation",
+      "client": "vscode",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "security.workspace.trust.enabled": true,
+        "security.workspace.trust.startupPrompt": "once",
+        "security.workspace.trust.untrustedFiles": "prompt",
+        "trusted_paths": []
+      },
+      "id": "workspace-trust",
+      "reason": "Workspace Trust is enabled with normal prompts and no broad trusted paths found.",
+      "recommendation": "Enable Workspace Trust, keep prompts active, and remove broad trusted paths such as home, Downloads, Desktop, or filesystem roots.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "execution-controls",
+      "client": "vscode",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "task.allowAutomaticTasks": "off"
+      },
+      "id": "automatic-tasks",
+      "reason": "Automatic tasks are not globally enabled.",
+      "recommendation": "Set task.allowAutomaticTasks to off unless you have strong workspace trust hygiene.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "vscode",
+      "evidence": {
+        "chat.agent.enabled": true,
+        "chat.tools.autoApprove": null,
+        "chat.tools.global.autoApprove": null
+      },
+      "id": "agent-global-auto-approve",
+      "reason": "Global agent tool auto-approval is disabled or agent mode is disabled.",
+      "recommendation": "Disable global auto-approval so tool, terminal, URL, and workspace actions require explicit confirmation.",
+      "score": 0,
+      "status": "success",
+      "weight": 3.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "vscode",
+      "evidence": {
+        "chat.tools.terminal.autoApprove": null,
+        "chat.tools.terminal.ignoreDefaultAutoApproveRules": false,
+        "dangerous_rules": []
+      },
+      "id": "terminal-auto-approve",
+      "reason": "No custom terminal auto-approval rules found.",
+      "recommendation": "Keep terminal auto-approval empty or strictly read-only; never ignore the built-in deny rules for destructive commands.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "external-content-security",
+      "client": "vscode",
+      "evidence": {
+        "chat.tools.urls.autoApprove": {
+          "https://developer.algorand.org": {
+            "approveRequest": true,
+            "approveResponse": false
+          }
+        },
+        "dangerous_rules": []
+      },
+      "id": "url-auto-approve",
+      "reason": "URL auto-approval has custom rules; review scope.",
+      "recommendation": "Keep URL auto-approval empty or limited to explicit internal hosts; avoid wildcards and public domains.",
+      "score": 36,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "vscode",
+      "evidence": {
+        "extensions.supportUntrustedWorkspaces": null,
+        "risky_overrides": []
+      },
+      "id": "extension-trust-overrides",
+      "reason": "No extension trust overrides found.",
+      "recommendation": "Remove extension trust overrides unless each extension has been explicitly reviewed for Restricted Mode safety.",
+      "score": 0,
+      "status": "success",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "vscode",
+      "evidence": {
+        "startup_extensions": [
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "zhuangtongfa.material-theme-3.19.0",
+            "id": "zhuangtongfa.material-theme"
+          },
+          {
+            "activation_events": [
+              "onLanguage:css",
+              "onLanguage:graphql",
+              "onLanguage:html",
+              "onLanguage:javascript",
+              "onLanguage:javascriptreact",
+              "onLanguage:json",
+              "onLanguage:jsonc",
+              "onLanguage:less",
+              "onLanguage:markdown",
+              "onLanguage:mdx",
+              "onLanguage:scss",
+              "onLanguage:svelte",
+              "onLanguage:typescript",
+              "onLanguage:typescriptreact",
+              "onLanguage:vue",
+              "onLanguage:yaml",
+              "onStartupFinished"
+            ],
+            "folder": "rvest.vs-code-prettier-eslint-6.0.0",
+            "id": "rvest.vs-code-prettier-eslint"
+          },
+          {
+            "activation_events": [
+              "onLanguage:typescript",
+              "onLanguage:typescriptReact",
+              "onLanguage:javascript",
+              "onLanguage:javascriptReact",
+              "onCommand:reactSnippets.search",
+              "onStartupFinished"
+            ],
+            "folder": "dsznajder.es7-react-js-snippets-4.4.3",
+            "id": "dsznajder.es7-react-js-snippets"
+          },
+          {
+            "activation_events": [
+              "*"
+            ],
+            "folder": "mhutchie.git-graph-1.30.0",
+            "id": "mhutchie.git-graph"
+          },
+          {
+            "activation_events": [
+              "workspaceContains:**/*.zip",
+              "onLanguage:zip",
+              "onFileSystem:zip",
+              "onCommand:zipfs.mountZipFile",
+              "onCommand:zipfs.mountZipEditor",
+              "onStartupFinished"
+            ],
+            "folder": "arcanis.vscode-zipfs-3.0.0",
+            "id": "arcanis.vscode-zipfs"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": ".3625a7b8-5be3-4e52-8e7e-18521a5f992d",
+            "id": "nrwl.angular-console"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "google.gemini-cli-vscode-ide-companion-0.20.0",
+            "id": "google.gemini-cli-vscode-ide-companion"
+          },
+          {
+            "activation_events": [
+              "onCommand:vscode-pets.start",
+              "onCommand:vscode-pets.throw-with-mouse",
+              "onCommand:vscode-pets.throw-ball",
+              "onCommand:vscode-pets.spawn-pet",
+              "onCommand:vscode-pets.delete-pet",
+              "onCommand:vscode-pets.remove-all-pets",
+              "onCommand:vscode-pets.roll-call",
+              "onCommand:vscode-pets.export-pet-list",
+              "onCommand:vscode-pets.import-pet-list",
+              "onWebviewPanel:petCoding",
+              "onView:explorer",
+              "onView:petsView",
+              "onStartupFinished"
+            ],
+            "folder": "tonybaloney.vscode-pets-1.35.0",
+            "id": "tonybaloney.vscode-pets"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "dbaeumer.vscode-eslint-3.0.24",
+            "id": "dbaeumer.vscode-eslint"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "firsttris.vscode-jest-runner-0.4.148",
+            "id": "firsttris.vscode-jest-runner"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onLanguageModelChat:copilot",
+              "onUri",
+              "onFileSystem:ccreq",
+              "onFileSystem:ccsettings"
+            ],
+            "folder": "github.copilot-chat-0.48.1",
+            "id": "GitHub.copilot-chat"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "atlassian.atlascode-4.0.31",
+            "id": "atlassian.atlascode"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onUri"
+            ],
+            "folder": "nrwl.angular-console-18.101.1",
+            "id": "nrwl.angular-console"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "figma.figma-vscode-extension-0.4.5",
+            "id": "figma.figma-vscode-extension"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "kickbacksai.kickbacks-ai-0.3.177",
+            "id": "Kickbacksai.kickbacks-ai"
+          },
+          {
+            "activation_events": [
+              "onFileSystem:gitlens",
+              "onStartupFinished",
+              "onTerminal:*",
+              "onUri",
+              "onWebviewPanel:gitlens.graph",
+              "onWebviewPanel:gitlens.patchDetails",
+              "onWebviewPanel:gitlens.composer",
+              "onWebviewPanel:gitlens.settings",
+              "onWebviewPanel:gitlens.timeline"
+            ],
+            "folder": "eamodio.gitlens-18.2.0",
+            "id": "eamodio.gitlens"
+          },
+          {
+            "activation_events": [
+              "onChatParticipant:opilot.ollama",
+              "onLanguageModelChatProvider:selfagency-opilot",
+              "onView:ollama-local-models",
+              "onView:ollama-cloud-models",
+              "onView:ollama-library-models",
+              "onView:ollama-modelfiles",
+              "onView:ollama-model-settings",
+              "onStartupFinished"
+            ],
+            "folder": "selfagency.opilot-1.8.2",
+            "id": "selfagency.opilot"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "pkief.material-icon-theme-5.36.1",
+            "id": "PKief.material-icon-theme"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "workspaceContains:.devcontainer/devcontainer.json",
+              "workspaceContains:.devcontainer.json",
+              "onResolveRemoteAuthority:dev-container",
+              "onResolveRemoteAuthority:attached-container",
+              "onResolveRemoteAuthority:k8s-container",
+              "onResolveRemoteAuthority:apple-container",
+              "onDebugResolve:extensionHost"
+            ],
+            "folder": "ms-vscode-remote.remote-containers-0.463.0",
+            "id": "ms-vscode-remote.remote-containers"
+          },
+          {
+            "activation_events": [
+              "onLanguage:python",
+              "onStartupFinished",
+              "onUri",
+              "onView:open-sidebar"
+            ],
+            "folder": "codium.codium-2.2.5",
+            "id": "Codium.codium"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onUri"
+            ],
+            "folder": "openai.chatgpt-26.623.101652-linux-x64",
+            "id": "openai.chatgpt"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "google.geminicodeassist-2.87.0",
+            "id": "google.geminicodeassist"
+          },
+          {
+            "activation_events": [
+              "onLanguage",
+              "onStartupFinished",
+              "onWebviewPanel:cody.editorPanel"
+            ],
+            "folder": "sourcegraph.cody-ai-1.155.0",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onWebviewPanel:claudeVSCodePanel"
+            ],
+            "folder": "anthropic.claude-code-2.1.201-linux-x64",
+            "id": "Anthropic.claude-code"
+          }
+        ]
+      },
+      "id": "extension-startup",
+      "reason": "24 extension(s) activate at startup or for every workspace.",
+      "recommendation": "Review startup and wildcard activation extensions; disable ones that are not required for daily work.",
+      "score": 44,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "vscode",
+      "evidence": {
+        "sideloaded_extensions": [
+          {
+            "id": "your-publisher.vyper-guard-vscode",
+            "source": "vsix",
+            "version": "0.0.1"
+          }
+        ]
+      },
+      "id": "sideloaded-extensions",
+      "reason": "1 sideloaded VSIX extension(s) bypass marketplace update and vetting flows.",
+      "recommendation": "Remove untrusted sideloaded extensions or replace them with reviewed, signed, marketplace/internal-registry builds.",
+      "score": 78,
+      "status": "failure",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-surface",
+      "client": "vscode",
+      "evidence": {
+        "agentic_extensions": [
+          {
+            "contributes": [
+              "languageModelTools",
+              "chatParticipants"
+            ],
+            "folder": ".3625a7b8-5be3-4e52-8e7e-18521a5f992d",
+            "id": "nrwl.angular-console"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.7.0-linux-x64",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.8.0-linux-x64",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.9.0-linux-x64",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.9.1-linux-x64",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-python.python-2026.4.0-linux-x64",
+            "id": "ms-python.python"
+          },
+          {
+            "contributes": [
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "ms-python.vscode-pylance-2026.2.1",
+            "id": "ms-python.vscode-pylance"
+          },
+          {
+            "contributes": [
+              "languageModelTools",
+              "chatParticipants",
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "github.copilot-chat-0.48.1",
+            "id": "GitHub.copilot-chat"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-azuretools.vscode-containers-2.4.5",
+            "id": "ms-azuretools.vscode-containers"
+          },
+          {
+            "contributes": [
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "nrwl.angular-console-18.101.1",
+            "id": "nrwl.angular-console"
+          },
+          {
+            "contributes": [
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "eamodio.gitlens-18.2.0",
+            "id": "eamodio.gitlens"
+          },
+          {
+            "contributes": [
+              "chatParticipants"
+            ],
+            "folder": "selfagency.opilot-1.8.2",
+            "id": "selfagency.opilot"
+          }
+        ]
+      },
+      "id": "agentic-extensions",
+      "reason": "12 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+      "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+      "score": 52,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "vscode",
+      "evidence": {
+        "extensions": [
+          {
+            "artifacts": [
+              "vs-code-prettier-eslint-6.0.0-beta.3.vsix.zip"
+            ],
+            "folder": "rvest.vs-code-prettier-eslint-6.0.0",
+            "id": "rvest.vs-code-prettier-eslint"
+          },
+          {
+            "artifacts": [
+              "dist/com.microsoft.jdtls.intellicode.core-0.7.1.jar",
+              "dist/Microsoft.VisualStudio.IntelliCode.SQL.dll"
+            ],
+            "folder": "visualstudioexptteam.vscodeintellicode-1.3.2",
+            "id": "VisualStudioExptTeam.vscodeintellicode"
+          },
+          {
+            "artifacts": [
+              "dist/bundled/bin/win32-arm64/pylance-indexer.exe",
+              "dist/bundled/bin/win32-x64/pylance-indexer.exe"
+            ],
+            "folder": "ms-python.vscode-pylance-2026.2.1",
+            "id": "ms-python.vscode-pylance"
+          },
+          {
+            "artifacts": [
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_amd64.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_sys_monitoring/_pydevd_sys_monitoring_cython.cpython-314-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_sys_monitoring/_pydevd_sys_monitoring_cython.cpython-313-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_sys_monitoring/_pydevd_sys_monitoring_cython.cpython-312-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-314-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-313-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-312-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-311-x86_64-linux-gnu.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-310-x86_64-linux-gnu.so"
+            ],
+            "folder": "ms-python.debugpy-2026.6.0-linux-x64",
+            "id": "ms-python.debugpy"
+          },
+          {
+            "artifacts": [
+              "cloudcode_cli.zip"
+            ],
+            "folder": "google.geminicodeassist-2.87.0",
+            "id": "google.geminicodeassist"
+          },
+          {
+            "artifacts": [
+              "dist/noxide.darwin-arm64-6MFXXAGT.node",
+              "dist/noxide.darwin-x64-Y2OOXGFP.node",
+              "dist/noxide.linux-arm64-gnu-ZKTPZZSX.node",
+              "dist/noxide.linux-arm64-musl-7YFV6ZVT.node",
+              "dist/noxide.linux-x64-gnu-FI7ZCYON.node",
+              "dist/noxide.linux-x64-musl-6IFCB45M.node",
+              "dist/noxide.win32-arm64-msvc-M4Z2A7QS.node",
+              "dist/noxide.win32-x64-msvc-MVMDLGLL.node",
+              "dist/win-ca-roots.exe"
+            ],
+            "folder": "sourcegraph.cody-ai-1.155.0",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "artifacts": [
+              "resources/audio-capture/x64-linux/audio-capture.node"
+            ],
+            "folder": "anthropic.claude-code-2.1.201-linux-x64",
+            "id": "Anthropic.claude-code"
+          }
+        ]
+      },
+      "id": "native-or-packed-extension-artifacts",
+      "reason": "7 extension(s) include native binaries or packed archives.",
+      "recommendation": "Confirm native binaries and packed archives are expected, signed, reproducible, and shipped by trusted publishers.",
+      "score": 38,
+      "status": "warning",
+      "weight": 1.0
+    },
+    {
+      "category": "client-discovery",
+      "client": "cursor",
+      "evidence": {
+        "installed_extensions": 32,
+        "settings_found": true
+      },
+      "id": "client-detected",
+      "reason": "Cursor local configuration was found.",
+      "recommendation": "",
+      "score": 0,
+      "status": "success",
+      "weight": 1.0
+    },
+    {
+      "category": "filesystem-isolation",
+      "client": "cursor",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "security.workspace.trust.enabled": true,
+        "security.workspace.trust.startupPrompt": "once",
+        "security.workspace.trust.untrustedFiles": "prompt",
+        "trusted_paths": []
+      },
+      "id": "workspace-trust",
+      "reason": "Workspace Trust is enabled with normal prompts and no broad trusted paths found.",
+      "recommendation": "Enable Workspace Trust, keep prompts active, and remove broad trusted paths such as home, Downloads, Desktop, or filesystem roots.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "execution-controls",
+      "client": "cursor",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "task.allowAutomaticTasks": "off"
+      },
+      "id": "automatic-tasks",
+      "reason": "Automatic tasks are not globally enabled.",
+      "recommendation": "Set task.allowAutomaticTasks to off unless you have strong workspace trust hygiene.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "cursor",
+      "evidence": {
+        "chat.agent.enabled": true,
+        "chat.tools.autoApprove": null,
+        "chat.tools.global.autoApprove": null
+      },
+      "id": "agent-global-auto-approve",
+      "reason": "Global agent tool auto-approval is disabled or agent mode is disabled.",
+      "recommendation": "Disable global auto-approval so tool, terminal, URL, and workspace actions require explicit confirmation.",
+      "score": 0,
+      "status": "success",
+      "weight": 3.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "cursor",
+      "evidence": {
+        "chat.tools.terminal.autoApprove": null,
+        "chat.tools.terminal.ignoreDefaultAutoApproveRules": false,
+        "dangerous_rules": []
+      },
+      "id": "terminal-auto-approve",
+      "reason": "No custom terminal auto-approval rules found.",
+      "recommendation": "Keep terminal auto-approval empty or strictly read-only; never ignore the built-in deny rules for destructive commands.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "external-content-security",
+      "client": "cursor",
+      "evidence": {
+        "chat.tools.urls.autoApprove": null,
+        "dangerous_rules": []
+      },
+      "id": "url-auto-approve",
+      "reason": "No custom URL auto-approval rules found.",
+      "recommendation": "Keep URL auto-approval empty or limited to explicit internal hosts; avoid wildcards and public domains.",
+      "score": 0,
+      "status": "success",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "cursor",
+      "evidence": {
+        "extensions.supportUntrustedWorkspaces": null,
+        "risky_overrides": []
+      },
+      "id": "extension-trust-overrides",
+      "reason": "No extension trust overrides found.",
+      "recommendation": "Remove extension trust overrides unless each extension has been explicitly reviewed for Restricted Mode safety.",
+      "score": 0,
+      "status": "success",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "cursor",
+      "evidence": {
+        "startup_extensions": [
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "workspaceContains:.devcontainer/devcontainer.json",
+              "workspaceContains:.devcontainer.json",
+              "onResolveRemoteAuthority:dev-container",
+              "onResolveRemoteAuthority:attached-container",
+              "onResolveRemoteAuthority:k8s-container",
+              "onDebugResolve:extensionHost"
+            ],
+            "folder": "ms-vscode-remote.remote-containers-0.394.0",
+            "id": "ms-vscode-remote.remote-containers"
+          },
+          {
+            "activation_events": [
+              "*"
+            ],
+            "folder": "mhutchie.git-graph-1.30.0",
+            "id": "mhutchie.git-graph"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "google.gemini-cli-vscode-ide-companion-0.20.0-universal",
+            "id": "google.gemini-cli-vscode-ide-companion"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "postman.postman-for-vscode-1.19.1-universal",
+            "id": "Postman.postman-for-vscode"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "ritwickdey.liveserver-5.7.10-universal",
+            "id": "ritwickdey.LiveServer"
+          },
+          {
+            "activation_events": [
+              "onFileSystem:gitlens",
+              "onStartupFinished",
+              "onTerminalShellIntegration:bash",
+              "onTerminalShellIntegration:cmd",
+              "onTerminalShellIntegration:csh",
+              "onTerminalShellIntegration:fish",
+              "onTerminalShellIntegration:gitbash",
+              "onTerminalShellIntegration:julia",
+              "onTerminalShellIntegration:ksh",
+              "onTerminalShellIntegration:node",
+              "onTerminalShellIntegration:nu",
+              "onTerminalShellIntegration:pwsh",
+              "onTerminalShellIntegration:python",
+              "onTerminalShellIntegration:sh",
+              "onTerminalShellIntegration:wsl",
+              "onTerminalShellIntegration:zsh",
+              "onUri",
+              "onWebviewPanel:gitlens.graph",
+              "onWebviewPanel:gitlens.patchDetails",
+              "onWebviewPanel:gitlens.composer",
+              "onWebviewPanel:gitlens.settings",
+              "onWebviewPanel:gitlens.timeline"
+            ],
+            "folder": "eamodio.gitlens-17.12.2-universal",
+            "id": "eamodio.gitlens"
+          },
+          {
+            "activation_events": [
+              "onLanguage:python",
+              "onStartupFinished",
+              "onUri",
+              "onView:open-sidebar"
+            ],
+            "folder": "codium.codium-2.2.3-universal",
+            "id": "Codium.codium"
+          },
+          {
+            "activation_events": [
+              "onLanguage",
+              "onStartupFinished",
+              "onWebviewPanel:cody.editorPanel"
+            ],
+            "folder": "sourcegraph.cody-ai-1.153.0-universal",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onWebviewPanel:claudeVSCodePanel"
+            ],
+            "folder": "anthropic.claude-code-2.1.144-linux-x64",
+            "id": "Anthropic.claude-code"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "google.geminicodeassist-2.82.0-universal",
+            "id": "google.geminicodeassist"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onUri"
+            ],
+            "folder": "openai.chatgpt-26.513.21555-linux-x64",
+            "id": "openai.chatgpt"
+          },
+          {
+            "activation_events": [
+              "onFileSystem:gitlens",
+              "onStartupFinished",
+              "onTerminal:*",
+              "onUri",
+              "onWebviewPanel:gitlens.graph",
+              "onWebviewPanel:gitlens.patchDetails",
+              "onWebviewPanel:gitlens.composer",
+              "onWebviewPanel:gitlens.settings",
+              "onWebviewPanel:gitlens.timeline"
+            ],
+            "folder": "eamodio.gitlens-18.2.0-universal",
+            "id": "eamodio.gitlens"
+          },
+          {
+            "activation_events": [
+              "onLanguage:python",
+              "onStartupFinished",
+              "onUri",
+              "onView:open-sidebar"
+            ],
+            "folder": "codium.codium-2.2.5-universal",
+            "id": "Codium.codium"
+          },
+          {
+            "activation_events": [
+              "onLanguage",
+              "onStartupFinished",
+              "onWebviewPanel:cody.editorPanel"
+            ],
+            "folder": "sourcegraph.cody-ai-1.155.0-universal",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onWebviewPanel:claudeVSCodePanel"
+            ],
+            "folder": "anthropic.claude-code-2.1.199-linux-x64",
+            "id": "Anthropic.claude-code"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "google.geminicodeassist-2.86.0-universal",
+            "id": "google.geminicodeassist"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished",
+              "onUri"
+            ],
+            "folder": "openai.chatgpt-26.623.101652-linux-x64",
+            "id": "openai.chatgpt"
+          }
+        ]
+      },
+      "id": "extension-startup",
+      "reason": "17 extension(s) activate at startup or for every workspace.",
+      "recommendation": "Review startup and wildcard activation extensions; disable ones that are not required for daily work.",
+      "score": 44,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "cursor",
+      "evidence": {
+        "sideloaded_extensions": []
+      },
+      "id": "sideloaded-extensions",
+      "reason": "No sideloaded VSIX extensions found in the inventory.",
+      "recommendation": "Remove untrusted sideloaded extensions or replace them with reviewed, signed, marketplace/internal-registry builds.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-surface",
+      "client": "cursor",
+      "evidence": {
+        "agentic_extensions": [
+          {
+            "contributes": [
+              "languageModelTools",
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "postman.postman-for-vscode-1.19.1-universal",
+            "id": "Postman.postman-for-vscode"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.9.1-universal",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "eamodio.gitlens-17.12.2-universal",
+            "id": "eamodio.gitlens"
+          },
+          {
+            "contributes": [
+              "mcpServerDefinitionProviders"
+            ],
+            "folder": "eamodio.gitlens-18.2.0-universal",
+            "id": "eamodio.gitlens"
+          }
+        ]
+      },
+      "id": "agentic-extensions",
+      "reason": "4 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+      "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+      "score": 52,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "cursor",
+      "evidence": {
+        "extensions": [
+          {
+            "artifacts": [
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_amd64.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-39-x86_64-linux-gnu.so"
+            ],
+            "folder": "ms-python.debugpy-2026.6.0-linux-x64",
+            "id": "ms-python.debugpy"
+          },
+          {
+            "artifacts": [
+              "dist/noxide.darwin-arm64-6MFXXAGT.node",
+              "dist/noxide.darwin-x64-Y2OOXGFP.node",
+              "dist/noxide.linux-arm64-gnu-ZKTPZZSX.node",
+              "dist/noxide.linux-arm64-musl-7YFV6ZVT.node",
+              "dist/noxide.linux-x64-gnu-FI7ZCYON.node",
+              "dist/noxide.linux-x64-musl-6IFCB45M.node",
+              "dist/noxide.win32-arm64-msvc-M4Z2A7QS.node",
+              "dist/noxide.win32-x64-msvc-MVMDLGLL.node",
+              "dist/win-ca-roots.exe"
+            ],
+            "folder": "sourcegraph.cody-ai-1.153.0-universal",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "artifacts": [
+              "resources/audio-capture/x64-linux/audio-capture.node"
+            ],
+            "folder": "anthropic.claude-code-2.1.144-linux-x64",
+            "id": "Anthropic.claude-code"
+          },
+          {
+            "artifacts": [
+              "cloudcode_cli.zip"
+            ],
+            "folder": "google.geminicodeassist-2.82.0-universal",
+            "id": "google.geminicodeassist"
+          },
+          {
+            "artifacts": [
+              "dist/noxide.darwin-arm64-6MFXXAGT.node",
+              "dist/noxide.darwin-x64-Y2OOXGFP.node",
+              "dist/noxide.linux-arm64-gnu-ZKTPZZSX.node",
+              "dist/noxide.linux-arm64-musl-7YFV6ZVT.node",
+              "dist/noxide.linux-x64-gnu-FI7ZCYON.node",
+              "dist/noxide.linux-x64-musl-6IFCB45M.node",
+              "dist/noxide.win32-arm64-msvc-M4Z2A7QS.node",
+              "dist/noxide.win32-x64-msvc-MVMDLGLL.node",
+              "dist/win-ca-roots.exe"
+            ],
+            "folder": "sourcegraph.cody-ai-1.155.0-universal",
+            "id": "sourcegraph.cody-ai"
+          },
+          {
+            "artifacts": [
+              "resources/audio-capture/x64-linux/audio-capture.node"
+            ],
+            "folder": "anthropic.claude-code-2.1.199-linux-x64",
+            "id": "Anthropic.claude-code"
+          },
+          {
+            "artifacts": [
+              "cloudcode_cli.zip"
+            ],
+            "folder": "google.geminicodeassist-2.86.0-universal",
+            "id": "google.geminicodeassist"
+          }
+        ]
+      },
+      "id": "native-or-packed-extension-artifacts",
+      "reason": "7 extension(s) include native binaries or packed archives.",
+      "recommendation": "Confirm native binaries and packed archives are expected, signed, reproducible, and shipped by trusted publishers.",
+      "score": 38,
+      "status": "warning",
+      "weight": 1.0
+    },
+    {
+      "category": "client-discovery",
+      "client": "windsurf",
+      "evidence": {
+        "installed_extensions": 17,
+        "settings_found": true
+      },
+      "id": "client-detected",
+      "reason": "Windsurf local configuration was found.",
+      "recommendation": "",
+      "score": 0,
+      "status": "success",
+      "weight": 1.0
+    },
+    {
+      "category": "filesystem-isolation",
+      "client": "windsurf",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "security.workspace.trust.enabled": true,
+        "security.workspace.trust.startupPrompt": "once",
+        "security.workspace.trust.untrustedFiles": "prompt",
+        "trusted_paths": []
+      },
+      "id": "workspace-trust",
+      "reason": "Workspace Trust is enabled with normal prompts and no broad trusted paths found.",
+      "recommendation": "Enable Workspace Trust, keep prompts active, and remove broad trusted paths such as home, Downloads, Desktop, or filesystem roots.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "execution-controls",
+      "client": "windsurf",
+      "evidence": {
+        "broad_trusted_paths": [],
+        "task.allowAutomaticTasks": "off"
+      },
+      "id": "automatic-tasks",
+      "reason": "Automatic tasks are not globally enabled.",
+      "recommendation": "Set task.allowAutomaticTasks to off unless you have strong workspace trust hygiene.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "windsurf",
+      "evidence": {
+        "chat.agent.enabled": true,
+        "chat.tools.autoApprove": null,
+        "chat.tools.global.autoApprove": null
+      },
+      "id": "agent-global-auto-approve",
+      "reason": "Global agent tool auto-approval is disabled or agent mode is disabled.",
+      "recommendation": "Disable global auto-approval so tool, terminal, URL, and workspace actions require explicit confirmation.",
+      "score": 0,
+      "status": "success",
+      "weight": 3.0
+    },
+    {
+      "category": "agent-execution-controls",
+      "client": "windsurf",
+      "evidence": {
+        "chat.tools.terminal.autoApprove": null,
+        "chat.tools.terminal.ignoreDefaultAutoApproveRules": false,
+        "dangerous_rules": []
+      },
+      "id": "terminal-auto-approve",
+      "reason": "No custom terminal auto-approval rules found.",
+      "recommendation": "Keep terminal auto-approval empty or strictly read-only; never ignore the built-in deny rules for destructive commands.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.5
+    },
+    {
+      "category": "external-content-security",
+      "client": "windsurf",
+      "evidence": {
+        "chat.tools.urls.autoApprove": null,
+        "dangerous_rules": []
+      },
+      "id": "url-auto-approve",
+      "reason": "No custom URL auto-approval rules found.",
+      "recommendation": "Keep URL auto-approval empty or limited to explicit internal hosts; avoid wildcards and public domains.",
+      "score": 0,
+      "status": "success",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "windsurf",
+      "evidence": {
+        "extensions.supportUntrustedWorkspaces": null,
+        "risky_overrides": []
+      },
+      "id": "extension-trust-overrides",
+      "reason": "No extension trust overrides found.",
+      "recommendation": "Remove extension trust overrides unless each extension has been explicitly reviewed for Restricted Mode safety.",
+      "score": 0,
+      "status": "success",
+      "weight": 1.5
+    },
+    {
+      "category": "extension-controls",
+      "client": "windsurf",
+      "evidence": {
+        "startup_extensions": [
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "cweijan.vscode-mysql-client2-8.4.5-universal",
+            "id": "cweijan.vscode-mysql-client2"
+          },
+          {
+            "activation_events": [
+              "onStartupFinished"
+            ],
+            "folder": "ritwickdey.liveserver-5.7.10-universal",
+            "id": "ritwickdey.LiveServer"
+          }
+        ]
+      },
+      "id": "extension-startup",
+      "reason": "2 extension(s) activate at startup or for every workspace.",
+      "recommendation": "Review startup and wildcard activation extensions; disable ones that are not required for daily work.",
+      "score": 44,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "windsurf",
+      "evidence": {
+        "sideloaded_extensions": []
+      },
+      "id": "sideloaded-extensions",
+      "reason": "No sideloaded VSIX extensions found in the inventory.",
+      "recommendation": "Remove untrusted sideloaded extensions or replace them with reviewed, signed, marketplace/internal-registry builds.",
+      "score": 0,
+      "status": "success",
+      "weight": 2.0
+    },
+    {
+      "category": "agent-surface",
+      "client": "windsurf",
+      "evidence": {
+        "agentic_extensions": [
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-toolsai.jupyter-2025.9.1-universal",
+            "id": "ms-toolsai.jupyter"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-azuretools.vscode-containers-2.4.1-universal",
+            "id": "ms-azuretools.vscode-containers"
+          },
+          {
+            "contributes": [
+              "languageModelTools",
+              "chatParticipants"
+            ],
+            "folder": "cweijan.vscode-mysql-client2-8.4.5-universal",
+            "id": "cweijan.vscode-mysql-client2"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-python.python-2026.2.0-universal",
+            "id": "ms-python.python"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-azuretools.vscode-containers-2.4.4-universal",
+            "id": "ms-azuretools.vscode-containers"
+          },
+          {
+            "contributes": [
+              "languageModelTools"
+            ],
+            "folder": "ms-python.python-2026.4.0-universal",
+            "id": "ms-python.python"
+          }
+        ]
+      },
+      "id": "agentic-extensions",
+      "reason": "6 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+      "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+      "score": 52,
+      "status": "warning",
+      "weight": 1.5
+    },
+    {
+      "category": "supply-chain-posture",
+      "client": "windsurf",
+      "evidence": {
+        "extensions": [
+          {
+            "artifacts": [
+              "jdbc-adapter-server-1.0-all.jar"
+            ],
+            "folder": "cweijan.dbclient-jdbc-1.4.2-universal",
+            "id": "cweijan.dbclient-jdbc"
+          },
+          {
+            "artifacts": [
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/run_code_on_dllmain_x86.dll",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/run_code_on_dllmain_amd64.dll",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/inject_dll_x86.exe",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/inject_dll_amd64.exe",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_x86.dll",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_amd64.so",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_amd64.dll",
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach.dylib"
+            ],
+            "folder": "ms-python.debugpy-2025.18.0-linux-x64",
+            "id": "ms-python.debugpy"
+          },
+          {
+            "artifacts": [
+              "bundled/libs/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_amd64.so",
+              "bundled/libs/debugpy/_vendored/pydevd/_pydevd_bundle/pydevd_cython.cpython-39-x86_64-linux-gnu.so"
+            ],
+            "folder": "ms-python.debugpy-2026.6.0-linux-x64",
+            "id": "ms-python.debugpy"
+          }
+        ]
+      },
+      "id": "native-or-packed-extension-artifacts",
+      "reason": "3 extension(s) include native binaries or packed archives.",
+      "recommendation": "Confirm native binaries and packed archives are expected, signed, reproducible, and shipped by trusted publishers.",
+      "score": 38,
+      "status": "warning",
+      "weight": 1.0
+    }
+  ],
+  "posture_summary": {
+    "clients": [
+      "cursor",
+      "vscode",
+      "windsurf"
+    ],
+    "counts": {
+      "failure": 1,
+      "skipped": 0,
+      "success": 22,
+      "warning": 10
+    },
+    "max_metric_score": 78,
+    "score": 78,
+    "status": "failure",
+    "top_findings": [
+      {
+        "client": "vscode",
+        "id": "sideloaded-extensions",
+        "reason": "1 sideloaded VSIX extension(s) bypass marketplace update and vetting flows.",
+        "recommendation": "Remove untrusted sideloaded extensions or replace them with reviewed, signed, marketplace/internal-registry builds.",
+        "score": 78,
+        "status": "failure"
+      },
+      {
+        "client": "vscode",
+        "id": "agentic-extensions",
+        "reason": "12 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+        "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+        "score": 52,
+        "status": "warning"
+      },
+      {
+        "client": "cursor",
+        "id": "agentic-extensions",
+        "reason": "4 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+        "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+        "score": 52,
+        "status": "warning"
+      },
+      {
+        "client": "windsurf",
+        "id": "agentic-extensions",
+        "reason": "6 extension(s) expose agent-facing tools, chat participants, or MCP surfaces.",
+        "recommendation": "Review agent-facing extensions for tool permissions, approval prompts, and data boundaries.",
+        "score": 52,
+        "status": "warning"
+      },
+      {
+        "client": "vscode",
+        "id": "extension-startup",
+        "reason": "24 extension(s) activate at startup or for every workspace.",
+        "recommendation": "Review startup and wildcard activation extensions; disable ones that are not required for daily work.",
+        "score": 44,
+        "status": "warning"
+      }
+    ],
+    "total_metrics": 33,
+    "weighted_score": 13
+  },
+  "privacy_mode": "local-metadata-and-static-features",
+  "registry_checks": {
+    "enabled": false,
+    "errors": [],
+    "findings": []
+  },
+  "scan_id": "scan_20260706150238",
+  "schema_version": "0.1.0",
+  "summary": {
+    "by_severity": {
+      "MEDIUM": 2
+    },
+    "by_verdict": {
+      "review": 2
+    },
+    "max_malware_score": 0,
+    "max_risk_score": 41,
+    "max_score": 41,
+    "posture_score": 78,
+    "posture_status": "failure",
+    "total_extensions": 2
+  },
+  "version_deltas": []
+}
