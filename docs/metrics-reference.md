@@ -172,6 +172,7 @@ Metrics:
 - `uri_auth_webview`
 - `workspace_trust_bypass`
 - `agentic_tooling`
+- `webview_csp_missing` / `webview_csp_unsafe_directive`
 
 Product behavior:
 
@@ -260,13 +261,15 @@ Metrics:
 
 - verified publisher
 - publisher age
-- install/rating anomaly
+- install/rating anomaly (`install-rating-mismatch`)
 - name impersonation
 - maintained repo
 - branch protection
 - dangerous workflows
-- broad CI token permissions
+- broad CI token permissions (`workflow-token-permissions-broad`)
 - security policy
+- license (`license-missing`)
+- binary artifacts in repo (`repo-binary-artifacts`)
 
 Product behavior:
 
@@ -310,7 +313,10 @@ Implemented now:
 - mutable dependency source detection for Git, URL, file, link, and workspace dependency specs
 - unpinned runtime dependency detection for `latest`, `*`, and `x` specs
 - native binary and packed archive artifact findings
-- repository/maintainer posture findings for missing repository metadata, missing security policy, and dangerous GitHub workflows
+- repository/maintainer posture findings for missing repository metadata, missing security policy, missing license, dangerous GitHub workflows, broad GitHub Actions token permissions, and committed native binary artifacts
+- provenance findings for native artifacts shipped without a companion checksum/signature or documented origin
+- webview capability findings for missing or unsafe Content-Security-Policy directives
+- marketplace install-count/rating mismatch reputation findings
 - agent-specific tool surface findings for shell, filesystem, network, MCP server, and prompt-injection sink risk
 - dynamic sandbox observation import through `--sandbox-observations` or `IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE`
 - known-bad SHA-256 hash feed matching through `--known-bad-hashes` or `IDE_SCANNER_KNOWN_BAD_HASHES_FILE`

@@ -764,6 +764,189 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("unexpected_network", {item["kind"] for item in items})
         self.assertIn("secret_exfil", {item["kind"] for item in items})
 
+    def test_repo_binary_artifacts_metric_fires_for_committed_native_binary(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"native","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "server.node").write_bytes(b"native-binary-payload")
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("repo-binary-artifacts", rule_ids)
+        self.assertIn("binary-without-origin", rule_ids)
+        self.assertEqual(report.malware_score, 0)
+        self.assertEqual(report.verdict, "review")
+
+    def test_binary_with_checksum_companion_does_not_flag_missing_origin(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"native-signed","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "server.node").write_bytes(b"native-binary-payload")
+            (root / "server.node.sha256").write_text("deadbeef", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("repo-binary-artifacts", rule_ids)
+        self.assertNotIn("binary-without-origin", rule_ids)
+
+    def test_license_missing_is_posture_context_not_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"nolicense","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("license-missing", rule_ids)
+        self.assertEqual(report.malware_score, 0)
+        self.assertNotEqual(report.verdict, "malicious")
+        self.assertNotEqual(report.verdict, "suspicious")
+
+    def test_license_present_suppresses_license_missing_finding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"licensed","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "LICENSE").write_text("MIT", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("license-missing", rule_ids)
+
+    def test_workflow_broad_token_permissions_is_posture_finding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"broad-token","version":"1.0.0","repository":"https://github.com/example/broad-token"}',
+                encoding="utf-8",
+            )
+            (workflows / "release.yml").write_text(
+                "on: push\njobs:\n  release:\n    steps:\n      - run: echo ${{ secrets.GITHUB_TOKEN }}\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("workflow-token-permissions-broad", rule_ids)
+        self.assertNotIn("dangerous-github-workflow", rule_ids)
+
+    def test_webview_without_csp_meta_tag_is_review_capability(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"webview-nocsp","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "function activate(context){"
+                "const panel=vscode.window.createWebviewPanel('demo','Demo',1,{enableScripts:true});"
+                "panel.webview.html='<html><body><script>doThing()</script></body></html>';"
+                "}"
+                "module.exports={activate};",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("webview-csp-missing", rule_ids)
+        self.assertEqual(report.malware_score, 0)
+        self.assertEqual(report.verdict, "review")
+
+    def test_webview_with_unsafe_csp_directive_is_flagged(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"webview-unsafe-csp","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "function activate(context){"
+                "const panel=vscode.window.createWebviewPanel('demo','Demo',1,{enableScripts:true});"
+                "panel.webview.html='<html><head><meta http-equiv=\"Content-Security-Policy\" "
+                "content=\"default-src \\'self\\'; script-src * \\'unsafe-inline\\'\"></head>"
+                "<body><script>doThing()</script></body></html>';"
+                "}"
+                "module.exports={activate};",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("webview-csp-unsafe-directive", rule_ids)
+        self.assertNotIn("webview-csp-missing", rule_ids)
+
+    def test_webview_with_strict_csp_is_not_flagged(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"webview-strict-csp","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "function activate(context){"
+                "const panel=vscode.window.createWebviewPanel('demo','Demo',1,{enableScripts:true});"
+                "panel.webview.html='<html><head><meta http-equiv=\"Content-Security-Policy\" "
+                "content=\"default-src \\'none\\'; script-src {{cspSource}} \\'nonce-abc123\\'\"></head>"
+                "<body><script nonce=\"abc123\">doThing()</script></body></html>';"
+                "}"
+                "module.exports={activate};",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("webview-csp-missing", rule_ids)
+        self.assertNotIn("webview-csp-unsafe-directive", rule_ids)
+
+    def test_install_rating_mismatch_is_reputation_context_only(self) -> None:
+        findings = _marketplace_metadata_findings("example.popular-bad-rating", {
+            "extension_id": "example.popular-bad-rating",
+            "found": True,
+            "publisher_verified": True,
+            "install_count": 200000,
+            "rating_count": 50,
+            "rating_average": 1.4,
+        })
+
+        rule_ids = {finding["rule_id"] for finding in findings}
+        self.assertIn("install-rating-mismatch", rule_ids)
+        self.assertIn("marketplace-low-rating", rule_ids)
+        mismatch = next(finding for finding in findings if finding["rule_id"] == "install-rating-mismatch")
+        self.assertEqual(mismatch["category"], "reputation")
+
+    def test_install_rating_mismatch_does_not_fire_for_low_install_low_rating(self) -> None:
+        findings = _marketplace_metadata_findings("example.small-bad-rating", {
+            "extension_id": "example.small-bad-rating",
+            "found": True,
+            "publisher_verified": True,
+            "install_count": 50,
+            "rating_count": 5,
+            "rating_average": 1.4,
+        })
+
+        rule_ids = {finding["rule_id"] for finding in findings}
+        self.assertNotIn("install-rating-mismatch", rule_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

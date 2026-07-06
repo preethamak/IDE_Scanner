@@ -80,7 +80,7 @@ These are the only metrics allowed to set `verdict=malicious`.
 | `publisher_verified` | Marketplace publisher verification. | Risk reducer, never proof of safety. | Treat as suppressor only for reputation, not code behavior. |
 | `extension_unavailable` | Extension id no longer exists or version disappeared. | Review or suspicious if paired with fresh reports/removal. | Distinguish unpublished, renamed, and removed-for-abuse states. |
 | `publisher_age_low` | Publisher created recently or first release recent. | Weak +2 to +8. | Never actionable alone; new projects are not suspicious by default. |
-| `install_rating_anomaly` | Very low installs, sudden spike, low rating, review spam, rating/install mismatch. | Weak +2 to +10. | Use as context only. |
+| `install_rating_anomaly` | Very low installs, sudden spike, low rating, review spam, rating/install mismatch. Implemented as `install-rating-mismatch`: high install count (>50k) paired with a low average rating (<2.5) across at least 5 ratings. | Weak +2 to +10 (reputation, score 10). | Use as context only; never actionable alone. |
 | `name_impersonation` | Extension id, display name, icon, README, or publisher similar to high-install trusted extension. | Review; suspicious only with behavior or removal evidence. | Allow forks/localization; require similarity target and features. |
 | `marketplace_signature_missing` | VSIX not signed where marketplace signing is expected. | Review/provenance risk. | Some ecosystems or sources may not sign; source must be known. |
 
@@ -92,7 +92,7 @@ These are the only metrics allowed to set `verdict=malicious`.
 | `source_vsix_diff_unexplained` | Build declared repo and compare expected files to VSIX artifact. | Review to suspicious depending on sensitive additions. | Ignore expected generated bundles when source map/build config matches. |
 | `attestation_missing` | deps.dev/SLSA/provenance missing for packages that normally provide it. | Weak/context. | Absence is not abuse. |
 | `attestation_violation` | Attestation says artifact was not built from declared source or builder. | Suspicious/provenance. | Require exact version/artifact and verifiable statement. |
-| `binary_without_origin` | `.node`, `.dll`, `.so`, `.dylib`, `.exe`, archive, or bundled server lacks source, signature, checksum, or expected path. | Review. | Language servers often ship binaries; reduce when signed and checksum-pinned. |
+| `binary_without_origin` | `.node`, `.dll`, `.so`, `.dylib`, `.exe`, archive, or bundled server lacks source, signature, checksum, or expected path. Implemented as `binary-without-origin`: fires when a native artifact from the artifact inventory has no companion `.sha256`/`.sig`/`.asc`/`.p7s` file and is not referenced by name in `SECURITY.md`/`README.md`. | Review (provenance, MEDIUM). | Language servers often ship binaries; reduce when signed and checksum-pinned. |
 | `reproducible_hash_match` | Local built artifact matches published VSIX/package hash. | Risk reducer. | Reducer only; does not override confirmed malware. |
 
 ### 4. Install-Time Behavior
@@ -117,6 +117,7 @@ These metrics answer: "What can this extension do if compromised or malicious?"
 | `startup_activation` | `onStartupFinished` or equivalent auto-run. | Capability/review. | Startup alone is common; pair with code behavior. |
 | `terminal_task_debugger` | Contributions to terminal, task provider, debug adapter, shell integration. | Capability/review. | Developer tools often need these. |
 | `uri_auth_webview` | `onUri`, auth provider, webview, custom editor, remote content. | Capability/review. | Review CSP, domain allowlists, token handling. |
+| `webview_csp_missing` / `webview_csp_unsafe_directive` | A file that opens a webview (`createWebviewPanel`, `registerWebviewViewProvider`, or `.webview.html =`) is scanned for a `Content-Security-Policy` meta tag; missing entirely, or present with `unsafe-inline`/`unsafe-eval`/wildcard `script-src`. | Capability/review (MEDIUM). | Only fires when a webview surface is actually detected in the same file; strict CSPs with scoped `script-src`/`style-src` do not trigger. |
 | `workspace_trust_bypass` | Runs sensitive behavior in untrusted workspaces or does not declare workspace trust limits. | Review/suspicious if paired with file or exec behavior. | Use VS Code workspace trust metadata when present. |
 | `agentic_tooling` | `languageModelTools`, chat participants, MCP servers, autonomous command tools. | Capability/review, higher with shell/file/network tools. | Require tool schemas and approval mode evidence. |
 
@@ -170,9 +171,10 @@ These metrics should reduce or increase review priority, not decide malware.
 | `repo_maintained` | Recent commits/releases/issues response. | Reducer if healthy; weak risk if stale. | Stable extensions may be intentionally quiet. |
 | `code_review_branch_protection` | OpenSSF Scorecard checks. | Posture score. | Small solo projects can be benign. |
 | `dangerous_github_workflows` | Pull request target, untrusted checkout, broad tokens, script injection. | Review/supply-chain risk. | Needs repo access and workflow parsing. |
-| `token_permissions_broad` | GitHub Actions token permissions too broad. | Posture risk. | Build-time risk, not runtime malware. |
+| `token_permissions_broad` | GitHub Actions token permissions too broad. Implemented as `workflow-token-permissions-broad`: fires when a workflow grants both `id-token: write` and `contents: write`, or uses `GITHUB_TOKEN` without an explicit `permissions:` block. | Posture risk (LOW, score up to 34). | Build-time risk, not runtime malware; distinct rule id from `dangerous-github-workflow` so the two triage separately. |
 | `security_policy_missing` | No security policy, no vulnerability reporting. | Weak. | Not meaningful for tiny projects alone. |
-| `binary_artifacts_in_repo` | OpenSSF binary artifacts check or repo inventory. | Review. | Language servers and native extensions may need binaries. |
+| `license_missing` | No `LICENSE`/`LICENSE.md`/`LICENSE.txt` found in the packaged artifact. | Weak/reputation (score up to 6). | Not meaningful for tiny/internal projects alone; never actionable by itself. |
+| `binary_artifacts_in_repo` | OpenSSF binary artifacts check or repo inventory. Implemented as `repo-binary-artifacts`, sourced from the artifact inventory's `native`-kind entries (was previously registered but never emitted — now wired up). | Review (posture, score up to 32). | Language servers and native extensions may need binaries. |
 
 ### 10. AI and Agent-Specific Metrics
 
@@ -359,6 +361,12 @@ Current `ide-scanner` behavior already matches the most important safety rules:
 - static behavior chains now include obfuscation+execution+network, persistence, and agent data exfiltration.
 - dynamic sandbox observations can be imported as `observed-*` evidence from an external runner.
 - repository posture and agent-specific tool surface metrics are implemented as review/context evidence.
+- `repo-binary-artifacts` (posture) is now emitted from the artifact inventory's native-kind entries; it was previously registered in scoring/evidence-class sets but never produced a finding.
+- `binary-without-origin` (provenance) fires for native artifacts lacking a companion checksum/signature file or documented origin in `SECURITY.md`/`README.md`.
+- `install-rating-mismatch` (reputation) fires for high-install, low-rating marketplace metadata combinations, distinct from the existing flat low-install/low-rating thresholds.
+- `webview-csp-missing` and `webview-csp-unsafe-directive` (capability) detect webview surfaces lacking a Content-Security-Policy or declaring an unsafe one.
+- `license-missing` (reputation) flags packaged artifacts with no local LICENSE file; kept out of `posture` deliberately, since posture evidence is always verdict-actionable and license absence alone must not escalate a clean extension to `review`.
+- `workflow-token-permissions-broad` (posture) flags GitHub Actions workflows with broad token scopes or an implicit default token, separate from `dangerous-github-workflow`.
 - Standalone secret, network, filesystem, execution, dynamic code, and obfuscation indicators are `weak` unless they form a chain.
 - `malicious` currently requires confirmed evidence.
 - Correlated static abuse paths produce `suspicious` with `malware_authority=non_authoritative`.
