@@ -15,6 +15,7 @@ MARKETPLACE_EXTENSIONQUERY_URL = "https://marketplace.visualstudio.com/_apis/pub
 REMOVED_PACKAGES_URL = "https://raw.githubusercontent.com/microsoft/vsmarketplace/main/RemovedPackages.md"
 REMOVED_ROW = re.compile(r"^\|\s*(?P<id>[a-zA-Z0-9._-]+)\s*\|\s*(?P<date>[0-9/]+)\s*\|\s*(?P<type>[^|]+?)\s*\|", re.M)
 LOW_INSTALL_THRESHOLD = 100
+HIGH_INSTALL_RATING_MISMATCH_THRESHOLD = 50_000
 STALE_EXTENSION_DAYS = 730
 STALE_REPOSITORY_DAYS = 730
 MARKETPLACE_BATCH_SIZE = 25
@@ -417,6 +418,21 @@ def _marketplace_metadata_findings(extension_id: str, metadata: dict[str, Any] |
             "reputation",
             "marketplace-low-rating",
             f"Marketplace rating is low: {rating_average:.2f} across {rating_count} ratings.",
+            metadata,
+        ))
+    if (
+        rating_count >= 5
+        and rating_average
+        and rating_average < 2.5
+        and install_count >= HIGH_INSTALL_RATING_MISMATCH_THRESHOLD
+    ):
+        findings.append(_registry_finding(
+            extension_id,
+            "LOW",
+            0.5,
+            "reputation",
+            "install-rating-mismatch",
+            f"Marketplace install count is high ({install_count}) but rating is low ({rating_average:.2f} across {rating_count} ratings).",
             metadata,
         ))
 

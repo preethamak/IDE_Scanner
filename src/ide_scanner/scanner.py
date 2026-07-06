@@ -44,6 +44,8 @@ TEXT_EXTS = {
     ".tsx",
     ".yaml",
     ".yml",
+    ".html",
+    ".htm",
 }
 EXEC_TEXT_EXTS = {".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ps1", ".py", ".sh", ".ts", ".tsx"}
 BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
@@ -85,10 +87,12 @@ CAPABILITY_RULES = {
     "powerful-ide-contribution",
     "sensitive-activation",
     "startup-activation",
+    "webview-csp-missing",
+    "webview-csp-unsafe-directive",
 }
 DEPENDENCY_RULES = {"mutable-dependency-source", "unpinned-dependency", "vulnerable-npm-dependency"}
-PROVENANCE_RULES = {"marketplace-removed-package", "packed-artifact", "source-vsix-diff-unexplained"}
-POSTURE_RULES = {"dangerous-github-workflow", "repo-binary-artifacts"}
+PROVENANCE_RULES = {"marketplace-removed-package", "packed-artifact", "source-vsix-diff-unexplained", "binary-without-origin"}
+POSTURE_RULES = {"dangerous-github-workflow", "repo-binary-artifacts", "workflow-token-permissions-broad"}
 REPUTATION_RULES = {
     "marketplace-extension-not-found",
     "marketplace-low-install-count",
@@ -97,11 +101,13 @@ REPUTATION_RULES = {
     "marketplace-stale-extension",
     "marketplace-unverified-publisher",
     "marketplace-verified-publisher",
+    "install-rating-mismatch",
     "repo-archived",
     "repo-maintained",
     "repo-stale",
     "repo-url-missing",
     "security-policy-missing",
+    "license-missing",
 }
 MALWARE_REMOVAL_TYPES = {"malware"}
 SUSPICIOUS_REMOVAL_TYPES = {"suspicious"}
@@ -157,11 +163,11 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
     _add_dependency_source_findings(extension_id, version, manifest, findings)
-    _add_repository_posture_findings(extension_id, version, manifest, path, findings)
 
     files = _walk_extension_files(path)
     artifact_inventory = _artifact_inventory(path, files)
-    _add_artifact_inventory_findings(extension_id, version, artifact_inventory, known_bad_hashes or {}, findings, capabilities)
+    _add_artifact_inventory_findings(extension_id, version, artifact_inventory, known_bad_hashes or {}, findings, capabilities, path)
+    _add_repository_posture_findings(extension_id, version, manifest, path, findings, artifact_inventory)
 
     for file in files:
         rel = file.relative_to(path).as_posix()
@@ -177,6 +183,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         scanned_files += 1
         if suffix in EXEC_TEXT_EXTS:
             _add_code_findings(extension_id, version, rel, text, findings, capabilities)
+        if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
+            _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
     verdict, verdict_reason, malware_authority, severity, malware_score, risk_score, score_details = _classify_findings(findings)
 
@@ -531,6 +539,7 @@ def _add_repository_posture_findings(
     manifest: dict[str, Any],
     path: Path,
     findings: list[Finding],
+    artifact_inventory: dict[str, Any] | None = None,
 ) -> None:
     if not _repository_url(manifest.get("repository")):
         findings.append(_finding(
@@ -556,6 +565,33 @@ def _add_repository_posture_findings(
             [],
             "Treat as posture context only; small extensions may not ship security policy files.",
         ))
+    if not any((path / item).exists() for item in ("LICENSE", "LICENSE.md", "LICENSE.txt", "license", "license.md")):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "license-missing",
+            "repository-posture",
+            "LOW",
+            0.4,
+            "No local LICENSE file was found in the packaged artifact.",
+            [],
+            "Treat as posture context only; absence of a license file is not malware evidence.",
+        ))
+    for artifact in (artifact_inventory or {}).get("risky_artifacts", []):
+        if artifact.get("kind") != "native":
+            continue
+        rel = str(artifact["path"])
+        findings.append(_finding(
+            extension_id,
+            version,
+            "repo-binary-artifacts",
+            "repository-posture",
+            "LOW",
+            0.5,
+            f"Packaged artifact ships a committed native binary: {rel}.",
+            [rel],
+            "Confirm committed binaries are expected and, where possible, built reproducibly rather than checked in directly.",
+        ))
     for workflow in (path / ".github" / "workflows").glob("*.yml"):
         text = _read_text(workflow) or ""
         _add_workflow_findings(extension_id, version, workflow.relative_to(path).as_posix(), text, findings)
@@ -578,6 +614,21 @@ def _add_workflow_findings(extension_id: str, version: str, rel: str, text: str,
             [rel],
             "Review workflow permissions and untrusted pull request execution paths.",
         ))
+    has_permissions_block = bool(re.search(r"^permissions:\s*$|^permissions:\s*\S", lowered, re.MULTILINE))
+    grants_broad_write = bool(re.search(r"id-token:\s*write", lowered)) and bool(re.search(r"contents:\s*write", lowered))
+    uses_github_token = "github_token" in lowered or "secrets.github_token" in lowered
+    if grants_broad_write or (uses_github_token and not has_permissions_block):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "workflow-token-permissions-broad",
+            "repository-posture",
+            "LOW",
+            0.5,
+            f"GitHub Actions workflow {rel} grants broad token permissions or relies on the implicit default token scope.",
+            [rel],
+            "Declare an explicit least-privilege `permissions:` block scoped to only the jobs that need it.",
+        ))
 
 
 def _add_artifact_inventory_findings(
@@ -587,7 +638,9 @@ def _add_artifact_inventory_findings(
     known_bad_hashes: dict[str, dict[str, Any]],
     findings: list[Finding],
     capabilities: dict[str, dict[str, Any]],
+    path: Path | None = None,
 ) -> None:
+    all_paths = {str(entry.get("path")) for entry in artifact_inventory.get("_all_file_hashes", [])}
     for artifact in artifact_inventory["risky_artifacts"]:
         rel = str(artifact["path"])
         kind = str(artifact["kind"])
@@ -617,6 +670,20 @@ def _add_artifact_inventory_findings(
         capability_id = "native_code" if kind == "native" else "packed_artifacts"
         capabilities.setdefault(capability_id, {"id": capability_id, "evidence": []})["evidence"].append(rel)
 
+        if kind == "native" and not _has_origin_evidence(path, rel, all_paths):
+            findings.append(_finding(
+                extension_id,
+                version,
+                "binary-without-origin",
+                "provenance",
+                "MEDIUM",
+                0.55,
+                f"Native binary {rel} has no companion checksum or signature file and no documented provenance.",
+                [rel],
+                "Publish a checksum/signature alongside the binary or document its build origin in SECURITY.md/README.",
+                {"sha256": artifact["sha256"]},
+            ))
+
     matches = _known_bad_matches(artifact_inventory, known_bad_hashes)
     if matches:
         artifact_inventory["known_bad_matches"] = matches
@@ -635,6 +702,20 @@ def _add_artifact_inventory_findings(
             "Block or remove this extension. A local artifact hash matched confirmed malicious intelligence.",
             match,
         ))
+
+
+def _has_origin_evidence(path: Path | None, rel: str, all_paths: set[str]) -> bool:
+    companions = {f"{rel}.sha256", f"{rel}.sig", f"{rel}.asc", f"{rel}.p7s"}
+    if companions & all_paths:
+        return True
+    if path is None:
+        return False
+    stem = rel.rsplit("/", 1)[-1]
+    for doc_name in ("SECURITY.md", "README.md", "docs/SECURITY.md"):
+        text = _read_text(path / doc_name)
+        if text and stem in text:
+            return True
+    return False
 
 
 def _add_code_findings(
@@ -817,6 +898,42 @@ def _features_nearby(text: str, patterns: list[re.Pattern[str]], window_lines: i
         if all(any(abs(hit - anchor) <= window_lines for hit in hits) for hits in line_hits[1:]):
             return True
     return False
+
+
+WEBVIEW_SURFACE_RE = re.compile(r"createWebviewPanel\(|registerWebviewViewProvider\(|\.webview\.html\s*=", re.I)
+CSP_META_RE = re.compile(r"<meta[^>]+http-equiv\s*=\s*[\"']Content-Security-Policy[\"'][^>]*>", re.I)
+CSP_UNSAFE_DIRECTIVE_RE = re.compile(r"unsafe-inline|unsafe-eval|script-src[^;\"']*\*", re.I)
+
+
+def _add_webview_csp_findings(extension_id: str, version: str, rel: str, text: str, findings: list[Finding]) -> None:
+    if not WEBVIEW_SURFACE_RE.search(text):
+        return
+    csp_match = CSP_META_RE.search(text)
+    if not csp_match:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "webview-csp-missing",
+            "webview",
+            "MEDIUM",
+            0.6,
+            f"Extension creates a webview in {rel} without a detected Content-Security-Policy meta tag.",
+            [rel],
+            "Add a strict Content-Security-Policy meta tag to every webview HTML document, scoping script-src/style-src to the webview's own origin and the webview.cspSource.",
+        ))
+        return
+    if CSP_UNSAFE_DIRECTIVE_RE.search(csp_match.group(0)):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "webview-csp-unsafe-directive",
+            "webview",
+            "MEDIUM",
+            0.58,
+            f"Extension webview in {rel} declares a Content-Security-Policy with an unsafe directive (unsafe-inline, unsafe-eval, or a wildcard script-src).",
+            [rel],
+            "Avoid unsafe-inline, unsafe-eval, and wildcard script-src in webview CSP; use nonces or content hashes instead.",
+        ))
 
 
 def _apply_registry_findings(extensions: list[ExtensionReport], raw_findings: list[dict[str, Any]]) -> None:
@@ -1801,6 +1918,10 @@ def _capability_score(findings: list[Finding]) -> int:
             score = max(score, 36)
         elif finding.rule_id in {"broad-activation", "sensitive-activation", "powerful-ide-contribution"}:
             score = max(score, 30)
+        elif finding.rule_id == "webview-csp-unsafe-directive":
+            score = max(score, 34)
+        elif finding.rule_id == "webview-csp-missing":
+            score = max(score, 28)
         elif finding.rule_id == "startup-activation":
             score = max(score, 20)
     return score
@@ -1864,6 +1985,8 @@ def _posture_score(findings: list[Finding]) -> int:
     for finding in findings:
         if finding.rule_id == "dangerous-github-workflow":
             score = max(score, 44)
+        elif finding.rule_id == "workflow-token-permissions-broad":
+            score = max(score, 34)
         elif finding.rule_id == "repo-binary-artifacts":
             score = max(score, 32)
     return score
@@ -1884,9 +2007,11 @@ def _reputation_score(findings: list[Finding]) -> int:
             score = max(score, 10)
         elif finding.rule_id == "marketplace-stale-extension":
             score = max(score, 8)
+        elif finding.rule_id == "install-rating-mismatch":
+            score = max(score, 10)
         elif finding.rule_id in {"repo-archived", "repo-stale"}:
             score = max(score, 8)
-        elif finding.rule_id in {"repo-url-missing", "security-policy-missing"}:
+        elif finding.rule_id in {"repo-url-missing", "security-policy-missing", "license-missing"}:
             score = max(score, 6)
     return score
 
