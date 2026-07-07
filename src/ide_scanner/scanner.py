@@ -14,7 +14,7 @@ from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
 from .posture import scan_posture, summarize_posture
-from .registry import enrich_registry
+from .registry import MarketplaceDownloadError, download_marketplace_vsix, enrich_registry, parse_marketplace_reference
 from .rules import (
     CODE_RULES,
     DESTRUCTIVE_RE,
@@ -155,6 +155,7 @@ SENSITIVE_TEXT_NEGATIVE_RE = re.compile(
 def scan_targets(
     paths: list[Path | str] | None = None,
     extension_ids: list[str] | None = None,
+    marketplace_scan_ids: list[str] | None = None,
     include_fixtures: bool = False,
     all_local: bool = False,
     online: bool = False,
@@ -183,6 +184,10 @@ def scan_targets(
         for target in unique.values()
     ]
     extensions.extend(_registry_only_extension(extension_id) for extension_id in extension_ids or [])
+    extensions.extend(
+        scan_marketplace_extension(identifier, known_bad_hashes=known_bad_hashes)
+        for identifier in marketplace_scan_ids or []
+    )
     _apply_threat_feed(extensions, _load_threat_feed(threat_feed_file))
     _apply_sandbox_observations(extensions, _load_sandbox_observations(sandbox_observations_file))
     registry = enrich_registry(extensions, online=online)
@@ -277,6 +282,71 @@ def _scan_discovered_target(target: dict[str, str], known_bad_hashes: dict[str, 
     if target.get("type") == "vsix":
         return scan_vsix(path, known_bad_hashes=known_bad_hashes)
     return scan_extension(path, source=target.get("type", "vscode"), known_bad_hashes=known_bad_hashes)
+
+
+def scan_marketplace_extension(
+    identifier: str,
+    version: str | None = None,
+    known_bad_hashes: dict[str, dict[str, Any]] | None = None,
+) -> ExtensionReport:
+    """Download a VSIX from the VS Marketplace gallery and run the normal
+    quarantine-extraction static scan on it (scan_vsix). This is a hosted,
+    static-only path: it must never invoke sandbox_runner.run_sandbox(...,
+    allow_execute=True) against attacker-controlled marketplace content."""
+    try:
+        resolved_id = parse_marketplace_reference(identifier)
+    except MarketplaceDownloadError as exc:
+        return _marketplace_error_extension(identifier, str(exc))
+
+    try:
+        vsix_path = download_marketplace_vsix(resolved_id, version=version)
+    except MarketplaceDownloadError as exc:
+        return _marketplace_error_extension(resolved_id, str(exc))
+
+    try:
+        report = scan_vsix(vsix_path, known_bad_hashes=known_bad_hashes)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        return _marketplace_error_extension(resolved_id, f"Downloaded VSIX could not be scanned: {exc}")
+    finally:
+        vsix_path.unlink(missing_ok=True)
+
+    report.source = "marketplace"
+    report.install_path = f"marketplace:{resolved_id}"
+    return report
+
+
+def _marketplace_error_extension(identifier: str, message: str) -> ExtensionReport:
+    publisher, _, name = identifier.partition(".")
+    if not name:
+        publisher = "unknown"
+        name = identifier
+    artifact_inventory = _empty_artifact_inventory()
+    artifact_inventory["scan_incomplete"] = True
+    artifact_inventory["skipped_reason"] = message
+    return ExtensionReport(
+        instance_id=_stable_id(f"marketplace:{identifier}"),
+        extension_id=identifier,
+        name=name,
+        publisher=publisher,
+        version="unknown",
+        description="",
+        repository="",
+        install_path=f"marketplace:{identifier}",
+        source="marketplace-error",
+        artifact_hash="",
+        severity="INFO",
+        verdict="clean",
+        malware_authority="none",
+        verdict_reason=message,
+        malware_score=0,
+        risk_score=0,
+        score_details=_empty_score_details(),
+        capabilities=[],
+        artifact_inventory=artifact_inventory,
+        findings=[],
+        scanned_files=0,
+        dependencies={},
+    )
 
 
 def _registry_only_extension(extension_id: str) -> ExtensionReport:

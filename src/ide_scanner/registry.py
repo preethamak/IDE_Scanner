@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from urllib.parse import urlparse
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from typing import Any
 
 MARKETPLACE_EXTENSIONQUERY_URL = "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=7.2-preview.1"
@@ -20,6 +23,16 @@ STALE_EXTENSION_DAYS = 730
 STALE_REPOSITORY_DAYS = 730
 MARKETPLACE_BATCH_SIZE = 25
 OSV_BATCH_SIZE = 100
+VSIX_ASSET_TYPE = "Microsoft.VisualStudio.Services.VSIXPackage"
+MAX_VSIX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+VSIX_DOWNLOAD_TIMEOUT = 30
+EXTENSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+class MarketplaceDownloadError(RuntimeError):
+    """Raised when a marketplace VSIX cannot be resolved or downloaded safely."""
+
+
 IMPERSONATION_TARGETS = (
     ("microsoft", "python", "Python"),
     ("microsoft", "vscode-cpptools", "C/C++"),
@@ -83,6 +96,155 @@ def enrich_registry(extensions: list[Any], online: bool = False) -> dict[str, An
             repo_metadata.get(str(getattr(extension, "repository", "") or "")),
         ))
     return {"enabled": True, "mode": "batched", "findings": findings, "errors": errors}
+
+
+def parse_marketplace_reference(value: str) -> str:
+    """Normalize a user-supplied marketplace reference (publisher.name or a
+    marketplace.visualstudio.com / vscode:extension URL) down to a bare
+    ``publisher.name`` extension id. Raises MarketplaceDownloadError on
+    anything that doesn't resolve to a well-formed id."""
+    raw = str(value or "").strip()
+    if not raw:
+        raise MarketplaceDownloadError("Marketplace reference is empty.")
+
+    if EXTENSION_ID_RE.match(raw):
+        return raw
+
+    parsed = urlparse(raw)
+    if parsed.scheme in {"vscode", "vscode-insiders"}:
+        # vscode:extension/publisher.name parses with an empty netloc and the
+        # "extension/..." segment folded into path; handle both that and the
+        # (rarer) vscode://extension/publisher.name double-slash form.
+        rest = f"{parsed.netloc}/{parsed.path}" if parsed.netloc else parsed.path
+        rest = re.sub(r"/+", "/", rest).strip("/")
+        prefix = "extension/"
+        candidate = rest[len(prefix):] if rest.startswith(prefix) else ""
+        if EXTENSION_ID_RE.match(candidate):
+            return candidate
+
+    if parsed.scheme in {"http", "https"} and parsed.netloc.lower().endswith("marketplace.visualstudio.com"):
+        query = parse_qs(parsed.query)
+        item_name = (query.get("itemName") or [""])[0]
+        if EXTENSION_ID_RE.match(item_name):
+            return item_name
+
+    raise MarketplaceDownloadError(f"Could not resolve a publisher.name extension id from {raw!r}.")
+
+
+def download_marketplace_vsix(
+    extension_id: str,
+    version: str | None = None,
+    destination_dir: Path | str | None = None,
+    max_bytes: int = MAX_VSIX_DOWNLOAD_BYTES,
+    timeout: int = VSIX_DOWNLOAD_TIMEOUT,
+) -> Path:
+    """Resolve `publisher.name` (optionally pinned to `version`) against the VS
+    Marketplace gallery API and download the VSIX package to a temp file.
+
+    Raises MarketplaceDownloadError for any resolution/network/size failure.
+    Caller owns the returned path and is responsible for deleting it."""
+    resolved_id = parse_marketplace_reference(extension_id)
+    metadata, error = _fetch_marketplace_metadata(resolved_id)
+    if error:
+        raise MarketplaceDownloadError(f"Marketplace lookup failed for {resolved_id}: {error}")
+    if not metadata or not metadata.get("found"):
+        raise MarketplaceDownloadError(f"Extension {resolved_id} was not found on the VS Marketplace.")
+
+    publisher = metadata.get("publisher") or resolved_id.split(".", 1)[0]
+    name = metadata.get("extension_name") or resolved_id.split(".", 1)[1]
+    target_version = version or metadata.get("version") or ""
+    if not target_version:
+        raise MarketplaceDownloadError(f"Could not resolve a version to download for {resolved_id}.")
+
+    download_url = (
+        f"https://marketplace.visualstudio.com/_apis/public/gallery/publishers/{publisher}/"
+        f"vsextensions/{name}/{target_version}/vspackage"
+    )
+
+    destination_root = Path(destination_dir) if destination_dir else Path(tempfile.gettempdir())
+    destination_root.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{resolved_id}-{target_version}")
+    fd, tmp_path = tempfile.mkstemp(prefix=f"ide-scanner-mkt-{safe_name}-", suffix=".vsix", dir=str(destination_root))
+    out_path = Path(tmp_path)
+
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            _download_to_file(download_url, handle, max_bytes=max_bytes, timeout=timeout)
+    except MarketplaceDownloadError:
+        out_path.unlink(missing_ok=True)
+        raise
+    except (OSError, urllib.error.URLError, subprocess.SubprocessError) as exc:
+        out_path.unlink(missing_ok=True)
+        raise MarketplaceDownloadError(f"Failed to download VSIX for {resolved_id}: {exc}") from exc
+
+    if out_path.stat().st_size == 0:
+        out_path.unlink(missing_ok=True)
+        raise MarketplaceDownloadError(f"Downloaded VSIX for {resolved_id} was empty.")
+
+    _degzip_if_needed(out_path)
+    return out_path
+
+
+def _degzip_if_needed(path: Path) -> None:
+    """The vspackage endpoint sometimes serves the VSIX gzip-compressed
+    (Content-Encoding: gzip) without a matching urllib auto-decode, so the
+    raw bytes on disk start with the gzip magic (1f 8b) instead of the PK
+    zip signature. Unwrap it in place before scan_vsix() opens it as a
+    zipfile."""
+    with path.open("rb") as handle:
+        header = handle.read(2)
+    if header != b"\x1f\x8b":
+        return
+    decompressed_fd, decompressed_name = tempfile.mkstemp(prefix="ide-scanner-mkt-gunzip-", suffix=".vsix", dir=str(path.parent))
+    try:
+        with gzip.open(path, "rb") as source, os.fdopen(decompressed_fd, "wb") as target:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                target.write(chunk)
+    except OSError as exc:
+        Path(decompressed_name).unlink(missing_ok=True)
+        raise MarketplaceDownloadError(f"Downloaded VSIX was gzip-encoded but could not be decompressed: {exc}") from exc
+    os.replace(decompressed_name, path)
+
+
+def _download_to_file(url: str, handle: Any, max_bytes: int, timeout: int) -> None:
+    request = urllib.request.Request(url, headers={"accept": "application/octet-stream"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            _stream_with_cap(response, handle, max_bytes, url)
+        return
+    except (OSError, urllib.error.URLError):
+        pass
+
+    # Fall back to curl, still enforcing the byte cap on our side while streaming.
+    process = subprocess.Popen(
+        ["curl", "-L", "--max-time", str(timeout), "-s", url],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert process.stdout is not None
+        _stream_with_cap(process.stdout, handle, max_bytes, url)
+    finally:
+        process.stdout.close() if process.stdout else None
+        process.wait(timeout=timeout)
+    if process.returncode != 0:
+        raise MarketplaceDownloadError(f"curl exited with status {process.returncode} downloading {url}")
+
+
+def _stream_with_cap(source: Any, handle: Any, max_bytes: int, url: str) -> None:
+    total = 0
+    while True:
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise MarketplaceDownloadError(
+                f"VSIX download from {url} exceeded the {max_bytes} byte cap; aborted."
+            )
+        handle.write(chunk)
 
 
 def _fetch_removed_packages() -> tuple[dict[str, dict[str, str]], str | None]:

@@ -13,6 +13,7 @@ from .scanner import scan_targets
 class ScanRequest:
     paths: list[Path | str] = field(default_factory=list)
     extension_ids: list[str] = field(default_factory=list)
+    marketplace_scan_ids: list[str] = field(default_factory=list)
     include_fixtures: bool = False
     all_local: bool = False
     online: bool = False
@@ -44,6 +45,7 @@ def run_scan(request: ScanRequest) -> dict[str, Any]:
     return scan_targets(
         paths=request.paths,
         extension_ids=request.extension_ids,
+        marketplace_scan_ids=request.marketplace_scan_ids,
         include_fixtures=request.include_fixtures,
         all_local=request.all_local,
         online=request.online,
