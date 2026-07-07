@@ -331,11 +331,18 @@ Implemented now:
 - current `score_details`
 - `malware_authority`
 
+Implemented benchmark support:
+
+- normalized Protect Your Secrets public CSV adapter
+- credential-exposure benchmark runner against scanner JSON/report.zip
+- dashboard-ready `benchmark.zip`
+- `not_scanned` accounting for dataset entries absent from partial reports
+
 Not implemented yet:
 
 - verified publisher/signature scoring
 - source-to-VSIX provenance comparison
-- calibration benchmark corpus
+- full calibration corpus beyond bundled fixtures and the public credential-exposure labels
 - full dynamic sandbox runner execution
 
 ## Recommended Next Build Order
@@ -343,7 +350,7 @@ Not implemented yet:
 1. Add marketplace signature state and VSIX signature verification.
 2. Add source-to-VSIX provenance comparison.
 3. Add dynamic sandbox runner with fake credential canaries.
-4. Build benchmark corpora and publish precision/recall for each verdict.
+4. Expand benchmark corpora and publish precision/recall for each verdict and exposure vector.
 
 ## User-Facing Explanation Template
 

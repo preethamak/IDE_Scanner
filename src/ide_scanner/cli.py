@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from .agent import build_agent_report, upload_agent_report
+from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
+from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .discovery import discover_from_path, discover_local_installations
 from .report_bundle import iter_report_events, write_report_bundle
 from .sandbox_runner import run_sandbox
@@ -45,8 +47,21 @@ def main(argv: list[str] | None = None) -> int:
     sandbox.add_argument("--allow-execute", action="store_true", help="Actually execute package lifecycle commands in a temporary HOME/workspace.")
     sandbox.add_argument("--timeout", type=int, default=15, help="Execution timeout per command in seconds.")
 
-    benchmark = subparsers.add_parser("benchmark", help="Run scanner against bundled ground-truth fixtures.")
-    benchmark.add_argument("--out", help="Write benchmark JSON result to this file.")
+    benchmark = subparsers.add_parser("benchmark", help="Run scanner benchmarks.")
+    benchmark_subparsers = benchmark.add_subparsers(dest="benchmark_command")
+    benchmark.add_argument("--out", help="Write bundled fixture benchmark JSON result to this file.")
+
+    benchmark_run = benchmark_subparsers.add_parser("run", help="Evaluate a scanner report against a normalized benchmark dataset.")
+    benchmark_run.add_argument("--dataset", required=True, help="Normalized benchmark dataset JSON.")
+    benchmark_run.add_argument("--report", required=True, help="Scanner report JSON or report.zip to evaluate.")
+    benchmark_run.add_argument("--out", "--output", dest="output", help="Write benchmark JSON or benchmark.zip.")
+    benchmark_run.add_argument("--format", choices=["json", "benchmark.zip"], default=None, help="Defaults to benchmark.zip when --output ends in .zip.")
+
+    benchmark_normalize = benchmark_subparsers.add_parser("normalize", help="Normalize an external benchmark dataset.")
+    benchmark_normalize.add_argument("adapter", choices=["protect-your-secrets"], help="Dataset adapter to use.")
+    benchmark_normalize.add_argument("--input", required=True, help="Input dataset file.")
+    benchmark_normalize.add_argument("--out", "--output", dest="output", required=True, help="Output normalized JSON file.")
+    benchmark_normalize.add_argument("--source-ref", default=None, help="Dataset reference URL or local commit.")
 
     agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
     agent.add_argument("--server", required=True, help="Base URL of the web app, for example http://127.0.0.1:8765.")
@@ -119,6 +134,30 @@ def main(argv: list[str] | None = None) -> int:
         _emit(observations, args.out)
         return 0
     if args.command == "benchmark":
+        if args.benchmark_command == "run":
+            result = run_credential_exposure_benchmark(args.dataset, args.report)
+            output_format = args.format or ("benchmark.zip" if args.output and args.output.lower().endswith(".zip") else "json")
+            if output_format == "benchmark.zip":
+                if not args.output:
+                    parser.error("benchmark run --format benchmark.zip requires --output")
+                _emit(write_benchmark_bundle(result, args.output), None)
+            else:
+                _emit(result, args.output)
+            return 0
+        if args.benchmark_command == "normalize":
+            result = write_normalized_dataset(
+                args.input,
+                args.output,
+                source_ref=args.source_ref or "https://github.com/yueyueL/VSCode-Extensions-Security-Analysis/",
+            )
+            _emit({
+                "output": args.output,
+                "dataset_id": result["dataset_id"],
+                "extension_count": result["extension_count"],
+                "credential_extension_count": result["credential_extension_count"],
+                "credential_data_points": result["credential_data_points"],
+            }, None)
+            return 0
         result = _run_benchmark()
         _emit(result, args.out)
         return 0

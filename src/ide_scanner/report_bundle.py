@@ -301,7 +301,7 @@ def _finding_actionability(finding: Any) -> str:
         return "block"
     if evidence_class in {"correlated", "observed"} and severity in {"HIGH", "CRITICAL"}:
         return "investigate"
-    if evidence_class in {"dependency", "provenance", "capability", "posture"}:
+    if evidence_class in {"dependency", "provenance", "capability", "posture", "exposure"}:
         if rule_id in {"startup-activation", "repo-url-missing", "security-policy-missing", "license-missing", "repo-maintained"}:
             return "contextual"
         return "review"

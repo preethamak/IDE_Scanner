@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ide_scanner.benchmarks.adapters.protect_your_secrets import normalize_ground_truth_csv
+from ide_scanner.benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from ide_scanner.discovery import discover_from_path
 from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
@@ -257,6 +258,61 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_id["pub.secret"]["expected_findings"], ["credential-config-key", "credential-inputbox-prompt"])
         self.assertEqual(by_id["pub.pii"]["label"], "pii_exposure")
         self.assertEqual(by_id["pub.clean"]["label"], "non_credential")
+
+    def test_credential_exposure_benchmark_runs_against_report_bundle(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "pub",
+                    "name": "secret",
+                    "version": "1.0.0",
+                    "main": "extension.js",
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const vscode = require('vscode');\n"
+                "async function activate(context) {\n"
+                " const token = await vscode.window.showInputBox({ prompt: 'Enter GitHub token' });\n"
+                " await context.globalState.update('githubToken', token);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            dataset_path = Path(tmp) / "dataset.json"
+            dataset_path.write_text(json.dumps({
+                "dataset_id": "test-credential-exposure",
+                "source": "unit-test",
+                "extensions": [{
+                    "extension_id": "pub.secret",
+                    "version": "1.0.0",
+                    "label": "credential_exposure",
+                    "exposure_types": ["inputBox", "globalState"],
+                    "expected_findings": ["credential-inputbox-prompt", "credential-global-state-storage"],
+                    "reference": "unit-test",
+                }],
+            }), encoding="utf-8")
+            report = scan_targets(paths=[root])
+            report_zip = Path(tmp) / "report.zip"
+            write_report_bundle(report, report_zip, profile="benchmark", source="folder")
+
+            result = run_credential_exposure_benchmark(dataset_path, report_zip)
+            benchmark_zip = Path(tmp) / "benchmark.zip"
+            receipt = write_benchmark_bundle(result, benchmark_zip)
+
+            with zipfile.ZipFile(benchmark_zip) as archive:
+                names = set(archive.namelist())
+
+        row = result["leaderboard"]["extensions"][0]
+        self.assertEqual(row["outcome"], "true_positive")
+        self.assertEqual(result["benchmark_summary"]["recall"], 1.0)
+        self.assertEqual(result["benchmark_summary"]["precision"], 1.0)
+        self.assertIn("credential-inputbox-prompt", row["matched_findings"])
+        self.assertEqual(receipt["output"], str(benchmark_zip))
+        self.assertIn("benchmark_summary.json", names)
+        self.assertIn("rule_coverage.json", names)
+        self.assertIn("extensions/pub.secret.json", names)
 
     def test_compiled_out_directory_is_scanned(self) -> None:
         with TemporaryDirectory() as tmp:
