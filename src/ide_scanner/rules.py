@@ -37,7 +37,7 @@ CODE_RULES = [
 
 FILE_READ_RE = re.compile(r"\b(fs\.(readFile|readFileSync|createReadStream)|workspace\.fs\.readFile|FileInputStream|readText|readBytes)\b")
 FILE_WRITE_RE = re.compile(r"\b(fs\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream)|workspace\.fs\.writeFile|FileOutputStream|writeText|writeBytes)\b")
-NETWORK_SINK_RE = re.compile(r"\b(fetch\(|axios\.(post|put|request)|https?\.request|XMLHttpRequest|WebSocket|request\.write|req\.write|OkHttpClient|HttpClient|URLConnection)\b")
+NETWORK_SINK_RE = re.compile(r"\b(?:fetch\s*\(|axios\.(?:post|put|request)\s*\(|https?\.request\s*\(|XMLHttpRequest\b|WebSocket\b|request\.write\s*\(|req\.write\s*\(|OkHttpClient\b|HttpClient\b|URLConnection\b)")
 ENCODE_ARCHIVE_RE = re.compile(r"\b(Buffer\.from|btoa\(|atob\(|base64|createGzip|archiver|adm-zip|JSZip|zip\b|createCipheriv|crypto\.publicEncrypt)\b", re.I)
 DESTRUCTIVE_RE = re.compile(r"\b(rm\s+-rf|unlinkSync|rmdirSync|rmSync\([^)]*recursive\s*:\s*true|Files\.delete|deleteOnExit)\b")
 DOWNLOAD_RE = re.compile(r"\b(fetch\(|https?\.get|https?\.request|axios\.get|curl\s+|wget\s+)\b")

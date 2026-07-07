@@ -81,6 +81,13 @@ CAPABILITY_RULES = {
     "agent-shell-tool",
     "agentic-tooling",
     "broad-activation",
+    "credential-command-execution",
+    "credential-command-registration",
+    "credential-config-key",
+    "credential-config-update",
+    "credential-global-state-key",
+    "credential-global-state-storage",
+    "credential-inputbox-prompt",
     "dynamic-shell-execution",
     "lifecycle-script",
     "mcp-server-command",
@@ -111,8 +118,38 @@ REPUTATION_RULES = {
     "security-policy-missing",
     "license-missing",
 }
+EXPOSURE_RULES = {
+    "credential-command-control",
+    "credential-command-execution",
+    "credential-command-registration",
+    "credential-config-key",
+    "credential-config-update",
+    "credential-dataflow-to-file",
+    "credential-dataflow-to-network",
+    "credential-dataflow-to-process",
+    "credential-global-state-key",
+    "credential-global-state-storage",
+    "credential-inputbox-prompt",
+    "clipboard-read-near-secret-input",
+}
 MALWARE_REMOVAL_TYPES = {"malware"}
 SUSPICIOUS_REMOVAL_TYPES = {"suspicious"}
+SENSITIVE_TEXT_RE = re.compile(
+    r"("
+    r"api[-_ ]?(key|token)|api(key|token)|access[-_ ]?token|accessToken|"
+    r"refresh[-_ ]?token|refreshToken|auth[-_ ]?token|authToken|bearer|"
+    r"password|passwd|pwd|secret|credential|private[-_ ]?key|privateKey|"
+    r"client[-_ ]?secret|clientSecret|github[-_ ]?token|githubToken|npm[-_ ]?token|npmToken|"
+    r"openai\w*|anthropic\w*|claude\w*|gemini\w*|azure[-_ ]?key|azureKey|"
+    r"aws[-_ ]?(secret|key)|aws(secret|key)|webhook|session[-_ ]?token|sessionToken|cookie"
+    r")",
+    re.I,
+)
+SENSITIVE_TEXT_NEGATIVE_RE = re.compile(
+    r"\b(keyboard|keybinding|shortcut|translation[-_ ]?key|object[-_ ]?key|primary[-_ ]?key|"
+    r"foreign[-_ ]?key|sort[-_ ]?key|map[-_ ]?key)\b",
+    re.I,
+)
 
 
 def scan_targets(
@@ -373,6 +410,7 @@ def _add_manifest_findings(
             ))
             capabilities.setdefault("agentic", {"id": "agentic", "evidence": []})["evidence"].append(key)
             _add_agent_capability_findings(extension_id, version, key, contributes.get(key), findings, capabilities)
+    _add_cross_extension_manifest_findings(extension_id, version, contributes, findings, capabilities)
 
 
 def _add_dependency_source_findings(
@@ -533,6 +571,52 @@ def _add_agent_capability_findings(
             "Review prompt/tool boundaries and sanitize untrusted content before tool invocation.",
             {"contribution": key},
         ))
+
+
+def _add_cross_extension_manifest_findings(
+    extension_id: str,
+    version: str,
+    contributes: dict[str, Any],
+    findings: list[Finding],
+    capabilities: dict[str, dict[str, Any]],
+) -> None:
+    for item in _manifest_configuration_items(contributes):
+        text = " ".join(str(item.get(field) or "") for field in ("key", "title", "description", "markdownDescription"))
+        if not _looks_sensitive_text(text):
+            continue
+        key = str(item.get("key") or "")
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-config-key",
+            "cross-extension-exposure",
+            "LOW",
+            _sensitive_text_confidence(text, base=0.62),
+            f"Manifest declares a credential-related configuration surface: {key}.",
+            ["package.json"],
+            "Prefer VS Code SecretStorage for credentials and document whether other extensions can read or influence this configuration.",
+            {"configuration_key": key, "text": _truncate_evidence_text(text), "surface": "RequestedConfiguration"},
+        ))
+        capabilities.setdefault("credential_configuration", {"id": "credential_configuration", "evidence": []})["evidence"].append(key)
+
+    for command in _manifest_commands(contributes):
+        text = " ".join(str(command.get(field) or "") for field in ("command", "title", "category"))
+        if not _looks_sensitive_text(text):
+            continue
+        command_id = str(command.get("command") or "")
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-command-registration",
+            "cross-extension-exposure",
+            "LOW",
+            _sensitive_text_confidence(text, base=0.58),
+            f"Manifest declares a credential-related command surface: {command_id}.",
+            ["package.json"],
+            "Review whether this command can be invoked by other extensions and whether it gates credential access with user intent.",
+            {"command": command_id, "text": _truncate_evidence_text(text), "surface": "RequestedCommands"},
+        ))
+        capabilities.setdefault("credential_commands", {"id": "credential_commands", "evidence": []})["evidence"].append(command_id)
 
 
 def _add_repository_posture_findings(
@@ -914,6 +998,278 @@ def _add_code_findings(
             [rel],
             "Verify the download source, integrity checks, and execution purpose.",
         ))
+    _add_cross_extension_code_findings(
+        extension_id,
+        version,
+        rel,
+        text,
+        findings,
+        capabilities,
+        has_file_write=has_file_write,
+        has_network=has_network,
+        has_shell_or_dynamic_exec=has_shell_exec or has_dynamic_exec or has_exec_file,
+    )
+
+
+def _add_cross_extension_code_findings(
+    extension_id: str,
+    version: str,
+    rel: str,
+    text: str,
+    findings: list[Finding],
+    capabilities: dict[str, dict[str, Any]],
+    *,
+    has_file_write: bool,
+    has_network: bool,
+    has_shell_or_dynamic_exec: bool,
+) -> None:
+    sensitive_input = _find_sensitive_api_text(text, r"showInputBox\s*\((?P<args>[^;\n]{0,800})", "InputBox")
+    sensitive_config_reads = _find_sensitive_api_text(
+        text,
+        r"(?:getConfiguration\s*\([^)]*\)\s*\.\s*get|WorkspaceConfiguration\s*\.\s*get|config\s*\.\s*get)\s*\((?P<args>[^;\n]{0,500})",
+        "WorkspaceConfiguration",
+    )
+    sensitive_config_updates = _find_sensitive_api_text(
+        text,
+        r"(?:getConfiguration\s*\([^)]*\)\s*\.\s*update|WorkspaceConfiguration\s*\.\s*update|config\s*\.\s*update)\s*\((?P<args>[^;\n]{0,500})",
+        "WorkspaceConfiguration",
+    )
+    sensitive_global_state = _find_sensitive_api_text(
+        text,
+        r"(?:globalState|workspaceState)\s*\.\s*(?:get|update)\s*\((?P<args>[^;\n]{0,500})",
+        "GlobalState",
+    )
+    sensitive_command_register = _find_sensitive_api_text(
+        text,
+        r"commands\s*\.\s*register(?:TextEditor)?Command\s*\((?P<args>[^;\n]{0,500})",
+        "Commands",
+    )
+    sensitive_command_exec = _find_sensitive_api_text(
+        text,
+        r"commands\s*\.\s*executeCommand\s*\((?P<args>[^;\n]{0,500})",
+        "Commands",
+    )
+    has_clipboard_read = bool(re.search(r"(?:env\s*\.\s*)?clipboard\s*\.\s*readText\s*\(", text))
+
+    for item in sensitive_input:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-inputbox-prompt",
+            "cross-extension-exposure",
+            "MEDIUM",
+            item["confidence"],
+            "InputBox prompt or options appear to request credential-related data.",
+            [rel],
+            "Use VS Code SecretStorage for secret capture and avoid exposing credential prompts to clipboard or command-controlled flows.",
+            item,
+        ))
+        capabilities.setdefault("credential_input", {"id": "credential_input", "evidence": []})["evidence"].append(rel)
+
+    for item in sensitive_config_reads:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-config-key",
+            "cross-extension-exposure",
+            "LOW",
+            item["confidence"],
+            "Source reads a credential-related VS Code configuration key.",
+            [rel],
+            "Review whether the setting is world-readable extension configuration and migrate secrets to SecretStorage where possible.",
+            item,
+        ))
+
+    for item in sensitive_config_updates:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-config-update",
+            "cross-extension-exposure",
+            "HIGH",
+            max(0.78, item["confidence"]),
+            "Source writes credential-related data to VS Code configuration.",
+            [rel],
+            "Do not store credentials in VS Code settings; use SecretStorage or an OS credential store.",
+            item,
+        ))
+
+    for item in sensitive_global_state:
+        rule_id = "credential-global-state-storage" if ".update" in item.get("snippet", "") else "credential-global-state-key"
+        findings.append(_finding(
+            extension_id,
+            version,
+            rule_id,
+            "cross-extension-exposure",
+            "HIGH" if rule_id == "credential-global-state-storage" else "LOW",
+            max(0.76, item["confidence"]) if rule_id == "credential-global-state-storage" else item["confidence"],
+            "Source uses a credential-related globalState/workspaceState key.",
+            [rel],
+            "Avoid storing credentials in extension state unless access boundaries and lifetime are explicitly understood.",
+            item,
+        ))
+
+    for item in sensitive_command_register:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-command-registration",
+            "cross-extension-exposure",
+            "LOW",
+            item["confidence"],
+            "Source registers a credential-related command surface.",
+            [rel],
+            "Review whether other extensions can invoke this command and whether credential access requires explicit user intent.",
+            item,
+        ))
+
+    for item in sensitive_command_exec:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-command-execution",
+            "cross-extension-exposure",
+            "MEDIUM",
+            max(0.68, item["confidence"]),
+            "Source executes a credential-related VS Code command.",
+            [rel],
+            "Review command control paths and avoid allowing untrusted extensions or inputs to steer credential operations.",
+            item,
+        ))
+
+    has_sensitive_source = bool(sensitive_input or sensitive_config_reads or sensitive_config_updates or sensitive_global_state)
+    if sensitive_input and sensitive_global_state:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-command-control",
+            "cross-extension-exposure",
+            "HIGH",
+            0.82,
+            "Credential-like user input appears near extension state storage.",
+            [rel],
+            "Manually verify whether credential input can be stored in cross-extension-accessible state or command-controlled flows.",
+            {"surfaces": ["InputBox", "GlobalState"], "evidence_class": "correlated"},
+        ))
+    if has_clipboard_read and has_sensitive_source:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "clipboard-read-near-secret-input",
+            "cross-extension-exposure",
+            "HIGH",
+            0.8,
+            "Clipboard reads appear in the same file as credential-related input or storage surfaces.",
+            [rel],
+            "Avoid reading clipboard contents around secret capture flows unless the user explicitly requested the paste/import action.",
+            {"surfaces": ["clipboard", "credential"], "evidence_class": "correlated"},
+        ))
+    if has_sensitive_source and has_network:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-dataflow-to-network",
+            "cross-extension-exposure",
+            "CRITICAL",
+            0.86,
+            "Credential-related source surfaces and network sinks appear in the same source file.",
+            [rel],
+            "Manually verify the data flow. If credential data reaches network sinks unexpectedly, block the extension.",
+            {"sink": "network", "evidence_class": "correlated"},
+        ))
+    if has_sensitive_source and has_shell_or_dynamic_exec:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-dataflow-to-process",
+            "cross-extension-exposure",
+            "HIGH",
+            0.78,
+            "Credential-related source surfaces and process execution appear in the same source file.",
+            [rel],
+            "Manually verify whether credentials can influence process execution or command arguments.",
+            {"sink": "process", "evidence_class": "correlated"},
+        ))
+    if has_sensitive_source and has_file_write:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "credential-dataflow-to-file",
+            "cross-extension-exposure",
+            "HIGH",
+            0.76,
+            "Credential-related source surfaces and file writes appear in the same source file.",
+            [rel],
+            "Review file persistence paths and ensure raw secrets are not written to workspace or extension files.",
+            {"sink": "file", "evidence_class": "correlated"},
+        ))
+
+
+def _find_sensitive_api_text(text: str, pattern: str, surface: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for match in re.finditer(pattern, text, re.I | re.S):
+        snippet = match.group("args") if "args" in match.groupdict() else match.group(0)
+        if not _looks_sensitive_text(snippet):
+            continue
+        out.append({
+            "surface": surface,
+            "text": _truncate_evidence_text(snippet),
+            "snippet": _truncate_evidence_text(match.group(0)),
+            "confidence": _sensitive_text_confidence(snippet, base=0.64),
+        })
+    return out[:10]
+
+
+def _manifest_configuration_items(contributes: dict[str, Any]) -> list[dict[str, Any]]:
+    configuration = contributes.get("configuration")
+    blocks = configuration if isinstance(configuration, list) else [configuration]
+    items: list[dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        properties = block.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        for key, value in properties.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+            item = dict(value)
+            item["key"] = key
+            item.setdefault("title", block.get("title", ""))
+            items.append(item)
+    return items
+
+
+def _manifest_commands(contributes: dict[str, Any]) -> list[dict[str, Any]]:
+    commands = contributes.get("commands")
+    if not isinstance(commands, list):
+        return []
+    return [dict(item) for item in commands if isinstance(item, dict)]
+
+
+def _looks_sensitive_text(value: str) -> bool:
+    if not value or SENSITIVE_TEXT_NEGATIVE_RE.search(value):
+        return False
+    return bool(SENSITIVE_TEXT_RE.search(value))
+
+
+def _sensitive_text_confidence(value: str, *, base: float) -> float:
+    text = value.lower()
+    confidence = base
+    if re.search(r"(api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|private[-_ ]?key)", text):
+        confidence += 0.14
+    if re.search(r"(openai|anthropic|claude|github|npm|aws|azure|gemini)", text):
+        confidence += 0.08
+    if SENSITIVE_TEXT_NEGATIVE_RE.search(text):
+        confidence -= 0.18
+    return round(max(0.35, min(0.94, confidence)), 2)
+
+
+def _truncate_evidence_text(value: str, limit: int = 240) -> str:
+    compact = re.sub(r"\s+", " ", str(value)).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
 
 
 def _combined_secret_regex(secret_refs: list[tuple[str, str]]) -> re.Pattern[str]:
@@ -1674,6 +2030,8 @@ def _evidence_class(rule_id: str, evidence: dict[str, Any] | None = None) -> str
         return "confirmed" if _is_removed_malware(evidence) else "provenance"
     if rule_id in CORRELATED_RULES:
         return "correlated"
+    if rule_id in EXPOSURE_RULES:
+        return "exposure"
     if rule_id in CAPABILITY_RULES:
         return "capability"
     if rule_id in DEPENDENCY_RULES:
@@ -1783,6 +2141,8 @@ def _is_actionable_review_finding(finding: Finding) -> bool:
     evidence_class = _finding_evidence_class(finding)
     if evidence_class in {"correlated", "dependency", "observed", "posture", "provenance"}:
         return True
+    if evidence_class == "exposure":
+        return True
     if evidence_class == "capability":
         return finding.rule_id != "startup-activation"
     return False
@@ -1813,6 +2173,7 @@ def _empty_score_details() -> dict[str, Any]:
             "provenance": 0,
             "dependency": 0,
             "posture": 0,
+            "cross_extension_exposure": 0,
             "reputation": 0,
             "weak_context": 0,
         },
@@ -1825,6 +2186,7 @@ def _empty_score_details() -> dict[str, Any]:
             "provenance": 0,
             "dependency": 0,
             "posture": 0,
+            "exposure": 0,
             "reputation": 0,
             "weak": 0,
         },
@@ -1845,8 +2207,9 @@ def _score_details(findings: list[Finding]) -> dict[str, Any]:
     dependency_score = _dependency_score(findings)
     observed_score = _observed_score(findings)
     posture_score = _posture_score(findings)
+    exposure_score = _exposure_score(findings)
     reputation_score = _reputation_score(findings)
-    has_actionable_context = correlated_score > 0 or capability_score > 0 or provenance_score > 0 or dependency_score > 0 or observed_score > 0 or posture_score > 0
+    has_actionable_context = correlated_score > 0 or capability_score > 0 or provenance_score > 0 or dependency_score > 0 or observed_score > 0 or posture_score > 0 or exposure_score > 0
     weak_score = _weak_score(findings, has_actionable_context)
 
     components = {
@@ -1857,6 +2220,7 @@ def _score_details(findings: list[Finding]) -> dict[str, Any]:
         "provenance": provenance_score,
         "dependency": dependency_score,
         "posture": posture_score,
+        "cross_extension_exposure": exposure_score,
         "reputation": reputation_score,
         "weak_context": weak_score,
     }
@@ -1893,6 +2257,7 @@ def _score_basis(components: dict[str, int]) -> tuple[str, str]:
         "dependency",
         "provenance",
         "sensitive_capability",
+        "cross_extension_exposure",
         "posture",
         "reputation",
         "weak_context",
@@ -2036,6 +2401,26 @@ def _posture_score(findings: list[Finding]) -> int:
             score = max(score, 34)
         elif finding.rule_id == "repo-binary-artifacts":
             score = max(score, 32)
+    return score
+
+
+def _exposure_score(findings: list[Finding]) -> int:
+    score = 0
+    for finding in findings:
+        if finding.rule_id == "credential-dataflow-to-network":
+            score = max(score, 92)
+        elif finding.rule_id in {"credential-command-control", "clipboard-read-near-secret-input"}:
+            score = max(score, 72)
+        elif finding.rule_id in {"credential-dataflow-to-process", "credential-dataflow-to-file"}:
+            score = max(score, 68)
+        elif finding.rule_id in {"credential-config-update", "credential-global-state-storage"}:
+            score = max(score, 58)
+        elif finding.rule_id == "credential-inputbox-prompt":
+            score = max(score, 42)
+        elif finding.rule_id == "credential-command-execution":
+            score = max(score, 40)
+        elif finding.rule_id in {"credential-config-key", "credential-global-state-key", "credential-command-registration"}:
+            score = max(score, 24)
     return score
 
 
