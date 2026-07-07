@@ -8,7 +8,7 @@ from typing import Any
 
 from .agent import build_agent_report, upload_agent_report
 from .discovery import discover_from_path, discover_local_installations
-from .report_bundle import write_report_bundle
+from .report_bundle import iter_report_events, write_report_bundle
 from .sandbox_runner import run_sandbox
 from .scanner import scan_targets
 
@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--jobs", type=int, default=1, help="Worker count for future parallel scans. Currently accepted for CLI compatibility.")
+    scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
+    scan.add_argument("--ui", action="store_true", help="Reserved for local dashboard mode.")
 
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
@@ -69,11 +71,28 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_observations_file=args.sandbox_observations,
             previous_report_file=args.previous_report,
         )
+        if args.ui:
+            parser.error("scan --ui is reserved for the local dashboard mode and is not implemented in this build")
         output_format = _scan_output_format(args.output, args.format)
+        source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
+        if args.stream:
+            output = ""
+            if args.output:
+                if output_format != "report.zip":
+                    parser.error("scan --stream --output currently writes report.zip bundles only")
+                receipt = write_report_bundle(
+                    report,
+                    args.output,
+                    profile=args.profile,
+                    source=source,
+                    include_raw_evidence=args.include_raw_evidence,
+                )
+                output = str(receipt["output"])
+            _emit_ndjson(iter_report_events(report, profile=args.profile, source=source, output=output))
+            return 0
         if output_format == "report.zip":
             if not args.output:
                 parser.error("scan --format report.zip requires --output")
-            source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
             receipt = write_report_bundle(
                 report,
                 args.output,
@@ -131,6 +150,11 @@ def _emit(data: dict[str, Any], out: str | None) -> None:
         Path(out).write_text(payload + "\n", encoding="utf-8")
         return
     print(payload)
+
+
+def _emit_ndjson(events) -> None:
+    for event in events:
+        print(json.dumps(event, sort_keys=True))
 
 
 def _scan_output_format(output: str | None, explicit_format: str | None) -> str:

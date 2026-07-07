@@ -74,6 +74,43 @@ def write_report_bundle(
     }
 
 
+def iter_report_events(report: dict[str, Any], *, profile: str = "smart", source: str = "unknown", output: str = ""):
+    bundle = build_report_bundle(report, profile=profile, source=source)
+    metadata = bundle["metadata"]
+    yield {
+        "type": "scan_started",
+        "scan_id": metadata["scan_id"],
+        "profile": metadata["profile"],
+        "source": metadata["source"],
+        "total_extensions": metadata["total_extensions"],
+    }
+    for row in bundle["leaderboard"]["extensions"]:
+        yield {
+            "type": "extension_summary_ready",
+            "scan_id": metadata["scan_id"],
+            "extension_id": row["extension_id"],
+            "risk_score": row["risk_score"],
+            "malware_score": row["malware_score"],
+            "verdict": row["verdict"],
+            "severity": row["severity"],
+            "grade": row["grade"],
+            "detail_ref": row["detail_ref"],
+        }
+        yield {
+            "type": "extension_detail_ready",
+            "scan_id": metadata["scan_id"],
+            "extension_id": row["extension_id"],
+            "detail_ref": row["detail_ref"],
+        }
+    yield {
+        "type": "scan_completed",
+        "scan_id": metadata["scan_id"],
+        "output": output,
+        "completed_extensions": metadata["completed_extensions"],
+        "incomplete_extensions": metadata["incomplete_extensions"],
+    }
+
+
 def _metadata(report: dict[str, Any], extensions: list[ExtensionReport], *, profile: str, source: str) -> ReportMetadata:
     created_at = str(report.get("created_at") or dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"))
     scan_id = str(report.get("scan_id") or f"scan_{dt.datetime.now(dt.UTC).strftime('%Y%m%d%H%M%S')}")

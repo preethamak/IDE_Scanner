@@ -12,7 +12,7 @@ from ide_scanner.discovery import discover_from_path
 from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
-from ide_scanner.report_bundle import build_report_bundle, write_report_bundle
+from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
 from ide_scanner.scanner import scan_extension, scan_targets
 
@@ -155,6 +155,21 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(metadata["profile"], "standard")
         self.assertEqual(metadata["source"], "folder")
         self.assertEqual(leaderboard["extensions"][0]["detail_ref"], detail_names[0])
+
+    def test_report_stream_events_include_summary_and_detail_refs(self) -> None:
+        report = scan_targets(paths=[Path("fixtures") / "credential-exfil"])
+        events = list(iter_report_events(report, profile="smart", source="folder", output="report.zip"))
+
+        self.assertEqual(events[0]["type"], "scan_started")
+        self.assertEqual(events[0]["total_extensions"], 1)
+        self.assertIn("extension_summary_ready", {event["type"] for event in events})
+        self.assertIn("extension_detail_ready", {event["type"] for event in events})
+        self.assertEqual(events[-1]["type"], "scan_completed")
+        self.assertEqual(events[-1]["output"], "report.zip")
+        summary = next(event for event in events if event["type"] == "extension_summary_ready")
+        self.assertEqual(summary["extension_id"], "unknown.shadow-helper")
+        self.assertEqual(summary["verdict"], "suspicious")
+        self.assertTrue(summary["detail_ref"].startswith("extensions/"))
 
     def test_path_discovery_finds_fixture_extensions(self) -> None:
         targets = discover_from_path(Path("fixtures"))
