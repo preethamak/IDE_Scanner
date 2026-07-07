@@ -27,7 +27,7 @@ SECRET_PATTERNS = [
 ]
 
 CODE_RULES = [
-    Rule("process-execution", "execution", "LOW", 0.54, "Extension can spawn local processes. Common for language servers and debuggers.", re.compile(r"\b(child_process|spawnSync|execSync|execFileSync|spawn\(|exec\(|ProcessBuilder|Runtime\.getRuntime\(\)\.exec)"), "process_execution"),
+    Rule("process-execution", "execution", "LOW", 0.54, "Extension can spawn local processes. Common for language servers and debuggers.", re.compile(r"\b(child_process|spawnSync|execSync|execFileSync|execFile\(|spawn\(|exec\(|ProcessBuilder|Runtime\.getRuntime\(\)\.exec)"), "process_execution"),
     Rule("network-access", "network", "LOW", 0.48, "Extension performs network requests. Not malicious by itself.", re.compile(r"\b(fetch\(|axios\.|https?\.request|XMLHttpRequest|WebSocket|request\.write|req\.write|OkHttpClient|HttpClient|URLConnection)"), "network"),
     Rule("filesystem-access", "filesystem", "LOW", 0.42, "Extension reads or writes local files. Expected for many developer tools.", re.compile(r"\b(fs\.(readFile|readFileSync|writeFile|readdir|createReadStream|createWriteStream)|workspace\.fs|FileInputStream|FileOutputStream)"), "filesystem"),
     Rule("dynamic-code-loading", "code", "MEDIUM", 0.66, "Extension uses dynamic code loading or evaluation.", re.compile(r"\b(eval\(|new Function\(|vm\.runIn|import\s*\(|URLClassLoader|ClassLoader\.defineClass)"), "dynamic_code"),

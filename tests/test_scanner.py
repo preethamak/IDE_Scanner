@@ -133,6 +133,72 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("evidence_refs", detail["findings"][0])
         self.assertNotIn("evidence", detail["findings"][0])
 
+    def test_contextual_findings_get_context_score_and_clean_with_notes_label(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"notes","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[root])
+            bundle = build_report_bundle(report, profile="smart", source="folder")
+
+        row = bundle["leaderboard"]["extensions"][0]
+        detail = bundle["extensions"][row["detail_ref"]]
+        self.assertEqual(row["verdict"], "clean")
+        self.assertEqual(row["risk_score"], 0)
+        self.assertGreater(row["context_score"], 0)
+        self.assertEqual(row["verdict_label"], "Clean with notes")
+        self.assertTrue(all(finding["actionability"] == "contextual" for finding in detail["findings"]))
+
+    def test_configured_cli_execution_is_contextual_not_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"cli","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const vscode = require('vscode');\n"
+                "const { execFile } = require('child_process');\n"
+                "function run(){\n"
+                " const cliPath = vscode.workspace.getConfiguration('tool').get('executablePath', 'tool');\n"
+                " execFile(cliPath, ['analyze', vscode.window.activeTextEditor.document.uri.fsPath]);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[root])
+            bundle = build_report_bundle(report, profile="smart", source="folder")
+
+        scanned = report["extensions"][0]
+        rule_ids = {finding["rule_id"] for finding in scanned["findings"]}
+        self.assertEqual(scanned["verdict"], "clean")
+        self.assertEqual(scanned["risk_score"], 0)
+        self.assertIn("process-execution", rule_ids)
+        self.assertIn("safe-configured-cli-execution", rule_ids)
+        row = bundle["leaderboard"]["extensions"][0]
+        self.assertEqual(row["verdict_label"], "Clean with notes")
+        self.assertGreater(row["context_score"], 0)
+
+    def test_compiled_out_directory_is_scanned(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "out").mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"compiled","version":"1.0.0","main":"./out/extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "out" / "extension.js").write_text(
+                "const { execFile } = require('child_process'); execFile('tool', ['--version']);",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertIn("process-execution", {finding.rule_id for finding in report.findings})
+
     def test_write_report_bundle_creates_dashboard_ready_zip(self) -> None:
         with TemporaryDirectory() as tmp:
             report = scan_targets(paths=[Path("fixtures") / "credential-exfil"])

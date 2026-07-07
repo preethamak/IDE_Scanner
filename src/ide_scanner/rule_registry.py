@@ -99,6 +99,33 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "recommendation": "Upgrade or replace the vulnerable dependency.",
         "benchmark_tags": ["dependency", "vulnerability"],
     },
+    "safe-configured-cli-execution": {
+        "title": "Configured CLI execution",
+        "category": "execution",
+        "evidence_class": "weak",
+        "default_severity": "INFO",
+        "description": "Code executes a configured local CLI through execFile-style process execution.",
+        "recommendation": "Treat as contextual when the binary path is user-configured and arguments are explicit.",
+        "benchmark_tags": ["execution", "cli"],
+    },
+    "dynamic-shell-execution": {
+        "title": "Dynamic shell execution",
+        "category": "execution",
+        "evidence_class": "capability",
+        "default_severity": "MEDIUM",
+        "description": "Code uses shell-style process execution.",
+        "recommendation": "Review command construction and avoid shell execution for untrusted input.",
+        "benchmark_tags": ["execution", "shell"],
+    },
+    "untrusted-input-execution": {
+        "title": "Untrusted input execution",
+        "category": "execution",
+        "evidence_class": "capability",
+        "default_severity": "MEDIUM",
+        "description": "Code appears to combine IDE/workspace input with process execution.",
+        "recommendation": "Ensure file paths, document content, and workspace values are passed as arguments without shell interpolation.",
+        "benchmark_tags": ["execution", "input"],
+    },
 }
 
 

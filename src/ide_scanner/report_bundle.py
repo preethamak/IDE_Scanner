@@ -91,7 +91,9 @@ def iter_report_events(report: dict[str, Any], *, profile: str = "smart", source
             "extension_id": row["extension_id"],
             "risk_score": row["risk_score"],
             "malware_score": row["malware_score"],
+            "context_score": row["context_score"],
             "verdict": row["verdict"],
+            "verdict_label": row["verdict_label"],
             "severity": row["severity"],
             "grade": row["grade"],
             "detail_ref": row["detail_ref"],
@@ -157,6 +159,7 @@ def _summary(
             "malicious": verdict_counts.get("malicious", 0),
             "max_risk_score": max((extension.risk_score for extension in extensions), default=0),
             "max_malware_score": max((extension.malware_score for extension in extensions), default=0),
+            "max_context_score": max((_context_score(extension) for extension in extensions), default=0),
             "posture_status": posture_summary.get("status", "skipped"),
         },
         "top_risk_extensions": [summary.to_dict() for summary in _rank_summaries(summaries)[:10]],
@@ -178,7 +181,9 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         severity=extension.severity,
         risk_score=extension.risk_score,
         malware_score=extension.malware_score,
+        context_score=_context_score(extension),
         grade=grade_extension(extension.verdict, extension.risk_score, extension.malware_score, extension.findings),
+        verdict_label=_verdict_label(extension),
         top_findings=[finding.rule_id for finding in _rank_findings(extension.findings)[:5]],
         finding_count=len(extension.findings),
         dependency_count=len(extension.dependencies),
@@ -199,6 +204,8 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         evidence_id = _evidence_id(finding_data)
         evidence_store[evidence_id] = _evidence_record(finding_data, include_raw_evidence=include_raw_evidence)
         finding_data["evidence_refs"] = [evidence_id]
+        finding_data["evidence_class"] = _finding_evidence_class(finding)
+        finding_data["actionability"] = _finding_actionability(finding)
         if not include_raw_evidence:
             finding_data.pop("evidence", None)
         finding_data["file_refs"] = list(finding_data.get("file_refs") or [])[:5]
@@ -216,7 +223,9 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         severity=extension.severity,
         risk_score=extension.risk_score,
         malware_score=extension.malware_score,
+        context_score=_context_score(extension),
         grade=grade_extension(extension.verdict, extension.risk_score, extension.malware_score, extension.findings),
+        verdict_label=_verdict_label(extension),
         score_details=extension.score_details,
         score_explanation=_score_explanation(extension),
         verdict_reason=extension.verdict_reason,
@@ -246,6 +255,49 @@ def grade_extension(verdict: str, risk_score: int, malware_score: int, findings:
     if risk_score > 0 or malware_score > 0:
         return "A-"
     return "A"
+
+
+def _verdict_label(extension: ExtensionReport) -> str:
+    if extension.verdict == "clean" and _context_score(extension) > 0:
+        return "Clean with notes"
+    if extension.verdict == "review":
+        return "Needs review"
+    if extension.verdict == "malicious":
+        return "Confirmed malicious"
+    return extension.verdict.capitalize()
+
+
+def _context_score(extension: ExtensionReport) -> int:
+    contextual = [finding for finding in extension.findings if _finding_actionability(finding) == "contextual"]
+    if not contextual:
+        return 0
+    components = extension.score_details.get("components") if isinstance(extension.score_details, dict) else {}
+    reputation = int((components or {}).get("reputation") or 0)
+    posture = int((components or {}).get("posture") or 0)
+    weak = int((components or {}).get("weak_context") or 0)
+    return min(100, max(reputation, posture, weak) + min(40, len(contextual) * 6))
+
+
+def _finding_actionability(finding: Any) -> str:
+    evidence_class = _finding_evidence_class(finding)
+    rule_id = str(getattr(finding, "rule_id", ""))
+    severity = str(getattr(finding, "severity", ""))
+    if evidence_class == "confirmed":
+        return "block"
+    if evidence_class in {"correlated", "observed"} and severity in {"HIGH", "CRITICAL"}:
+        return "investigate"
+    if evidence_class in {"dependency", "provenance", "capability", "posture"}:
+        if rule_id in {"startup-activation", "repo-url-missing", "security-policy-missing", "license-missing", "repo-maintained"}:
+            return "contextual"
+        return "review"
+    return "contextual"
+
+
+def _finding_evidence_class(finding: Any) -> str:
+    evidence = getattr(finding, "evidence", None)
+    if isinstance(evidence, dict):
+        return str(evidence.get("evidence_class") or "weak")
+    return "weak"
 
 
 def _score_explanation(extension: ExtensionReport) -> list[str]:

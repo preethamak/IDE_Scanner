@@ -50,7 +50,7 @@ TEXT_EXTS = {
 EXEC_TEXT_EXTS = {".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ps1", ".py", ".sh", ".ts", ".tsx"}
 BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
-SKIP_DIRS = {".git", ".hg", ".svn", "dist", "media", "node_modules", "out", "resources", "syntaxes", "themes"}
+SKIP_DIRS = {".git", ".hg", ".svn", "dist", "media", "node_modules", "resources", "syntaxes", "themes"}
 MAX_TEXT_BYTES = 220_000
 SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 CONFIRMED_RULES = {"known-bad-artifact", "marketplace-removed-malware", "malicious-npm-dependency", "trusted-threat-feed-hit"}
@@ -81,12 +81,14 @@ CAPABILITY_RULES = {
     "agent-shell-tool",
     "agentic-tooling",
     "broad-activation",
+    "dynamic-shell-execution",
     "lifecycle-script",
     "mcp-server-command",
     "native-or-packed-artifact",
     "powerful-ide-contribution",
     "sensitive-activation",
     "startup-activation",
+    "untrusted-input-execution",
     "webview-csp-missing",
     "webview-csp-unsafe-directive",
 }
@@ -735,6 +737,10 @@ def _add_code_findings(
     has_download = bool(DOWNLOAD_RE.search(text))
     has_obfuscation = bool(re.search(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", text, re.I))
     has_dynamic_exec = bool(re.search(r"\b(eval\(|new Function\(|vm\.runIn|import\s*\(|exec\(|spawn\()", text))
+    has_exec_file = bool(re.search(r"\b(execFile|execFileSync)\b", text))
+    has_shell_exec = bool(re.search(r"\b(exec|execSync)\s*\(|shell\s*:\s*true", text))
+    has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
+    has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
     has_agent_surface = bool(re.search(r"(languageModel|chatParticipant|mcp|toolInvocation|invokeTool)", text, re.I))
     secret_regex = _combined_secret_regex(secret_refs)
@@ -757,6 +763,43 @@ def _add_code_findings(
 
     if _is_generated_code_blob(rel, text):
         return
+
+    if has_configured_cli and not has_shell_exec and not has_download:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "safe-configured-cli-execution",
+            "execution",
+            "INFO",
+            0.72,
+            "Code executes a configured local CLI through execFile-style process execution.",
+            [rel],
+            "Treat as contextual when the binary path is user-configured and arguments are explicit.",
+        ))
+    if has_shell_exec:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "dynamic-shell-execution",
+            "execution",
+            "MEDIUM",
+            0.72,
+            "Code uses shell-style process execution.",
+            [rel],
+            "Review command construction and avoid shell execution for untrusted input.",
+        ))
+    if (has_shell_exec or has_dynamic_exec) and has_editor_input:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "untrusted-input-execution",
+            "execution",
+            "MEDIUM",
+            0.62,
+            "Code appears to combine IDE/workspace input with process execution.",
+            [rel],
+            "Ensure file paths, document content, and workspace values are passed as arguments without shell interpolation.",
+        ))
 
     for secret_id, label in secret_refs:
         findings.append(_finding(
@@ -1916,6 +1959,10 @@ def _capability_score(findings: list[Finding]) -> int:
             score = max(score, 38)
         elif finding.rule_id == "native-or-packed-artifact":
             score = max(score, 36)
+        elif finding.rule_id == "dynamic-shell-execution":
+            score = max(score, 40)
+        elif finding.rule_id == "untrusted-input-execution":
+            score = max(score, 38)
         elif finding.rule_id in {"broad-activation", "sensitive-activation", "powerful-ide-contribution"}:
             score = max(score, 30)
         elif finding.rule_id == "webview-csp-unsafe-directive":

@@ -103,7 +103,9 @@ class ExtensionSummary:
     severity: Severity
     risk_score: int
     malware_score: int
+    context_score: int
     grade: str
+    verdict_label: str
     top_findings: list[str]
     finding_count: int
     dependency_count: int
@@ -131,7 +133,9 @@ class ExtensionDetail:
     severity: Severity
     risk_score: int
     malware_score: int
+    context_score: int
     grade: str
+    verdict_label: str
     score_details: dict[str, Any]
     score_explanation: list[str]
     verdict_reason: str
