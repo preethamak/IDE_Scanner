@@ -9,6 +9,8 @@ from typing import Any
 
 from .cli import _run_benchmark
 from .core import ScanRequest, build_inventory, run_scan, summarize_report
+from .registry import search_marketplace_extensions
+from .rule_registry import rules_json
 from .sandbox_runner import run_sandbox
 
 
@@ -19,6 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("scan")
     subparsers.add_parser("benchmark")
     subparsers.add_parser("sandbox")
+    subparsers.add_parser("search")
+    subparsers.add_parser("rules")
     args = parser.parse_args(argv)
 
     if args.command == "inventory":
@@ -71,6 +75,22 @@ def main(argv: list[str] | None = None) -> int:
             _emit_error("path must be a string")
             return 2
         _emit(run_sandbox(Path(path), allow_execute=bool(payload.get("allow_execute", False)), timeout_seconds=int(payload.get("timeout", 15) or 15)))
+        return 0
+    if args.command == "search":
+        payload = _read_stdin_json()
+        query = payload.get("query")
+        if not isinstance(query, str) or not query.strip():
+            _emit_error("query must be a non-empty string")
+            return 2
+        try:
+            results = search_marketplace_extensions(query, page_size=int(payload.get("limit", 25) or 25))
+        except Exception as exc:  # noqa: BLE001 - surface any registry/network failure to the caller
+            _emit_error(f"Marketplace search failed: {exc}")
+            return 0
+        _emit({"results": results})
+        return 0
+    if args.command == "rules":
+        _emit(rules_json())
         return 0
     return 2
 

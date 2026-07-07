@@ -185,6 +185,81 @@ def download_marketplace_vsix(
     return out_path
 
 
+MARKETPLACE_SEARCH_TEXT_FILTER = 10
+MARKETPLACE_SORT_BY_RELEVANCE = 0
+MARKETPLACE_SORT_BY_INSTALLS = 4
+MAX_SEARCH_RESULTS = 25
+ICON_SMALL_ASSET_TYPE = "Microsoft.VisualStudio.Services.Icons.Small"
+ICON_DEFAULT_ASSET_TYPE = "Microsoft.VisualStudio.Services.Icons.Default"
+
+
+def search_marketplace_extensions(query: str, page_size: int = MAX_SEARCH_RESULTS) -> list[dict[str, Any]]:
+    """Free-text search against the VS Marketplace gallery (extensionquery,
+    filterType 10). Returns lightweight result rows for a search-as-you-type
+    UI: id, display name, publisher, description, install count, rating,
+    icon URL, and whether the publisher is domain-verified. No download or
+    scan happens here -- this is metadata-only, read-only, and safe to call
+    directly from a request handler."""
+    query = query.strip()
+    if not query:
+        return []
+    page_size = max(1, min(int(page_size or MAX_SEARCH_RESULTS), MAX_SEARCH_RESULTS))
+    body = json.dumps({
+        "filters": [{
+            "criteria": [{"filterType": MARKETPLACE_SEARCH_TEXT_FILTER, "value": query}],
+            "pageNumber": 1,
+            "pageSize": page_size,
+            "sortBy": MARKETPLACE_SORT_BY_INSTALLS,
+        }],
+        "flags": 914,
+    }).encode("utf-8")
+    data = _http_post_json(MARKETPLACE_EXTENSIONQUERY_URL, body, timeout=15)
+    try:
+        raw_results = data.get("results", [{}])[0].get("extensions", [])
+    except (AttributeError, IndexError):
+        return []
+    results: list[dict[str, Any]] = []
+    for raw in raw_results:
+        if not isinstance(raw, dict):
+            continue
+        row = _normalize_marketplace_search_row(raw)
+        if row:
+            results.append(row)
+    return results
+
+
+def _normalize_marketplace_search_row(raw: dict[str, Any]) -> dict[str, Any] | None:
+    publisher = raw.get("publisher") if isinstance(raw.get("publisher"), dict) else {}
+    publisher_name = publisher.get("publisherName") or ""
+    extension_name = raw.get("extensionName") or ""
+    if not publisher_name or not extension_name:
+        return None
+    versions = raw.get("versions") if isinstance(raw.get("versions"), list) else []
+    latest_version = versions[0] if versions and isinstance(versions[0], dict) else {}
+    stats = _marketplace_stats(raw.get("statistics"))
+    files = latest_version.get("files") if isinstance(latest_version.get("files"), list) else []
+    icon_url = ""
+    for file_entry in files:
+        if isinstance(file_entry, dict) and file_entry.get("assetType") in (ICON_SMALL_ASSET_TYPE, ICON_DEFAULT_ASSET_TYPE):
+            icon_url = str(file_entry.get("source") or "")
+            if file_entry.get("assetType") == ICON_SMALL_ASSET_TYPE:
+                break
+    return {
+        "extension_id": f"{publisher_name}.{extension_name}",
+        "display_name": raw.get("displayName") or extension_name,
+        "publisher": publisher_name,
+        "publisher_display_name": publisher.get("displayName") or publisher_name,
+        "publisher_verified": bool(publisher.get("isDomainVerified") or "verified" in str(publisher.get("flags") or "")),
+        "short_description": raw.get("shortDescription") or "",
+        "version": latest_version.get("version") or "",
+        "last_updated": latest_version.get("lastUpdated") or raw.get("lastUpdated") or "",
+        "install_count": int(stats.get("install") or 0),
+        "rating_average": round(float(stats.get("averagerating") or 0), 2),
+        "rating_count": int(stats.get("ratingcount") or 0),
+        "icon_url": icon_url,
+    }
+
+
 def _degzip_if_needed(path: Path) -> None:
     """The vspackage endpoint sometimes serves the VSIX gzip-compressed
     (Content-Encoding: gzip) without a matching urllib auto-decode, so the
