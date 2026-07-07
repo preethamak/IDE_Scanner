@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 Severity = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 Verdict = Literal["clean", "review", "suspicious", "malicious"]
+VerdictState = Literal["safe", "safe_with_notes", "needs_review", "suspicious", "confirmed_malicious"]
 Status = Literal["success", "warning", "failure", "skipped"]
 
 
@@ -105,6 +106,7 @@ class ExtensionSummary:
     malware_score: int
     context_score: int
     grade: str
+    verdict_state: VerdictState
     verdict_label: str
     top_findings: list[str]
     finding_count: int
@@ -135,6 +137,7 @@ class ExtensionDetail:
     malware_score: int
     context_score: int
     grade: str
+    verdict_state: VerdictState
     verdict_label: str
     score_details: dict[str, Any]
     score_explanation: list[str]

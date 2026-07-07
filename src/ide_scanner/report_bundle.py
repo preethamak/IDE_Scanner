@@ -93,6 +93,7 @@ def iter_report_events(report: dict[str, Any], *, profile: str = "smart", source
             "malware_score": row["malware_score"],
             "context_score": row["context_score"],
             "verdict": row["verdict"],
+            "verdict_state": row["verdict_state"],
             "verdict_label": row["verdict_label"],
             "severity": row["severity"],
             "grade": row["grade"],
@@ -183,6 +184,7 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         malware_score=extension.malware_score,
         context_score=_context_score(extension),
         grade=grade_extension(extension.verdict, extension.risk_score, extension.malware_score, extension.findings),
+        verdict_state=_verdict_state(extension),
         verdict_label=_verdict_label(extension),
         top_findings=[finding.rule_id for finding in _rank_findings(extension.findings)[:5]],
         finding_count=len(extension.findings),
@@ -225,6 +227,7 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         malware_score=extension.malware_score,
         context_score=_context_score(extension),
         grade=grade_extension(extension.verdict, extension.risk_score, extension.malware_score, extension.findings),
+        verdict_state=_verdict_state(extension),
         verdict_label=_verdict_label(extension),
         score_details=extension.score_details,
         score_explanation=_score_explanation(extension),
@@ -258,13 +261,25 @@ def grade_extension(verdict: str, risk_score: int, malware_score: int, findings:
 
 
 def _verdict_label(extension: ExtensionReport) -> str:
-    if extension.verdict == "clean" and _context_score(extension) > 0:
-        return "Clean with notes"
-    if extension.verdict == "review":
-        return "Needs review"
+    return {
+        "safe": "Safe",
+        "safe_with_notes": "Safe with notes",
+        "needs_review": "Needs review",
+        "suspicious": "Suspicious",
+        "confirmed_malicious": "Confirmed malicious",
+    }[_verdict_state(extension)]
+
+
+def _verdict_state(extension: ExtensionReport) -> str:
     if extension.verdict == "malicious":
-        return "Confirmed malicious"
-    return extension.verdict.capitalize()
+        return "confirmed_malicious"
+    if extension.verdict == "suspicious":
+        return "suspicious"
+    if extension.verdict == "review":
+        return "needs_review"
+    if _context_score(extension) > 0:
+        return "safe_with_notes"
+    return "safe"
 
 
 def _context_score(extension: ExtensionReport) -> int:

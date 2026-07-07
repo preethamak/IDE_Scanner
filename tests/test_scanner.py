@@ -149,7 +149,8 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["verdict"], "clean")
         self.assertEqual(row["risk_score"], 0)
         self.assertGreater(row["context_score"], 0)
-        self.assertEqual(row["verdict_label"], "Clean with notes")
+        self.assertEqual(row["verdict_state"], "safe_with_notes")
+        self.assertEqual(row["verdict_label"], "Safe with notes")
         self.assertTrue(all(finding["actionability"] == "contextual" for finding in detail["findings"]))
 
     def test_configured_cli_execution_is_contextual_not_review(self) -> None:
@@ -179,7 +180,8 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process-execution", rule_ids)
         self.assertIn("safe-configured-cli-execution", rule_ids)
         row = bundle["leaderboard"]["extensions"][0]
-        self.assertEqual(row["verdict_label"], "Clean with notes")
+        self.assertEqual(row["verdict_state"], "safe_with_notes")
+        self.assertEqual(row["verdict_label"], "Safe with notes")
         self.assertGreater(row["context_score"], 0)
 
     def test_compiled_out_directory_is_scanned(self) -> None:
