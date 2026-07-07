@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import unittest
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from ide_scanner.discovery import discover_from_path
 from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
+from ide_scanner.report_bundle import build_report_bundle, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
 from ide_scanner.scanner import scan_extension, scan_targets
 
@@ -104,6 +106,55 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(agent["malware_score"], 0)
         self.assertGreater(agent["risk_score"], 0)
         self.assertIn("agentic-tooling", {finding["rule_id"] for finding in agent["findings"]})
+
+    def test_report_bundle_splits_summary_leaderboard_and_details(self) -> None:
+        report = scan_targets(include_fixtures=True)
+        bundle = build_report_bundle(report, profile="smart", source="fixtures")
+
+        self.assertEqual(bundle["metadata"]["schema_version"], "2.0")
+        self.assertEqual(bundle["metadata"]["profile"], "smart")
+        self.assertEqual(bundle["metadata"]["source"], "fixtures")
+        self.assertEqual(bundle["summary"]["summary"]["total_extensions"], 8)
+        self.assertEqual(bundle["summary"]["summary"]["suspicious"], 2)
+        self.assertIn("rules", bundle["rules"])
+
+        rows = bundle["leaderboard"]["extensions"]
+        self.assertEqual(len(rows), 8)
+        self.assertTrue(all("detail_ref" in row for row in rows))
+        suspicious = next(row for row in rows if row["extension_id"] == "unknown.shadow-helper")
+        self.assertEqual(suspicious["grade"], "D")
+        self.assertIn("credential-exfiltration-chain", suspicious["top_findings"])
+
+        detail = bundle["extensions"][suspicious["detail_ref"]]
+        self.assertEqual(detail["extension_id"], "unknown.shadow-helper")
+        self.assertIn("score_explanation", detail)
+        self.assertIn("recommendations", detail)
+        self.assertTrue(detail["evidence"])
+        self.assertIn("evidence_refs", detail["findings"][0])
+        self.assertNotIn("evidence", detail["findings"][0])
+
+    def test_write_report_bundle_creates_dashboard_ready_zip(self) -> None:
+        with TemporaryDirectory() as tmp:
+            report = scan_targets(paths=[Path("fixtures") / "credential-exfil"])
+            output = Path(tmp) / "report.zip"
+            receipt = write_report_bundle(report, output, profile="standard", source="folder")
+
+            self.assertEqual(receipt["output"], str(output))
+            with zipfile.ZipFile(output) as archive:
+                names = set(archive.namelist())
+                self.assertIn("metadata.json", names)
+                self.assertIn("summary.json", names)
+                self.assertIn("leaderboard.json", names)
+                self.assertIn("posture.json", names)
+                self.assertIn("rules.json", names)
+                detail_names = [name for name in names if name.startswith("extensions/")]
+                self.assertEqual(len(detail_names), 1)
+                metadata = json.loads(archive.read("metadata.json"))
+                leaderboard = json.loads(archive.read("leaderboard.json"))
+
+        self.assertEqual(metadata["profile"], "standard")
+        self.assertEqual(metadata["source"], "folder")
+        self.assertEqual(leaderboard["extensions"][0]["detail_ref"], detail_names[0])
 
     def test_path_discovery_finds_fixture_extensions(self) -> None:
         targets = discover_from_path(Path("fixtures"))

@@ -8,6 +8,7 @@ from typing import Any
 
 from .agent import build_agent_report, upload_agent_report
 from .discovery import discover_from_path, discover_local_installations
+from .report_bundle import write_report_bundle
 from .sandbox_runner import run_sandbox
 from .scanner import scan_targets
 
@@ -18,15 +19,19 @@ def main(argv: list[str] | None = None) -> int:
 
     scan = subparsers.add_parser("scan", help="Run a security scan.")
     scan.add_argument("--fixtures", action="store_true", help="Scan bundled sample extensions.")
-    scan.add_argument("--all", action="store_true", help="Scan local VS Code-compatible extension installs.")
-    scan.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
-    scan.add_argument("--extension-id", action="append", default=[], help="Extension identifier to check against online registries.")
+    scan.add_argument("--all", "--installed", dest="installed", action="store_true", help="Scan local VS Code-compatible extension installs.")
+    scan.add_argument("--path", "--folder", "--vsix", dest="path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
+    scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
+    scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Scan profile. smart is the default.")
+    scan.add_argument("--format", choices=["json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to report.zip when --output ends in .zip, otherwise json.")
     scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
     scan.add_argument("--threat-feed", help="JSON feed of known malicious or suspicious extension ids.")
     scan.add_argument("--sandbox-observations", help="JSON observations from an external sandbox run. The scanner imports this evidence but does not execute extensions.")
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
-    scan.add_argument("--out", help="Write JSON report to this file.")
+    scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
+    scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
+    scan.add_argument("--jobs", type=int, default=1, help="Worker count for future parallel scans. Currently accepted for CLI compatibility.")
 
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
@@ -57,14 +62,30 @@ def main(argv: list[str] | None = None) -> int:
             paths=[Path(item) for item in args.path],
             extension_ids=args.extension_id,
             include_fixtures=args.fixtures,
-            all_local=args.all,
-            online=args.online,
+            all_local=args.installed,
+            online=args.online or args.profile in {"deep"},
             known_bad_hashes_file=args.known_bad_hashes,
             threat_feed_file=args.threat_feed,
             sandbox_observations_file=args.sandbox_observations,
             previous_report_file=args.previous_report,
         )
-        _emit(report, args.out)
+        output_format = _scan_output_format(args.output, args.format)
+        if output_format == "report.zip":
+            if not args.output:
+                parser.error("scan --format report.zip requires --output")
+            source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
+            receipt = write_report_bundle(
+                report,
+                args.output,
+                profile=args.profile,
+                source=source,
+                include_raw_evidence=args.include_raw_evidence,
+            )
+            _emit(receipt, None)
+            return 0
+        if output_format in {"sarif", "sqlite"}:
+            parser.error(f"scan --format {output_format} is reserved but not implemented yet")
+        _emit(report, args.output)
         return 0
     if args.command == "inventory":
         targets: list[dict[str, str]] = []
@@ -110,6 +131,30 @@ def _emit(data: dict[str, Any], out: str | None) -> None:
         Path(out).write_text(payload + "\n", encoding="utf-8")
         return
     print(payload)
+
+
+def _scan_output_format(output: str | None, explicit_format: str | None) -> str:
+    if explicit_format:
+        return explicit_format
+    if output and output.lower().endswith(".zip"):
+        return "report.zip"
+    return "json"
+
+
+def _scan_source(installed: bool, paths: list[str], extension_ids: list[str], fixtures: bool) -> str:
+    sources: list[str] = []
+    if installed:
+        sources.append("installed")
+    if fixtures:
+        sources.append("fixtures")
+    if paths:
+        if all(Path(item).suffix.lower() == ".vsix" for item in paths):
+            sources.append("vsix")
+        else:
+            sources.append("folder")
+    if extension_ids:
+        sources.append("marketplace")
+    return "+".join(sources) if sources else "unknown"
 
 
 def _run_benchmark() -> dict[str, Any]:
