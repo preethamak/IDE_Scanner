@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .ast_analyzer import JS_AST_EXTS, analyze_js_source
 from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
@@ -87,6 +88,9 @@ CAPABILITY_RULES = {
     "agent-prompt-injection-sink",
     "agent-shell-tool",
     "agentic-tooling",
+    "ast-dynamic-call-target",
+    "ast-bracket-notation-sensitive-access",
+    "ast-constructed-dynamic-argument",
     "broad-activation",
     "credential-command-execution",
     "credential-command-registration",
@@ -234,6 +238,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         scanned_files += 1
         if suffix in EXEC_TEXT_EXTS:
             _add_code_findings(extension_id, version, rel, text, findings, capabilities)
+        if suffix in JS_AST_EXTS and not _is_generated_code_blob(rel, text):
+            _add_ast_findings(extension_id, version, rel, text, findings)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
@@ -2071,6 +2077,40 @@ def _read_text(path: Path) -> str | None:
         return data.decode("utf-8", errors="replace")
     except OSError:
         return None
+
+
+def _add_ast_findings(
+    extension_id: str,
+    version: str,
+    rel: str,
+    text: str,
+    findings: list[Finding],
+) -> None:
+    for item in analyze_js_source(rel, text):
+        rule_id = str(item.get("rule") or "")
+        if not rule_id:
+            continue
+        severity = str(item.get("severity") or "MEDIUM")
+        if severity not in _SEVERITY_TO_CONFIDENCE:
+            severity = "MEDIUM"
+        line = item.get("line")
+        detail = str(item.get("detail") or "Dynamic construction detected by AST analysis.")
+        summary = f"{detail} (line {line})" if isinstance(line, int) else detail
+        findings.append(_finding(
+            extension_id,
+            version,
+            rule_id,
+            "code",
+            severity,
+            _SEVERITY_TO_CONFIDENCE[severity],
+            summary,
+            [rel],
+            "Confirm whether the dynamically constructed target/argument is attacker-influenceable; this evades plain-text regex detection by design.",
+            evidence={"line": line} if isinstance(line, int) else None,
+        ))
+
+
+_SEVERITY_TO_CONFIDENCE = {"HIGH": 0.8, "MEDIUM": 0.65, "LOW": 0.5}
 
 
 def _finding(
