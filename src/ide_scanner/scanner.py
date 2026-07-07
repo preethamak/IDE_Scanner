@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,7 +15,13 @@ from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
 from .posture import scan_posture, summarize_posture
-from .registry import MarketplaceDownloadError, download_marketplace_vsix, enrich_registry, parse_marketplace_reference
+from .registry import (
+    MarketplaceDownloadError,
+    _degzip_if_needed,
+    download_marketplace_vsix,
+    enrich_registry,
+    parse_marketplace_reference,
+)
 from .rules import (
     CODE_RULES,
     DESTRUCTIVE_RE,
@@ -259,20 +266,29 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
 
 
 def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
-    vsix_path = path.expanduser().resolve()
-    vsix_hash, vsix_size = _hash_file(vsix_path)
-    with tempfile.TemporaryDirectory(prefix="ide-scanner-vsix-") as tmp:
-        tmp_root = Path(tmp)
-        _safe_extract_vsix(vsix_path, tmp_root)
-        extension_root = _find_extracted_extension_root(tmp_root)
-        report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
-        report.install_path = str(vsix_path)
-        report.source = "vsix"
-        report.artifact_hash = vsix_hash[:24]
-        report.artifact_inventory["vsix_hash"] = vsix_hash
-        report.artifact_inventory["vsix_size_bytes"] = vsix_size
-        report.artifact_inventory["source_artifact"] = vsix_path.name
-        report.artifact_inventory["vsix_signature"] = _vsix_signature_status(tmp_root)
+    original_path = path.expanduser().resolve()
+    with tempfile.TemporaryDirectory(prefix="ide-scanner-vsix-src-") as src_tmp:
+        # Some upload/download sources (browser fetches, the marketplace
+        # vspackage endpoint) hand back a gzip-wrapped VSIX instead of a raw
+        # zip. Unwrap a *copy* in scratch space so the caller's original
+        # file is never mutated in place, and never mixed into the
+        # extraction directory the scanner later walks.
+        vsix_path = Path(src_tmp) / f"source{original_path.suffix or '.vsix'}"
+        shutil.copyfile(original_path, vsix_path)
+        _degzip_if_needed(vsix_path)
+        vsix_hash, vsix_size = _hash_file(vsix_path)
+        with tempfile.TemporaryDirectory(prefix="ide-scanner-vsix-") as tmp:
+            tmp_root = Path(tmp)
+            _safe_extract_vsix(vsix_path, tmp_root)
+            extension_root = _find_extracted_extension_root(tmp_root)
+            report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
+            report.install_path = str(original_path)
+            report.source = "vsix"
+            report.artifact_hash = vsix_hash[:24]
+            report.artifact_inventory["vsix_hash"] = vsix_hash
+            report.artifact_inventory["vsix_size_bytes"] = vsix_size
+            report.artifact_inventory["source_artifact"] = original_path.name
+            report.artifact_inventory["vsix_signature"] = _vsix_signature_status(tmp_root)
         _apply_vsix_known_bad_match(report, known_bad_hashes or {})
         return report
 
