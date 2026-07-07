@@ -30,8 +30,19 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(paths, list) or not all(isinstance(item, str) for item in paths):
             _emit_error("extension_paths must be a list of strings")
             return 2
+        marketplace_ids = payload.get("marketplace_ids") or []
+        if not isinstance(marketplace_ids, list) or not all(isinstance(item, str) for item in marketplace_ids):
+            _emit_error("marketplace_ids must be a list of strings")
+            return 2
+        # Sandbox dynamic execution only ever runs over locally-supplied
+        # `paths` (the local collector-bridge/agent flow, on the operator's
+        # own machine). marketplace_ids are attacker-reachable, hosted,
+        # server-side downloads and must never be routed through
+        # run_sandbox(allow_execute=True) -- scan_marketplace_extension()
+        # only performs the static scan_vsix() path and has no sandbox
+        # call at all, so this holds structurally, not just by convention.
         sandbox_observations_file: str | None = None
-        if payload.get("sandbox"):
+        if payload.get("sandbox") and paths:
             observations = _run_sandboxes(paths, bool(payload.get("allow_execute", False)), int(payload.get("timeout", 15) or 15))
             sandbox_file = tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False)
             with sandbox_file:
@@ -39,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_observations_file = sandbox_file.name
         request = ScanRequest(
             paths=[Path(item) for item in paths],
+            marketplace_scan_ids=marketplace_ids,
             online=bool(payload.get("online", False)),
             sandbox_observations_file=sandbox_observations_file or payload.get("sandbox_observations_file"),
             previous_report_file=_write_previous_report(payload.get("previous_report")),
