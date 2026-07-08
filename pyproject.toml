@@ -10,5 +10,8 @@ license = "MIT"
 ide-scanner = "ide_scanner.cli:main"
 scan = "extension_scanner_cli.main:main"
 
+[tool.setuptools.package-data]
+ide_scanner = ["js_ast/*.js", "js_ast/*LICENSE*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
