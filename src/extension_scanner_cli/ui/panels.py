@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from .tables import visible_len
+import textwrap
+
+from .tables import ANSI_RE, terminal_width, truncate, visible_len
 from .theme import color
 
 
@@ -16,13 +18,28 @@ LOGO = r"""
 
 
 def banner(subtitle: str = "IDE extension security toolkit") -> str:
+    if terminal_width() < 82:
+        return color("Extension Scanner", "cyan") + "\n" + color(f"  v0.1.0  |  {subtitle}", "violet")
     return color(LOGO.rstrip(), "cyan") + "\n" + color(f"  v0.1.0  |  {subtitle}", "violet")
 
 
+def _wrap_panel_line(line: str, width: int) -> list[str]:
+    if visible_len(line) <= width:
+        return [line]
+    if ANSI_RE.search(line):
+        return [truncate(line, width)]
+    return textwrap.wrap(line, width=width, break_long_words=True, break_on_hyphens=False) or [""]
+
+
 def panel(title: str, body: str = "", *, subtitle: str = "") -> str:
-    content = [line.rstrip() for line in body.splitlines()] if body else []
+    raw_content = [line.rstrip() for line in body.splitlines()] if body else []
     header = f" {title} " + (f"- {subtitle} " if subtitle else "")
-    width = max(58, visible_len(header), *(visible_len(line) for line in content), 0)
+    max_width = max(36, terminal_width() - 4)
+    content: list[str] = []
+    for line in raw_content:
+        content.extend(_wrap_panel_line(line, max_width))
+    header = truncate(header, max_width)
+    width = min(max_width, max(36, visible_len(header), *(visible_len(line) for line in content), 0))
     top = "╭" + "─" * (width + 2) + "╮"
     title_line = "│ " + color(header, "cyan") + " " * max(width - visible_len(header), 0) + " │"
     lines = [top, title_line, "├" + "─" * (width + 2) + "┤"]
@@ -33,4 +50,7 @@ def panel(title: str, body: str = "", *, subtitle: str = "") -> str:
 
 
 def section(title: str) -> str:
-    return "\n" + color("─" * 18 + f" {title} " + "─" * 18, "cyan")
+    width = min(terminal_width(), 96)
+    label = f" {truncate(title, max(8, width - 10))} "
+    side = max(0, (width - visible_len(label)) // 2)
+    return "\n" + color("─" * side + label + "─" * side, "cyan")

@@ -20,11 +20,11 @@ STYLES = {
 }
 
 SEVERITY_ICON = {
-    "CRITICAL": "🔴",
-    "HIGH": "🟠",
-    "MEDIUM": "🟡",
-    "LOW": "🔵",
-    "INFO": "⚪",
+    "CRITICAL": "🔴 CRITICAL",
+    "HIGH": "🟠 HIGH",
+    "MEDIUM": "🟡 MEDIUM",
+    "LOW": "LOW",
+    "INFO": "INFO",
 }
 
 
@@ -74,7 +74,7 @@ def severity_style(severity: str) -> str:
 
 def severity_label(severity: str) -> str:
     value = severity.upper()
-    return f"{SEVERITY_ICON.get(value, '•')} {value}"
+    return SEVERITY_ICON.get(value, value or "INFO")
 
 
 def rule() -> str:

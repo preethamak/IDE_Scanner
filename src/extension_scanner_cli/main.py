@@ -28,7 +28,7 @@ from .ui.panels import banner, panel, section
 from .ui.prompts import confirm, prompt_choice, prompt_text
 from .ui.renderers import render_rules, render_scan_report
 from .ui.tables import key_values, table
-from .ui.theme import color, severity_style, supports_color
+from .ui.theme import color, severity_label, severity_style, supports_color
 
 
 APP_NAME = "Extension Scanner"
@@ -98,17 +98,30 @@ def interactive_home() -> int:
 
 def cmd_help(args: list[str]) -> int:
     topic = args[0] if args else "main"
+    workflows = [
+        ("Explore", "search, local, file"),
+        ("Review reports", "report view, report validate, report export"),
+        ("Reference", "rules, metrics, doctor"),
+        ("Verification", "test"),
+    ]
+    examples = [
+        ("1", "scan search prettier"),
+        ("2", "scan local --filter python"),
+        ("3", "scan file extension.vsix"),
+        ("4", "scan report view report.zip"),
+        ("5", "scan rules search credential"),
+        ("6", "scan doctor"),
+    ]
     topics = {
         "main": [
-            ("scan", "Open interactive terminal UI"),
-            ("scan search [query]", "Search marketplace, select an extension, scan it"),
-            ("scan local", "List installed extensions, select one, scan it"),
-            ("scan file [path]", "Scan VSIX, ZIP, or extension folder"),
-            ("scan report", "View, validate, or export report files"),
-            ("scan rules", "List or inspect scanner rules"),
-            ("scan metrics", "Explain scores, evidence classes, and verdicts"),
-            ("scan doctor", "Check local scanner CLI environment"),
-            ("scan test", "Run scanner verification tests"),
+            ("search", "Search the marketplace and scan a selected extension"),
+            ("local", "List installed IDE extensions and scan one"),
+            ("file", "Scan a VSIX, ZIP, or unpacked extension folder"),
+            ("report", "View, validate, or export saved reports"),
+            ("rules", "List rules or inspect one rule in detail"),
+            ("metrics", "Explain scores, evidence classes, and verdicts"),
+            ("doctor", "Check the local scanner environment"),
+            ("test", "Run scanner verification tests"),
         ],
         "search": [
             ("scan search prettier", "Search marketplace for matching extensions"),
@@ -140,8 +153,14 @@ def cmd_help(args: list[str]) -> int:
     }
     rows = topics.get(topic, topics["main"])
     print(banner("Command Map"))
-    print(panel(APP_NAME, "Direct scanner CLI. No web app, no HTTP bridge, no score recomputation.", subtitle="help"))
-    print(table(["Command", "Use"], rows, max_widths=[48, 74]))
+    print(panel(APP_NAME, "Local terminal workflow for searching, scanning, reviewing, and exporting IDE extension security reports.", subtitle="help"))
+    if topic == "main":
+        print(section("Grouped Workflows"))
+        print(table(["Workflow", "Commands"], workflows, max_widths=[18, 58]))
+        print(section("Examples"))
+        print(table(["#", "Command"], examples, max_widths=[4, 72]))
+        print(section("Command Catalog"))
+    print(table(["Command", "Use"], rows, max_widths=[24, 74]))
     return 0
 
 
@@ -257,7 +276,7 @@ def cmd_rules(args: list[str]) -> int:
         print(panel(str(match.get("rule_id")), key_values([
             ("Title", match.get("title", "")),
             ("Category", match.get("category", "")),
-            ("Severity", color(match.get("default_severity", ""), severity_style(str(match.get("default_severity") or "")))),
+            ("Severity", color(severity_label(str(match.get("default_severity") or "")), severity_style(str(match.get("default_severity") or "")))),
             ("Class", match.get("evidence_class", "")),
             ("Description", match.get("description", "")),
             ("Recommendation", match.get("recommendation", "")),
@@ -300,7 +319,7 @@ def cmd_metrics(args: list[str]) -> int:
     else:
         rows = blocks.get(topic, blocks["scores"])
     print(banner("Metrics Reference"))
-    print(panel("Metrics", "Scanner-owned scoring model. CLI formats these values only.", subtitle=topic))
+    print(panel("Metrics", "Scores are calculated by the scanner and shown here for review.", subtitle=topic))
     print(table(["Metric", "Meaning"], rows, max_widths=[24, 96]))
     return 0
 

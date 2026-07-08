@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import textwrap
 from typing import Any
 
 from .panels import banner, panel, section
-from .tables import count_bar, key_values, score_bar, table
+from .tables import count_bar, key_values, score_bar, table, terminal_width, truncate, visible_len
 from .theme import color, severity_label, severity_style, verdict_style
 
 
@@ -15,11 +16,11 @@ def render_scan_report(report: dict[str, Any]) -> str:
         panel(
             "Scan Metadata",
             key_values([
-                ("📄 Scan ID", report.get("scan_id", "unknown")),
-                ("📦 Extensions", summary.get("total_extensions", len(extensions))),
-                ("🔥 Max Risk", summary.get("max_risk_score", 0)),
-                ("🧬 Max Malware", summary.get("max_malware_score", 0)),
-                ("🕒 Created", report.get("created_at", "n/a") or "n/a"),
+                ("Scan ID", report.get("scan_id", "unknown")),
+                ("Extensions", summary.get("total_extensions", len(extensions))),
+                ("Max risk", summary.get("max_risk_score", 0)),
+                ("Max malware", summary.get("max_malware_score", 0)),
+                ("Created", report.get("created_at", "n/a") or "n/a"),
             ]),
             subtitle="complete",
         )
@@ -31,7 +32,7 @@ def render_scan_report(report: dict[str, Any]) -> str:
     for extension in extensions:
         lines.append(render_extension_detail(extension))
     lines.append(render_rules_run(extensions))
-    lines.append(color("─ Extension Scanner v0.1.0 • scanner-owned scores • CLI-rendered report ─", "violet"))
+    lines.append(color("─ Extension Scanner v0.1.0 | local scan report ─", "violet"))
     return "\n".join(lines)
 
 
@@ -63,7 +64,8 @@ def render_severity_breakdown(extensions: list[dict[str, Any]]) -> str:
     maximum = max(counts.values(), default=1)
     rows = []
     for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
-        rows.append(f"  {severity_label(severity):<14} {counts.get(severity, 0):>3}   {count_bar(counts.get(severity, 0), maximum)}")
+        label = _severity_text(severity)
+        rows.append(f"  {label}{' ' * max(16 - visible_len(label), 1)}{counts.get(severity, 0):>3}   {count_bar(counts.get(severity, 0), maximum)}")
     return panel("Severity Breakdown", "\n".join(rows))
 
 
@@ -75,12 +77,12 @@ def render_extension_summary_table(extensions: list[dict[str, Any]]) -> str:
             index,
             ext.get("extension_id", ""),
             color(state, verdict_style(str(ext.get("verdict") or ""), str(ext.get("verdict_state") or ""))),
-            ext.get("severity", ""),
+            _severity_text(str(ext.get("severity") or "")),
             ext.get("risk_score", 0),
             ext.get("malware_score", 0),
             ext.get("finding_count", len(ext.get("findings") or [])),
         ])
-    return section("📦 Extensions") + "\n" + table(
+    return section("Extensions") + "\n" + table(
         ["#", "Extension", "Verdict", "Severity", "Risk", "Malware", "Findings"],
         rows,
         max_widths=[4, 36, 18, 10, 7, 8, 9],
@@ -90,14 +92,14 @@ def render_extension_summary_table(extensions: list[dict[str, Any]]) -> str:
 def render_extension_detail(extension: dict[str, Any]) -> str:
     label = str(extension.get("verdict_label") or extension.get("verdict") or "unknown")
     verdict = color(label.upper(), verdict_style(str(extension.get("verdict") or ""), str(extension.get("verdict_state") or "")))
-    severity = color(severity_label(str(extension.get("severity") or "UNKNOWN")), severity_style(str(extension.get("severity") or "")))
+    severity = _severity_text(str(extension.get("severity") or "UNKNOWN"))
     header = key_values([
-        ("🧩 Extension", extension.get("extension_id", "unknown")),
-        ("🏷️ Version", extension.get("version", "unknown")),
-        ("👤 Publisher", extension.get("publisher", "unknown")),
-        ("🛡️ Verdict", verdict),
-        ("🎓 Grade", extension.get("grade", "")),
-        ("🚦 Severity", severity),
+        ("Extension", extension.get("extension_id", "unknown")),
+        ("Version", extension.get("version", "unknown")),
+        ("Publisher", extension.get("publisher", "unknown")),
+        ("Verdict", verdict),
+        ("Grade", extension.get("grade", "")),
+        ("Severity", severity),
     ])
     scores = key_values([
         ("Risk", score_bar(int(extension.get("risk_score") or 0), width=30)),
@@ -107,7 +109,7 @@ def render_extension_detail(extension: dict[str, Any]) -> str:
     findings = list(extension.get("findings") or [])
     finding_rows = []
     for finding in findings[:12]:
-        severity_text = color(severity_label(str(finding.get("severity") or "")), severity_style(str(finding.get("severity") or "")))
+        severity_text = _severity_text(str(finding.get("severity") or ""))
         finding_rows.append([
             severity_text,
             finding.get("rule_id", ""),
@@ -117,8 +119,8 @@ def render_extension_detail(extension: dict[str, Any]) -> str:
         ])
     body = header + "\n\nScores\n" + scores
     if extension.get("verdict_reason"):
-        body += "\n\nReason\n" + str(extension.get("verdict_reason"))
-    lines = [section(f"🔍 {extension.get('name') or extension.get('extension_id') or 'Extension'}"), body]
+        body += "\n\nReason\n" + _wrap_text(str(extension.get("verdict_reason") or ""))
+    lines = [section(str(extension.get("name") or extension.get("extension_id") or "Extension")), body]
     if finding_rows:
         lines.append("\nFindings\n" + table(
             ["Sev", "Rule", "Class", "Action", "Summary"],
@@ -132,7 +134,7 @@ def render_extension_detail(extension: dict[str, Any]) -> str:
 
 
 def render_detailed_findings(findings: list[dict[str, Any]]) -> str:
-    lines = [section("📋 Detailed Findings")]
+    lines = [section("Detailed Findings")]
     for index, finding in enumerate(findings[:8], start=1):
         severity = str(finding.get("severity") or "INFO").upper()
         title = str(finding.get("rule_id") or "finding")
@@ -142,9 +144,9 @@ def render_detailed_findings(findings: list[dict[str, Any]]) -> str:
             ("Detector", finding.get("rule_id", "")),
             ("Category", finding.get("category", "")),
             ("Evidence", finding.get("evidence_class") or _class_from_evidence(finding) or "n/a"),
-            ("💡 Fix", finding.get("recommendation") or "Review the finding and confirm expected extension behavior."),
+            ("Fix", finding.get("recommendation") or "Review the finding and confirm expected extension behavior."),
         ], key_width=14)
-        lines.append(panel(f"#{index} {severity_label(severity)} {title}", body, subtitle=f"{severity} • confidence {finding.get('confidence', 'n/a')}"))
+        lines.append(panel(f"#{index} {severity_label(severity)} {title}", body, subtitle=f"{severity} | confidence {finding.get('confidence', 'n/a')}"))
     return "\n".join(lines)
 
 
@@ -159,10 +161,10 @@ def render_rules_run(extensions: list[dict[str, Any]]) -> str:
                 rule_ids.append(rule_id)
     if not rule_ids:
         return ""
-    lines = ["🔧 Rules Triggered"]
+    lines = [section("Rules Triggered")]
     for index, rule_id in enumerate(rule_ids[:18]):
         branch = "└──" if index == len(rule_ids[:18]) - 1 else "├──"
-        lines.append(f"{branch} • {rule_id}")
+        lines.append(truncate(f"{branch} {rule_id}", terminal_width()))
     return "\n".join(lines)
 
 
@@ -172,11 +174,23 @@ def render_rules(rules: list[dict[str, Any]], *, limit: int = 40) -> str:
         rows.append([
             rule.get("rule_id", ""),
             rule.get("category", ""),
-            color(severity_label(str(rule.get("default_severity") or "")), severity_style(str(rule.get("default_severity") or ""))),
+            _severity_text(str(rule.get("default_severity") or "")),
             rule.get("evidence_class", ""),
             rule.get("title", ""),
         ])
     return table(["Rule", "Category", "Severity", "Class", "Title"], rows, max_widths=[34, 22, 10, 14, 42])
+
+
+def _severity_text(severity: str) -> str:
+    return color(severity_label(severity), severity_style(severity))
+
+
+def _wrap_text(value: str) -> str:
+    width = max(24, terminal_width())
+    lines: list[str] = []
+    for line in value.splitlines() or [""]:
+        lines.extend(textwrap.wrap(line, width=width, break_long_words=True, break_on_hyphens=False) or [""])
+    return "\n".join(lines)
 
 
 def _rank_extensions(extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -226,11 +240,11 @@ def _overall_verdict(extensions: list[dict[str, Any]]) -> str:
 
 def _score_phrase(score: int, verdict: str) -> str:
     if verdict == "malicious":
-        return "Confirmed malicious — remove immediately"
+        return "Confirmed malicious - remove immediately"
     if verdict == "suspicious":
-        return "Suspicious — investigate before use"
+        return "Suspicious - investigate before use"
     if verdict == "review":
-        return "Needs review — non-confirmed risk evidence"
+        return "Needs review - non-confirmed risk evidence"
     if score == 0:
-        return "Safe with notes — no actionable risk"
-    return "Low risk — contextual findings present"
+        return "Safe with notes - no actionable risk"
+    return "Low risk - contextual findings present"
