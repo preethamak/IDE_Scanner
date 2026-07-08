@@ -24,7 +24,7 @@ from .scanner_adapter import (
     search_extensions,
     write_bundle,
 )
-from .ui.panels import panel, section
+from .ui.panels import banner, panel, section
 from .ui.prompts import confirm, prompt_choice, prompt_text
 from .ui.renderers import render_rules, render_scan_report
 from .ui.tables import key_values, table
@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def interactive_home() -> int:
+    print(banner("IDE extension security toolkit"))
     print(panel(APP_NAME, "Search, select, scan, and export IDE extension security reports.", subtitle="terminal UI"))
     choices = [
         "Search marketplace extension",
@@ -138,6 +139,7 @@ def cmd_help(args: list[str]) -> int:
         ],
     }
     rows = topics.get(topic, topics["main"])
+    print(banner("Command Map"))
     print(panel(APP_NAME, "Direct scanner CLI. No web app, no HTTP bridge, no score recomputation.", subtitle="help"))
     print(table(["Command", "Use"], rows, max_widths=[48, 74]))
     return 0
@@ -163,6 +165,7 @@ def cmd_search(args: list[str]) -> int:
         print(color("No marketplace results found.", "yellow"))
         return 1
 
+    print(banner("Marketplace Search"))
     print(_marketplace_table(results))
     selected = prompt_choice("Select extension to scan", [str(item.get("extension_id", "")) for item in results])
     extension_id = str(results[selected].get("extension_id") or "")
@@ -183,6 +186,7 @@ def cmd_local(args: list[str]) -> int:
     if not rows:
         print(color("No installed extensions found.", "yellow"))
         return 1
+    print(banner("Installed Extensions"))
     print(_installed_table(rows))
     selected = prompt_choice("Select extension to scan", [item["extension_id"] for item in rows])
     target = rows[selected]
@@ -204,6 +208,7 @@ def cmd_file(args: list[str]) -> int:
     if not targets:
         print(color(f"No extension target found at {path}", "red"))
         return 1
+    print(banner("File Scan"))
     print(table(["Type", "Path"], [[item.get("type"), item.get("path")] for item in targets], max_widths=[10, 86]))
     report = scan_paths([item["path"] for item in targets])
     print(render_scan_report(display_report(report, source="file")))
@@ -259,6 +264,7 @@ def cmd_rules(args: list[str]) -> int:
             ("False positives", match.get("false_positive_notes", "")),
         ]), subtitle="rule"))
         return 0
+    print(banner("Rules Reference"))
     print(panel("Rules", f"Ruleset version: {get_rules().get('ruleset_version', 'unknown')}", subtitle=f"{len(rules)} rules"))
     print(render_rules(rules))
     return 0
@@ -293,6 +299,7 @@ def cmd_metrics(args: list[str]) -> int:
             rows.extend(values)
     else:
         rows = blocks.get(topic, blocks["scores"])
+    print(banner("Metrics Reference"))
     print(panel("Metrics", "Scanner-owned scoring model. CLI formats these values only.", subtitle=topic))
     print(table(["Metric", "Meaning"], rows, max_widths=[24, 96]))
     return 0
@@ -307,6 +314,7 @@ def cmd_doctor(args: list[str]) -> int:
         ("Color terminal", "OK" if supports_color() else "WARN", "enabled" if supports_color() else "disabled/non-tty"),
         ("Output directory", "OK" if Path.cwd().exists() else "FAIL", str(Path.cwd())),
     ]
+    print(banner("Environment Doctor"))
     print(panel("Doctor", "Local CLI environment checks.", subtitle=APP_NAME))
     print(table(["Check", "Status", "Detail"], [[a, _status(b), c] for a, b, c in checks], max_widths=[24, 10, 80]))
     return 0 if all(status != "FAIL" for _, status, _ in checks) else 1

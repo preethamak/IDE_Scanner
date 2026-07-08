@@ -19,6 +19,14 @@ STYLES = {
     "white": "\033[97m",
 }
 
+SEVERITY_ICON = {
+    "CRITICAL": "🔴",
+    "HIGH": "🟠",
+    "MEDIUM": "🟡",
+    "LOW": "🔵",
+    "INFO": "⚪",
+}
+
 
 def supports_color() -> bool:
     if os.environ.get("NO_COLOR"):
@@ -37,7 +45,7 @@ def color(text: object, style: str) -> str:
 
 
 def badge(text: str, style: str) -> str:
-    return color(f" {text.upper()} ", f"bold_{style}") if f"bold_{style}" in STYLES else color(f" {text.upper()} ", style)
+    return color(f" {text.upper()} ", style)
 
 
 def verdict_style(verdict: str, state: str = "") -> str:
@@ -62,6 +70,11 @@ def severity_style(severity: str) -> str:
     if value == "LOW":
         return "cyan"
     return "blue"
+
+
+def severity_label(severity: str) -> str:
+    value = severity.upper()
+    return f"{SEVERITY_ICON.get(value, '•')} {value}"
 
 
 def rule() -> str:

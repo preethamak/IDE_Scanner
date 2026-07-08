@@ -35,12 +35,13 @@ def table(headers: list[str], rows: Iterable[Iterable[object]], *, max_widths: l
             cells.append(raw + " " * max(width - visible_len(raw), 0))
         return "| " + " | ".join(cells) + " |"
 
-    border = "+-" + "-+-".join("-" * width for width in widths) + "-+"
-    sep = "+=" + "=+=".join("=" * width for width in widths) + "=+"
-    lines = [border, fmt_row(headers), sep]
+    top = "╭─" + "─┬─".join("─" * width for width in widths) + "─╮"
+    sep = "├─" + "─┼─".join("─" * width for width in widths) + "─┤"
+    bottom = "╰─" + "─┴─".join("─" * width for width in widths) + "─╯"
+    lines = [top, fmt_row(headers).replace("|", "│"), sep]
     lines.extend(fmt_row(row) for row in row_list)
-    lines.append(border)
-    return "\n".join(lines)
+    lines.append(bottom)
+    return "\n".join(line.replace("|", "│") for line in lines)
 
 
 def key_values(items: list[tuple[str, object]], *, key_width: int = 16) -> str:
@@ -53,4 +54,10 @@ def key_values(items: list[tuple[str, object]], *, key_width: int = 16) -> str:
 def score_bar(value: int | float, *, width: int = 24) -> str:
     value = max(0, min(100, int(value or 0)))
     filled = round(width * value / 100)
-    return "[" + "#" * filled + "-" * (width - filled) + f"] {value:>3}/100"
+    return "█" * filled + "░" * (width - filled) + f"  {value:>3}/100"
+
+
+def count_bar(value: int, maximum: int, *, width: int = 12) -> str:
+    maximum = max(maximum, 1)
+    filled = round(width * max(value, 0) / maximum)
+    return "█" * filled + "░" * (width - filled)
