@@ -75,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "scan":
+        if args.ui:
+            parser.error("scan --ui is not implemented yet. Use `scan --installed --output report.zip` and import the bundle in ide-scanner-web.")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             extension_ids=args.extension_id,
@@ -86,8 +88,6 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_observations_file=args.sandbox_observations,
             previous_report_file=args.previous_report,
         )
-        if args.ui:
-            parser.error("scan --ui is reserved for the local dashboard mode and is not implemented in this build")
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
         if args.stream:
@@ -281,3 +281,7 @@ def _agent_upload_receipt(server: str, result: dict[str, Any]) -> dict[str, Any]
         "max_risk_score": totals.get("max_risk_score", 0),
         "max_malware_score": totals.get("max_malware_score", 0),
     }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
