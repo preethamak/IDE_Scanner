@@ -21,6 +21,7 @@ class ScanRequest:
     threat_feed_file: Path | str | None = None
     sandbox_observations_file: Path | str | None = None
     previous_report_file: Path | str | None = None
+    include_posture: bool = True
 
 
 def build_inventory(paths: list[Path | str] | None = None, all_local: bool = False) -> dict[str, Any]:
@@ -53,6 +54,7 @@ def run_scan(request: ScanRequest) -> dict[str, Any]:
         threat_feed_file=request.threat_feed_file,
         sandbox_observations_file=request.sandbox_observations_file,
         previous_report_file=request.previous_report_file,
+        include_posture=request.include_posture,
     )
 
 

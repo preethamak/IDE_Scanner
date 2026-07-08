@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             online=bool(payload.get("online", False)),
             sandbox_observations_file=sandbox_observations_file or payload.get("sandbox_observations_file"),
             previous_report_file=_write_previous_report(payload.get("previous_report")),
+            include_posture=bool(payload.get("include_posture", True)),
         )
         report = run_scan(request)
         _emit({

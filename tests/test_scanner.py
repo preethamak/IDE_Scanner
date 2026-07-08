@@ -109,6 +109,14 @@ class ScannerTests(unittest.TestCase):
         self.assertGreater(agent["risk_score"], 0)
         self.assertIn("agentic-tooling", {finding["rule_id"] for finding in agent["findings"]})
 
+    def test_posture_can_be_disabled_for_hosted_package_scans(self) -> None:
+        report = scan_targets(include_fixtures=True, include_posture=False)
+
+        self.assertEqual(report["posture"], [])
+        self.assertEqual(report["posture_summary"]["status"], "skipped")
+        self.assertEqual(report["summary"]["posture_status"], "skipped")
+        self.assertFalse(any("IDE/client posture" in item for item in report["human_summary"]))
+
     def test_report_bundle_splits_summary_leaderboard_and_details(self) -> None:
         report = scan_targets(include_fixtures=True)
         bundle = build_report_bundle(report, profile="smart", source="fixtures")

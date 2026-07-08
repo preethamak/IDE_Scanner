@@ -174,6 +174,7 @@ def scan_targets(
     threat_feed_file: Path | str | None = None,
     sandbox_observations_file: Path | str | None = None,
     previous_report_file: Path | str | None = None,
+    include_posture: bool = True,
 ) -> dict[str, Any]:
     targets: list[dict[str, str]] = []
     root = Path.cwd()
@@ -203,7 +204,7 @@ def scan_targets(
     _apply_sandbox_observations(extensions, _load_sandbox_observations(sandbox_observations_file))
     registry = enrich_registry(extensions, online=online)
     _apply_registry_findings(extensions, registry["findings"])
-    return _build_report(extensions, registry, _load_previous_report(previous_report_file))
+    return _build_report(extensions, registry, _load_previous_report(previous_report_file), include_posture=include_posture)
 
 
 def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
@@ -1617,6 +1618,7 @@ def _build_report(
     extensions: list[ExtensionReport],
     registry: dict[str, Any],
     previous_report: dict[str, Any] | None = None,
+    include_posture: bool = True,
 ) -> dict[str, Any]:
     by_verdict: dict[str, int] = {}
     by_severity: dict[str, int] = {}
@@ -1632,8 +1634,12 @@ def _build_report(
 
     now = dt.datetime.now(dt.UTC)
     version_deltas = _version_deltas(extensions, previous_report)
-    posture_metrics = scan_posture()
-    posture_summary = summarize_posture(posture_metrics)
+    if include_posture:
+        posture_metrics = scan_posture()
+        posture_summary = summarize_posture(posture_metrics)
+    else:
+        posture_metrics = []
+        posture_summary = _skipped_posture_summary()
     summary = {
         "total_extensions": len(extensions),
         "by_verdict": by_verdict,
@@ -1651,11 +1657,29 @@ def _build_report(
         "privacy_mode": "local-metadata-and-static-features",
         "registry_checks": registry,
         "summary": summary,
-        "human_summary": _human_summary(summary, extensions, registry, version_deltas, posture_summary),
+        "human_summary": _human_summary(summary, extensions, registry, version_deltas, posture_summary if include_posture else None),
         "version_deltas": version_deltas,
         "posture_summary": posture_summary,
         "posture": [metric.to_dict() for metric in posture_metrics],
         "extensions": [extension.to_dict() for extension in extensions],
+    }
+
+
+def _skipped_posture_summary() -> dict[str, Any]:
+    return {
+        "status": "skipped",
+        "score": 0,
+        "max_metric_score": 0,
+        "weighted_score": 0,
+        "counts": {
+            "failure": 0,
+            "warning": 0,
+            "success": 0,
+            "skipped": 0,
+        },
+        "clients": [],
+        "total_metrics": 0,
+        "top_findings": [],
     }
 
 
