@@ -8,6 +8,7 @@ license = "MIT"
 
 [project.scripts]
 ide-scanner = "ide_scanner.cli:main"
+scan = "extension_scanner_cli.main:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
