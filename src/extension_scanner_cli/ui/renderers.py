@@ -32,7 +32,7 @@ def render_scan_report(report: dict[str, Any]) -> str:
     for extension in extensions:
         lines.append(render_extension_detail(extension))
     lines.append(render_rules_run(extensions))
-    lines.append(color("─ Extension Scanner v0.1.0 | local scan report ─", "violet"))
+    lines.append(color(truncate("─ Extension Scanner v0.1.0 | local scan report ─", terminal_width()), "violet"))
     return "\n".join(lines)
 
 

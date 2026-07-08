@@ -47,6 +47,32 @@ class CliUiTests(unittest.TestCase):
         self.assertIn("Extension", output)
         self.assertIn("Severity", output)
 
+    def test_three_column_table_stacks_in_very_narrow_terminal(self) -> None:
+        output = table(
+            ["Check", "Status", "Detail"],
+            [["Vendored acorn", "OK", "/home/akprajwal/VScode/ide-scanner/src/ide_scanner/js_ast/acorn_vendor.js"]],
+            max_widths=[24, 10, 80],
+            width=40,
+        )
+
+        self.assertTrue(all(visible_len(line) <= 40 for line in output.splitlines()))
+        self.assertIn("Check", output)
+        self.assertIn("Detail", output)
+        self.assertNotIn("...", output)
+
+    def test_table_wraps_long_tokens_without_truncating(self) -> None:
+        output = table(
+            ["Metric", "Meaning"],
+            [["reputation", "Marketplace/repository metadata and trust context."]],
+            max_widths=[18, 19],
+            width=40,
+        )
+
+        self.assertTrue(all(visible_len(line) <= 40 for line in output.splitlines()))
+        self.assertIn("Marketplace/", output)
+        self.assertIn("repository", output)
+        self.assertNotIn("Marketplace/re...", output)
+
     def test_severity_labels_keep_only_priority_emoji(self) -> None:
         self.assertEqual(severity_label("critical"), "🔴 CRITICAL")
         self.assertEqual(severity_label("high"), "🟠 HIGH")
@@ -140,10 +166,10 @@ class CliUiTests(unittest.TestCase):
             ],
         }
 
-        with patch("extension_scanner_cli.ui.tables.shutil.get_terminal_size", return_value=terminal_size((60, 24))):
+        with patch("extension_scanner_cli.ui.tables.shutil.get_terminal_size", return_value=terminal_size((40, 24))):
             output = render_scan_report(report)
 
-        self.assertTrue(all(visible_len(line) <= 60 for line in output.splitlines()))
+        self.assertTrue(all(visible_len(line) <= 40 for line in output.splitlines()))
         self.assertIn("🟠 HIGH", output)
         self.assertIn("LOW", output)
 

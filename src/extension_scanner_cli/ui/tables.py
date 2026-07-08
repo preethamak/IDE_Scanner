@@ -91,10 +91,14 @@ def _wrap_cell(value: object, width: int) -> list[str]:
         if visible_len(line) <= width:
             wrapped.append(line)
         elif " " not in line:
-            wrapped.append(truncate(line, width))
+            wrapped.extend(_split_long_token(line, width))
         else:
             parts = textwrap.wrap(line, width=width, break_long_words=False, break_on_hyphens=False) or [""]
-            wrapped.extend(truncate(part, width) for part in parts)
+            for part in parts:
+                if visible_len(part) > width:
+                    wrapped.extend(_split_long_token(part, width))
+                else:
+                    wrapped.append(part)
     return wrapped
 
 
@@ -114,18 +118,42 @@ def _simple_wrap(value: object, width: int) -> list[str]:
             lines.append(line)
             continue
         if " " not in line:
-            current = ""
-            for char in line:
-                if visible_len(current + char) > width:
-                    lines.append(current)
-                    current = char
-                else:
-                    current += char
-            if current:
-                lines.append(current)
+            lines.extend(_split_long_token(line, width))
             continue
         lines.extend(textwrap.wrap(line, width=width, break_long_words=True, break_on_hyphens=False) or [""])
     return lines or [""]
+
+
+def _split_long_token(value: str, width: int) -> list[str]:
+    chunks: list[str] = []
+    remaining = value
+    separators = {"/", ".", "_", "-"}
+    while remaining:
+        if visible_len(remaining) <= width:
+            chunks.append(remaining)
+            break
+
+        current = ""
+        last_break = -1
+        for index, char in enumerate(remaining):
+            if visible_len(current + char) > width:
+                break
+            current += char
+            if char in separators:
+                last_break = index + 1
+
+        if last_break >= max(4, min(width - 1, width // 3)):
+            chunks.append(remaining[:last_break])
+            remaining = remaining[last_break:]
+            continue
+
+        if current:
+            chunks.append(current)
+            remaining = remaining[len(current):]
+        else:
+            chunks.append(remaining[:1])
+            remaining = remaining[1:]
+    return chunks or [""]
 
 
 def _stacked_table(headers: list[str], rows: list[list[str]], width: int) -> str:
@@ -141,9 +169,10 @@ def _stacked_table(headers: list[str], rows: list[list[str]], width: int) -> str
             value = row[index] if index < len(row) else ""
             wrapped = _simple_wrap(value, value_width)
             label = truncate(header, key_width)
-            lines.append(f"{_pad(label, key_width)}: {wrapped[0]}")
+            continuation = " " * (visible_len(label) + 2)
+            lines.append(f"{label}: {wrapped[0]}")
             for extra in wrapped[1:]:
-                lines.append(f"{'':<{key_width}}  {extra}")
+                lines.append(f"{continuation}{extra}")
     return "\n".join(truncate(line, width) for line in lines)
 
 
@@ -151,7 +180,7 @@ def table(headers: list[str], rows: Iterable[Iterable[object]], *, max_widths: l
     row_list = [[str(cell) for cell in row] for row in rows]
     max_widths = max_widths or [28] * len(headers)
     target_width = width or terminal_width()
-    if len(headers) >= 5 and target_width < 72:
+    if (len(headers) >= 5 and target_width < 72) or (len(headers) >= 3 and target_width < 50):
         return _stacked_table(headers, row_list, target_width)
 
     widths = _fit_widths(headers, row_list, max_widths, target_width)
