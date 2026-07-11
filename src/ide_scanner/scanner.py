@@ -16,6 +16,7 @@ from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
 from .posture import scan_posture, summarize_posture
+from .providers import run_static_providers
 from .registry import (
     MarketplaceDownloadError,
     _degzip_if_needed,
@@ -58,8 +59,11 @@ TEXT_EXTS = {
 EXEC_TEXT_EXTS = {".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ps1", ".py", ".sh", ".ts", ".tsx"}
 BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
-SKIP_DIRS = {".git", ".hg", ".svn", "dist", "media", "node_modules", "resources", "syntaxes", "themes"}
-MAX_TEXT_BYTES = 220_000
+SKIP_DIRS = {".git", ".hg", ".svn"}
+MAX_TEXT_BYTES = 10 * 1024 * 1024
+MAX_ARCHIVE_FILES = 100_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 100
 SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 CONFIRMED_RULES = {"known-bad-artifact", "marketplace-removed-malware", "malicious-npm-dependency", "trusted-threat-feed-hit"}
 OBSERVED_RULES = {
@@ -221,32 +225,53 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     _add_dependency_source_findings(extension_id, version, manifest, findings)
 
     files = _walk_extension_files(path)
+    entrypoints = _declared_entrypoints(manifest, path)
     artifact_inventory = _artifact_inventory(path, files)
+    analysis_coverage = _new_analysis_coverage(files, entrypoints, path)
     _add_artifact_inventory_findings(extension_id, version, artifact_inventory, known_bad_hashes or {}, findings, capabilities, path)
     _add_repository_posture_findings(extension_id, version, manifest, path, findings, artifact_inventory)
 
     for file in files:
         rel = file.relative_to(path).as_posix()
         suffix = file.suffix.lower()
+        is_entrypoint = rel in entrypoints
+        if file.is_symlink():
+            if suffix in EXEC_TEXT_EXTS and (is_entrypoint or not _is_ignored_static_asset(rel)):
+                analysis_coverage["read_failures"].append(rel)
+            continue
         if suffix in BINARY_RISK_EXTS:
             continue
-        if suffix not in TEXT_EXTS or _is_ignored_static_asset(rel):
+        if suffix not in TEXT_EXTS or (_is_ignored_static_asset(rel) and not is_entrypoint):
             continue
 
         text = _read_text(file)
         if text is None:
+            if suffix in EXEC_TEXT_EXTS:
+                analysis_coverage["read_failures"].append(rel)
+            continue
+        if file.stat().st_size > MAX_TEXT_BYTES:
+            analysis_coverage["oversized_files"].append(rel)
             continue
         scanned_files += 1
         if suffix in EXEC_TEXT_EXTS:
-            _add_code_findings(extension_id, version, rel, text, findings, capabilities)
-        if suffix in JS_AST_EXTS and not _is_generated_code_blob(rel, text):
+            analysis_coverage["analyzed_executable_files"].append(rel)
+            _add_code_findings(extension_id, version, rel, text, findings, capabilities, analyze_generated=is_entrypoint)
+        if suffix in JS_AST_EXTS and (is_entrypoint or not _is_generated_code_blob(rel, text)):
             _add_ast_findings(extension_id, version, rel, text, findings)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
+    provider_findings, provider_statuses = run_static_providers(path, extension_id, version)
+    findings.extend(provider_findings)
+    analysis_coverage["providers"] = provider_statuses
     verdict, verdict_reason, malware_authority, severity, malware_score, risk_score, score_details = _classify_findings(findings)
 
-    return ExtensionReport(
+    _finalize_analysis_coverage(analysis_coverage)
+    artifact_inventory["analysis_coverage"] = analysis_coverage
+    artifact_inventory["scan_incomplete"] = analysis_coverage["status"] != "complete"
+    artifact_inventory["skipped_reason"] = "; ".join(analysis_coverage["limitations"])
+    artifact_hash = str(artifact_inventory.get("package_hash") or "")
+    report = ExtensionReport(
         instance_id=_stable_id(str(path)),
         extension_id=extension_id,
         name=name,
@@ -256,7 +281,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         repository=_repository_url(manifest.get("repository")),
         install_path=str(path),
         source=source,
-        artifact_hash=_manifest_hash(path),
+        artifact_hash=artifact_hash,
         severity=severity,
         verdict=verdict,
         malware_authority=malware_authority,
@@ -269,7 +294,17 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         findings=findings,
         scanned_files=scanned_files,
         dependencies=_dependencies(manifest, path),
+        artifact_identity={
+            "extension_id": extension_id,
+            "version": version,
+            "sha256": artifact_hash,
+            "source": source,
+            "signature": dict(artifact_inventory.get("vsix_signature") or {}),
+        },
+        analysis_coverage=analysis_coverage,
     )
+    _apply_security_decision(report)
+    return report
 
 
 def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
@@ -291,12 +326,20 @@ def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = N
             report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
             report.install_path = str(original_path)
             report.source = "vsix"
-            report.artifact_hash = vsix_hash[:24]
+            report.artifact_hash = vsix_hash
             report.artifact_inventory["vsix_hash"] = vsix_hash
             report.artifact_inventory["vsix_size_bytes"] = vsix_size
             report.artifact_inventory["source_artifact"] = original_path.name
             report.artifact_inventory["vsix_signature"] = _vsix_signature_status(tmp_root)
+            report.artifact_identity = {
+                "extension_id": report.extension_id,
+                "version": report.version,
+                "sha256": vsix_hash,
+                "source": "vsix",
+                "signature": dict(report.artifact_inventory["vsix_signature"]),
+            }
         _apply_vsix_known_bad_match(report, known_bad_hashes or {})
+        _apply_security_decision(report)
         return report
 
 
@@ -377,6 +420,9 @@ def _registry_only_extension(extension_id: str) -> ExtensionReport:
     if not name:
         publisher = "unknown"
         name = extension_id
+    artifact_inventory = _empty_artifact_inventory()
+    artifact_inventory["scan_incomplete"] = True
+    artifact_inventory["skipped_reason"] = "No local extension artifact was provided; executable analysis was not performed."
     return ExtensionReport(
         instance_id=_stable_id(f"registry:{extension_id}"),
         extension_id=extension_id,
@@ -396,7 +442,7 @@ def _registry_only_extension(extension_id: str) -> ExtensionReport:
         risk_score=0,
         score_details=_empty_score_details(),
         capabilities=[],
-        artifact_inventory=_empty_artifact_inventory(),
+        artifact_inventory=artifact_inventory,
         findings=[],
         scanned_files=0,
         dependencies={},
@@ -904,6 +950,8 @@ def _add_code_findings(
     text: str,
     findings: list[Finding],
     capabilities: dict[str, dict[str, Any]],
+    *,
+    analyze_generated: bool = False,
 ) -> None:
     secret_refs = [(secret_id, label) for secret_id, label, regex in SECRET_PATTERNS if regex.search(text)]
     has_file_read = bool(FILE_READ_RE.search(text))
@@ -938,7 +986,7 @@ def _add_code_findings(
         ))
         capabilities.setdefault(rule.capability, {"id": rule.capability, "evidence": []})["evidence"].append(rel)
 
-    if _is_generated_code_blob(rel, text):
+    if _is_generated_code_blob(rel, text) and not analyze_generated:
         return
 
     if has_configured_cli and not has_shell_exec and not has_download:
@@ -1620,20 +1668,27 @@ def _build_report(
     previous_report: dict[str, Any] | None = None,
     include_posture: bool = True,
 ) -> dict[str, Any]:
+    version_deltas = _version_deltas(extensions, previous_report)
+    deltas_by_id = {str(item.get("extension_id")): item for item in version_deltas}
+    for extension in extensions:
+        extension.baseline_diff = dict(deltas_by_id.get(extension.extension_id) or {})
+        _apply_security_decision(extension)
+
     by_verdict: dict[str, int] = {}
     by_severity: dict[str, int] = {}
+    by_decision: dict[str, int] = {}
     max_score = 0
     max_malware_score = 0
     max_risk_score = 0
     for extension in extensions:
         by_verdict[extension.verdict] = by_verdict.get(extension.verdict, 0) + 1
         by_severity[extension.severity] = by_severity.get(extension.severity, 0) + 1
+        by_decision[extension.decision] = by_decision.get(extension.decision, 0) + 1
         max_malware_score = max(max_malware_score, extension.malware_score)
         max_risk_score = max(max_risk_score, extension.risk_score)
         max_score = max(max_score, extension.risk_score)
 
     now = dt.datetime.now(dt.UTC)
-    version_deltas = _version_deltas(extensions, previous_report)
     if include_posture:
         posture_metrics = scan_posture()
         posture_summary = summarize_posture(posture_metrics)
@@ -1644,6 +1699,7 @@ def _build_report(
         "total_extensions": len(extensions),
         "by_verdict": by_verdict,
         "by_severity": by_severity,
+        "by_decision": by_decision,
         "max_score": max_score,
         "max_malware_score": max_malware_score,
         "max_risk_score": max_risk_score,
@@ -1761,6 +1817,13 @@ def _version_deltas(extensions: list[ExtensionReport], previous_report: dict[str
             delta["changes"].append("risk_score")
         if int(previous.get("malware_score") or 0) != extension.malware_score:
             delta["changes"].append("malware_score")
+        previous_identity = previous.get("artifact_identity") if isinstance(previous.get("artifact_identity"), dict) else {}
+        previous_hash = str(previous.get("artifact_hash") or previous_identity.get("sha256") or "")
+        exact_hash_changed = len(previous_hash) == 64 and len(extension.artifact_hash) == 64 and previous_hash != extension.artifact_hash
+        artifact_changed = previous.get("version") != extension.version or exact_hash_changed
+        delta["artifact_changed"] = artifact_changed
+        if exact_hash_changed:
+            delta["changes"].append("artifact_hash")
         previous_deps = set((previous.get("dependencies") or {}).keys()) if isinstance(previous.get("dependencies"), dict) else set()
         current_deps = set(extension.dependencies.keys())
         added_deps = sorted(current_deps - previous_deps)
@@ -1777,9 +1840,61 @@ def _version_deltas(extensions: list[ExtensionReport], previous_report: dict[str
             delta["changes"].append("risky_artifacts")
             delta["added_risky_artifacts"] = added_artifacts[:25]
             delta["removed_risky_artifacts"] = removed_artifacts[:25]
+        previous_rules = {
+            str(item.get("rule_id")) for item in previous.get("findings") or []
+            if isinstance(item, dict) and item.get("rule_id")
+        }
+        current_rules = {finding.rule_id for finding in extension.findings}
+        added_rules = sorted(current_rules - previous_rules)
+        removed_rules = sorted(previous_rules - current_rules)
+        if added_rules or removed_rules:
+            delta["changes"].append("findings")
+            delta["added_findings"] = added_rules[:50]
+            delta["removed_findings"] = removed_rules[:50]
+        previous_capabilities = {
+            str(item.get("id")) for item in previous.get("capabilities") or []
+            if isinstance(item, dict) and item.get("id")
+        }
+        current_capabilities = {
+            str(item.get("id")) for item in extension.capabilities
+            if isinstance(item, dict) and item.get("id")
+        }
+        added_capabilities = sorted(current_capabilities - previous_capabilities)
+        removed_capabilities = sorted(previous_capabilities - current_capabilities)
+        if added_capabilities or removed_capabilities:
+            delta["changes"].append("capabilities")
+            delta["added_capabilities"] = added_capabilities[:50]
+            delta["removed_capabilities"] = removed_capabilities[:50]
         if delta["changes"]:
+            delta["analysis_changed"] = True
+            delta["baseline_changed"] = artifact_changed
             deltas.append(delta)
     return deltas
+
+
+def _apply_security_decision(extension: ExtensionReport) -> None:
+    coverage = extension.analysis_coverage or extension.artifact_inventory.get("analysis_coverage") or {}
+    incomplete = bool(extension.artifact_inventory.get("scan_incomplete")) or coverage.get("status") == "incomplete"
+    if extension.verdict == "malicious":
+        extension.decision = "block"
+        extension.decision_reason = "Confirmed malicious intelligence or an exact known-bad artifact matched."
+        return
+    if incomplete:
+        extension.decision = "incomplete"
+        extension.decision_reason = str(extension.artifact_inventory.get("skipped_reason") or "Executable analysis did not complete.")
+        return
+    added_capabilities = list(extension.baseline_diff.get("added_capabilities") or [])
+    added_findings = list(extension.baseline_diff.get("added_findings") or [])
+    artifact_changed = bool(extension.baseline_diff.get("artifact_changed"))
+    if extension.verdict in {"suspicious", "review"} or (artifact_changed and (added_capabilities or added_findings)):
+        extension.decision = "review"
+        if artifact_changed and (added_capabilities or added_findings):
+            extension.decision_reason = "The artifact changed from its baseline and introduced new security-relevant behavior."
+        else:
+            extension.decision_reason = extension.verdict_reason
+        return
+    extension.decision = "allow"
+    extension.decision_reason = "Analysis completed without actionable evidence or unapproved baseline changes."
 
 
 def _artifact_paths(extension: dict[str, Any]) -> set[str]:
@@ -1831,6 +1946,20 @@ def _artifact_inventory(path: Path, files: list[Path]) -> dict[str, Any]:
 
     for file in sorted(files):
         rel = file.relative_to(path).as_posix()
+        if file.is_symlink():
+            try:
+                target = os.readlink(file)
+            except OSError:
+                target = "unreadable"
+            digest = hashlib.sha256(target.encode("utf-8", errors="replace")).hexdigest()
+            size = len(target.encode("utf-8", errors="replace"))
+            all_hashes.append({"path": rel, "sha256": digest, "size_bytes": size, "kind": "symlink", "target": target})
+            risky_artifacts.append({"path": rel, "sha256": digest, "size_bytes": size, "kind": "symlink", "target": target})
+            package_digest.update(rel.encode("utf-8"))
+            package_digest.update(b"\0symlink\0")
+            package_digest.update(target.encode("utf-8", errors="replace"))
+            package_digest.update(b"\0")
+            continue
         digest, size = _hash_file(file)
         if not digest:
             continue
@@ -1972,7 +2101,17 @@ def _hash_metadata(metadata: Any, source_path: str) -> dict[str, Any]:
 
 def _safe_extract_vsix(vsix_path: Path, destination: Path) -> None:
     with zipfile.ZipFile(vsix_path) as archive:
-        for member in archive.infolist():
+        members = archive.infolist()
+        files = [member for member in members if member.filename and not member.is_dir()]
+        total_size = sum(member.file_size for member in files)
+        compressed_size = sum(max(1, member.compress_size) for member in files)
+        if len(files) > MAX_ARCHIVE_FILES:
+            raise ValueError(f"VSIX contains too many files ({len(files)} > {MAX_ARCHIVE_FILES})")
+        if total_size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise ValueError("VSIX uncompressed size exceeds the extraction limit")
+        if total_size / max(1, compressed_size) > MAX_ARCHIVE_COMPRESSION_RATIO:
+            raise ValueError("VSIX compression ratio exceeds the extraction limit")
+        for member in members:
             name = member.filename.replace("\\", "/")
             if not name or name.endswith("/"):
                 continue
@@ -2030,10 +2169,9 @@ def _apply_vsix_known_bad_match(report: ExtensionReport, known_bad_hashes: dict[
 
 
 def _walk_extension_files(path: Path) -> list[Path]:
-    # os.walk with in-place dirname pruning so we never descend into huge
-    # skipped trees (node_modules, dist, out, ...). rglob("*") would enumerate
-    # every file inside those directories before filtering, which turns a scan
-    # of a multi-GB extension install into minutes of wasted I/O.
+    # Hash the complete packaged artifact. Static analysis applies its own
+    # lower-noise filters, but artifact identity must include bundled output and
+    # runtime dependencies because either can contain the code that executes.
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(path):
         dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS]
@@ -2042,9 +2180,84 @@ def _walk_extension_files(path: Path) -> list[Path]:
     return files
 
 
+def _declared_entrypoints(manifest: dict[str, Any], path: Path) -> set[str]:
+    entrypoints: set[str] = set()
+    for key in ("main", "browser"):
+        value = manifest.get(key)
+        if isinstance(value, str) and value.strip():
+            entrypoints.add(_normalize_package_path(value))
+    if not entrypoints and (path / "extension.js").is_file():
+        entrypoints.add("extension.js")
+    return entrypoints
+
+
+def _normalize_package_path(value: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _new_analysis_coverage(files: list[Path], entrypoints: set[str], path: Path) -> dict[str, Any]:
+    all_paths = {file.relative_to(path).as_posix() for file in files}
+    candidates = sorted(
+        rel for rel in all_paths
+        if Path(rel).suffix.lower() in EXEC_TEXT_EXTS and (rel in entrypoints or not _is_ignored_static_asset(rel))
+    )
+    return {
+        "status": "pending",
+        "coverage_percent": 0,
+        "discovered_files": len(files),
+        "declared_entrypoints": sorted(entrypoints),
+        "resolved_entrypoints": sorted(entrypoints & all_paths),
+        "missing_entrypoints": sorted(entrypoints - all_paths),
+        "executable_candidates": candidates,
+        "analyzed_executable_files": [],
+        "read_failures": [],
+        "oversized_files": [],
+        "limitations": [],
+        "providers": {},
+    }
+
+
+def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
+    candidates = set(coverage.get("executable_candidates") or [])
+    analyzed = set(coverage.get("analyzed_executable_files") or [])
+    missing = list(coverage.get("missing_entrypoints") or [])
+    failures = list(coverage.get("read_failures") or [])
+    oversized = list(coverage.get("oversized_files") or [])
+    limitations: list[str] = []
+    if missing:
+        limitations.append(f"Missing declared entrypoint(s): {', '.join(missing[:3])}")
+    if failures:
+        limitations.append(f"Could not read {len(failures)} executable file(s)")
+    if oversized:
+        limitations.append(f"Skipped {len(oversized)} executable file(s) larger than {MAX_TEXT_BYTES} bytes")
+    required = candidates - set(oversized) - set(failures)
+    if required - analyzed:
+        limitations.append(f"Did not analyze {len(required - analyzed)} executable candidate(s)")
+    required_providers = {
+        item.strip().lower()
+        for item in os.environ.get("IDE_SCANNER_REQUIRE_PROVIDERS", "").split(",")
+        if item.strip()
+    }
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    for name in sorted(required_providers):
+        provider = providers.get(name) if isinstance(providers.get(name), dict) else {}
+        provider["required"] = True
+        providers[name] = provider
+        if provider.get("status") != "completed":
+            limitations.append(f"Required provider {name} did not complete")
+    denominator = len(candidates) + len(missing)
+    coverage["coverage_percent"] = round(100 * len(analyzed & candidates) / denominator) if denominator else 100
+    coverage["limitations"] = limitations
+    coverage["status"] = "complete" if not limitations else "incomplete"
+
+
 def _is_ignored_static_asset(rel: str) -> bool:
     normalized = rel.replace("\\", "/").lower()
     generated_prefixes = (
+        "node_modules/",
         "assets/pdf.js/build/",
         "bundled/libs/debugpy/_vendored/",
         "drawio/src/main/webapp/math/es5/",
@@ -2224,7 +2437,7 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
 
     high_correlated = [
         finding for finding in findings
-        if _finding_evidence_class(finding) == "correlated" and finding.severity == "HIGH"
+        if _finding_evidence_class(finding) == "correlated" and finding.severity in {"HIGH", "CRITICAL"}
     ]
     if high_correlated:
         return (
@@ -2456,6 +2669,22 @@ def _correlated_score(findings: list[Finding]) -> int:
         score = max(score, 76)
     if "download-and-execute" in rule_ids:
         score = max(score, 72)
+    if "credential-dataflow-to-network" in rule_ids:
+        score = max(score, 88)
+    if "credential-dataflow-to-process" in rule_ids:
+        score = max(score, 78)
+    if "credential-dataflow-to-file" in rule_ids:
+        score = max(score, 76)
+    if "credential-command-control" in rule_ids:
+        score = max(score, 74)
+    if "clipboard-read-near-secret-input" in rule_ids:
+        score = max(score, 72)
+    if "untrusted-workspace-input-to-process" in rule_ids:
+        score = max(score, 82)
+    if "webview-message-to-process" in rule_ids:
+        score = max(score, 84)
+    if "decoded-payload-execution" in rule_ids or "encoded-dynamic-execution" in rule_ids:
+        score = max(score, 82)
     return score
 
 
@@ -2610,7 +2839,9 @@ def _suppressors(findings: list[Finding]) -> list[dict[str, Any]]:
 
 
 def _suppressor_reduction(findings: list[Finding]) -> int:
-    return sum(int(item["reduction"]) for item in _suppressors(findings))
+    # Publisher verification is reputation context, not a reason to discount
+    # observed code behavior, capabilities, dependencies, or provenance.
+    return 0
 
 
 def _weak_score(findings: list[Finding], has_actionable_context: bool) -> int:

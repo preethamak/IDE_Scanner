@@ -13,7 +13,7 @@ from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
 from .rule_registry import RULESET_VERSION, rules_json
 
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "2.1"
 
 
 def build_report_bundle(
@@ -95,6 +95,9 @@ def iter_report_events(report: dict[str, Any], *, profile: str = "smart", source
             "verdict": row["verdict"],
             "verdict_state": row["verdict_state"],
             "verdict_label": row["verdict_label"],
+            "decision": row["decision"],
+            "decision_reason": row["decision_reason"],
+            "coverage_percent": row["coverage_percent"],
             "severity": row["severity"],
             "grade": row["grade"],
             "detail_ref": row["detail_ref"],
@@ -142,7 +145,9 @@ def _summary(
     category_counts: dict[str, int] = {}
     finding_counts: dict[str, int] = {}
     evidence_class_counts: dict[str, int] = {}
+    decision_counts = {decision: 0 for decision in ("block", "review", "incomplete", "allow")}
     for extension in extensions:
+        decision_counts[extension.decision] = decision_counts.get(extension.decision, 0) + 1
         verdict_counts[extension.verdict] = verdict_counts.get(extension.verdict, 0) + 1
         severity_counts[extension.severity] = severity_counts.get(extension.severity, 0) + 1
         for finding in extension.findings:
@@ -162,12 +167,15 @@ def _summary(
             "max_malware_score": max((extension.malware_score for extension in extensions), default=0),
             "max_context_score": max((_context_score(extension) for extension in extensions), default=0),
             "posture_status": posture_summary.get("status", "skipped"),
+            "decision_counts": decision_counts,
+            "incomplete": decision_counts.get("incomplete", 0),
         },
         "top_risk_extensions": [summary.to_dict() for summary in _rank_summaries(summaries)[:10]],
         "finding_counts": _sorted_counts(finding_counts),
         "severity_counts": _sorted_counts(severity_counts),
         "category_counts": _sorted_counts(category_counts),
         "evidence_class_counts": _sorted_counts(evidence_class_counts),
+        "version_deltas": list(report.get("version_deltas") or []),
     }
 
 
@@ -195,6 +203,11 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         from_cache=bool(getattr(extension, "from_cache", False)),
         scan_incomplete=_scan_incomplete(extension),
         skipped_reason=_skipped_reason(extension),
+        decision=extension.decision,
+        decision_reason=extension.decision_reason,
+        artifact_sha256=str(extension.artifact_identity.get("sha256") or extension.artifact_hash),
+        coverage_percent=int(extension.analysis_coverage.get("coverage_percent") or 0),
+        baseline_changed=bool(extension.baseline_diff.get("baseline_changed")),
     )
 
 
@@ -242,6 +255,11 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         from_cache=bool(getattr(extension, "from_cache", False)),
         scan_incomplete=_scan_incomplete(extension),
         skipped_reason=_skipped_reason(extension),
+        decision=extension.decision,
+        decision_reason=extension.decision_reason,
+        artifact_identity=dict(extension.artifact_identity),
+        analysis_coverage=dict(extension.analysis_coverage),
+        baseline_diff=dict(extension.baseline_diff),
     )
 
 
@@ -470,6 +488,11 @@ def _extension_from_dict(data: dict[str, Any]) -> ExtensionReport:
         findings=findings,
         scanned_files=int(data.get("scanned_files") or 0),
         dependencies=data.get("dependencies") if isinstance(data.get("dependencies"), dict) else {},
+        decision=str(data.get("decision") or "incomplete"),  # type: ignore[arg-type]
+        decision_reason=str(data.get("decision_reason") or "Analysis has not completed."),
+        artifact_identity=data.get("artifact_identity") if isinstance(data.get("artifact_identity"), dict) else {},
+        analysis_coverage=data.get("analysis_coverage") if isinstance(data.get("analysis_coverage"), dict) else {},
+        baseline_diff=data.get("baseline_diff") if isinstance(data.get("baseline_diff"), dict) else {},
     )
 
 

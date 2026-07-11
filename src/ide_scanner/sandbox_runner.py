@@ -20,6 +20,10 @@ CANARY_FILES = (
 
 
 def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 15) -> dict[str, Any]:
+    if allow_execute:
+        raise ValueError(
+            "Executable sandbox mode is disabled until OS-level filesystem, process, and network isolation is available."
+        )
     source = path.expanduser().resolve()
     with tempfile.TemporaryDirectory(prefix="ide-scanner-sandbox-") as tmp:
         root = Path(tmp)

@@ -6,6 +6,7 @@ from typing import Any, Literal
 Severity = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 Verdict = Literal["clean", "review", "suspicious", "malicious"]
 VerdictState = Literal["safe", "safe_with_notes", "needs_review", "suspicious", "confirmed_malicious"]
+Decision = Literal["allow", "review", "block", "incomplete"]
 Status = Literal["success", "warning", "failure", "skipped"]
 
 
@@ -67,6 +68,11 @@ class ExtensionReport:
     findings: list[Finding]
     scanned_files: int
     dependencies: dict[str, str] = field(default_factory=dict)
+    decision: Decision = "incomplete"
+    decision_reason: str = "Analysis has not completed."
+    artifact_identity: dict[str, Any] = field(default_factory=dict)
+    analysis_coverage: dict[str, Any] = field(default_factory=dict)
+    baseline_diff: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -117,6 +123,11 @@ class ExtensionSummary:
     from_cache: bool = False
     scan_incomplete: bool = False
     skipped_reason: str = ""
+    decision: Decision = "incomplete"
+    decision_reason: str = "Analysis has not completed."
+    artifact_sha256: str = ""
+    coverage_percent: int = 0
+    baseline_changed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -152,6 +163,11 @@ class ExtensionDetail:
     from_cache: bool = False
     scan_incomplete: bool = False
     skipped_reason: str = ""
+    decision: Decision = "incomplete"
+    decision_reason: str = "Analysis has not completed."
+    artifact_identity: dict[str, Any] = field(default_factory=dict)
+    analysis_coverage: dict[str, Any] = field(default_factory=dict)
+    baseline_diff: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

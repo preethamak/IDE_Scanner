@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
     sandbox.add_argument("--out", required=True, help="Write sandbox observations JSON to this file.")
-    sandbox.add_argument("--allow-execute", action="store_true", help="Actually execute package lifecycle commands in a temporary HOME/workspace.")
+    sandbox.add_argument("--allow-execute", action="store_true", help="Reserved; disabled until OS-level isolation is implemented.")
     sandbox.add_argument("--timeout", type=int, default=15, help="Execution timeout per command in seconds.")
 
     benchmark = subparsers.add_parser("benchmark", help="Run scanner benchmarks.")

@@ -21,7 +21,6 @@ PYTHONPATH=src python -m ide_scanner scan --path ~/.vscode/extensions --threat-f
 PYTHONPATH=src python -m ide_scanner scan --path extension.vsix --sandbox-observations observations.json
 PYTHONPATH=src python -m ide_scanner scan --all --previous-report old-report.json
 PYTHONPATH=src python -m ide_scanner sandbox --path extension-folder --out observations.json
-PYTHONPATH=src python -m ide_scanner sandbox --path extension-folder --out observations.json --allow-execute
 PYTHONPATH=src python -m ide_scanner benchmark
 PYTHONPATH=src python -m ide_scanner benchmark normalize protect-your-secrets --input data/Ground_Truth_datasets.csv --output benchmarks/datasets/vscode-credential-exposure/normalized.json
 PYTHONPATH=src python -m ide_scanner benchmark run --dataset benchmarks/datasets/vscode-credential-exposure/normalized.json --report report.zip --output benchmark.zip
@@ -53,13 +52,23 @@ Known-bad hash feeds can be JSON or line-based SHA-256 files:
 {"hashes":[{"sha256":"<64 hex chars>","source":"internal-feed","classification":"malware"}]}
 ```
 
-Sandbox observations are imported from an external runner; this scanner does not execute untrusted extensions:
+Sandbox observations can be imported from an external, OS-isolated runner; the local scanner does not execute untrusted extensions:
 
 ```json
 {"extensions":{"publisher.name":[{"kind":"secret_exfil","destination":"https://example.com"}]}}
 ```
 
-The built-in `sandbox` command is conservative by default. Without `--allow-execute`, it only creates a disposable plan and canary layout. With `--allow-execute`, it runs package lifecycle commands and the Node extension entrypoint in a temporary HOME/workspace. It preloads runtime instrumentation for filesystem reads/writes, process execution, DNS, TCP, HTTP, and HTTPS. Network calls are recorded and blocked by the hook. The output can be passed back to `scan --sandbox-observations`.
+The built-in `sandbox` command creates a disposable plan and canary layout only. Executable mode is disabled until the project has OS-level filesystem, process, and network isolation. Observations produced by a separate isolated runner can be passed to `scan --sandbox-observations`.
+
+Report bundles include a security decision (`allow`, `review`, `block`, or `incomplete`), exact artifact identity, executable analysis coverage, provider status, and baseline changes when `--previous-report` is supplied. Declared `main` and `browser` entrypoints are analyzed even when they are bundled under generated directories.
+
+Optional local analysis providers:
+
+```bash
+python -m pip install -e '.[analysis]'
+```
+
+Semgrep supplies IDE-specific taint findings and YARA scans the complete artifact for byte-level indicators. Provider findings are normalized as evidence; provider severity alone cannot produce a confirmed-malware verdict.
 
 Threat feeds can mark extension ids as confirmed malware or high-risk review evidence:
 

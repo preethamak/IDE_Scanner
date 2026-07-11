@@ -3,10 +3,64 @@ from __future__ import annotations
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.07.07"
+RULESET_VERSION = "2026.07.11"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
+    "untrusted-workspace-input-to-process": {
+        "title": "Workspace input reaches process execution",
+        "category": "execution",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "Semgrep taint analysis found workspace-controlled data reaching a process execution sink.",
+        "recommendation": "Require explicit user initiation and pass validated arguments without shell interpolation.",
+        "benchmark_tags": ["semgrep", "workspace", "execution"],
+    },
+    "webview-message-to-process": {
+        "title": "Webview message reaches execution",
+        "category": "webview",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "Semgrep taint analysis found webview-controlled message data reaching an execution sink.",
+        "recommendation": "Validate message schemas and keep webview data away from command construction.",
+        "benchmark_tags": ["semgrep", "webview", "execution"],
+    },
+    "decoded-payload-execution": {
+        "title": "Decoded payload reaches dynamic execution",
+        "category": "code",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "Semgrep found decoded or deobfuscated data flowing into dynamic execution.",
+        "recommendation": "Remove dynamic payload execution or make the decoded artifact immutable and verifiable.",
+        "benchmark_tags": ["semgrep", "obfuscation", "execution"],
+    },
+    "unicode-evasion": {
+        "title": "Unicode source-code evasion",
+        "category": "code",
+        "evidence_class": "weak",
+        "default_severity": "MEDIUM",
+        "description": "YARA matched bidirectional or invisible Unicode control bytes.",
+        "recommendation": "Inspect the matched bytes and remove invisible controls from executable files.",
+        "benchmark_tags": ["yara", "unicode", "evasion"],
+    },
+    "encoded-dynamic-execution": {
+        "title": "Encoded dynamic execution",
+        "category": "code",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "YARA matched encoded payload handling combined with dynamic execution markers.",
+        "recommendation": "Inspect the decoded payload and block the artifact when its origin cannot be verified.",
+        "benchmark_tags": ["yara", "obfuscation", "execution"],
+    },
+    "embedded-pe-artifact": {
+        "title": "Embedded portable executable",
+        "category": "artifact",
+        "evidence_class": "provenance",
+        "default_severity": "MEDIUM",
+        "description": "YARA found portable executable content embedded inside another artifact.",
+        "recommendation": "Extract, hash, sign, and independently inspect the embedded executable.",
+        "benchmark_tags": ["yara", "binary", "provenance"],
+    },
     "credential-exfiltration-chain": {
         "title": "Credential exfiltration chain",
         "category": "credential-access",
