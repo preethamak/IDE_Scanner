@@ -332,6 +332,9 @@ def rule_registry() -> list[RuleMetadata]:
             description=rule.summary,
             recommendation="Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
             benchmark_tags=[rule.category],
+            engine=_engine_for(rule.id, [rule.category]),
+            decision_effect=_decision_effect("weak"),
+            confidence_basis=_confidence_basis("weak"),
         )
 
     for rule_id, override in _RULE_OVERRIDES.items():
@@ -345,6 +348,9 @@ def rule_registry() -> list[RuleMetadata]:
             recommendation=str(override["recommendation"]),
             false_positive_notes=str(override.get("false_positive_notes") or ""),
             benchmark_tags=list(override.get("benchmark_tags") or []),
+            engine=_engine_for(rule_id, list(override.get("benchmark_tags") or [])),
+            decision_effect=_decision_effect(str(override["evidence_class"])),
+            confidence_basis=_confidence_basis(str(override["evidence_class"])),
         )
     return sorted(rules.values(), key=lambda item: item.rule_id)
 
@@ -358,3 +364,46 @@ def rules_json() -> dict[str, object]:
 
 def _title(rule_id: str) -> str:
     return rule_id.replace("-", " ").replace(":", ": ").title()
+
+
+def _engine_for(rule_id: str, tags: list[str]) -> str:
+    if "semgrep" in tags:
+        return "semgrep"
+    if "yara" in tags:
+        return "yara"
+    if rule_id.startswith("ast-"):
+        return "javascript-ast"
+    if rule_id in {"known-bad-artifact", "marketplace-removed-package"}:
+        return "threat-intelligence"
+    if rule_id in {"malicious-npm-dependency", "vulnerable-npm-dependency"}:
+        return "dependency-intelligence"
+    if rule_id in {"agentic-tooling", "lifecycle-script"}:
+        return "manifest"
+    if rule_id in {"native-or-packed-artifact"}:
+        return "artifact-inspection"
+    if "dataflow" in tags or len(set(tags) & {"credential", "network", "filesystem", "process"}) > 1:
+        return "native-correlation"
+    return "native-static"
+
+
+def _decision_effect(evidence_class: str) -> str:
+    if evidence_class == "confirmed":
+        return "block-by-default"
+    if evidence_class in {"correlated", "dependency", "provenance"}:
+        return "review-or-block-by-policy"
+    if evidence_class in {"capability", "exposure"}:
+        return "review-by-policy"
+    return "review-context"
+
+
+def _confidence_basis(evidence_class: str) -> str:
+    return {
+        "confirmed": "Authoritative artifact or package intelligence matched an exact identity.",
+        "correlated": "Multiple related deterministic signals or a source-to-sink path were connected.",
+        "dependency": "Resolved dependency identity matched configured package intelligence.",
+        "provenance": "Artifact, marketplace, or release-origin evidence changed trust context.",
+        "capability": "Deterministic inspection found a sensitive capability; intent is not inferred.",
+        "exposure": "Deterministic inspection found a secret or cross-extension boundary exposure.",
+        "observed": "A controlled analysis provider recorded the behavior at runtime.",
+        "weak": "Single deterministic static indicator; requires surrounding context.",
+    }.get(evidence_class, "Deterministic scanner evidence; review the cited source and limitations.")

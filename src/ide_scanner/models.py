@@ -186,6 +186,9 @@ class RuleMetadata:
     recommendation: str
     false_positive_notes: str = ""
     benchmark_tags: list[str] = field(default_factory=list)
+    engine: str = "native-static"
+    decision_effect: str = "review-context"
+    confidence_basis: str = "Single deterministic static indicator; requires surrounding context."
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
