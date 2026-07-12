@@ -85,7 +85,15 @@ Sandbox observations can be imported from an external, OS-isolated runner; the l
 
 The built-in `sandbox` command creates a disposable plan and canary layout only. Executable mode is disabled until the project has OS-level filesystem, process, and network isolation. Observations produced by a separate isolated runner can be passed to `scan --sandbox-observations`.
 
-Report bundles include a security decision (`allow`, `review`, `block`, or `incomplete`), exact artifact identity, executable analysis coverage, provider status, and baseline changes when `--previous-report` is supplied. Declared `main` and `browser` entrypoints are analyzed even when they are bundled under generated directories.
+Schema 2.2 report bundles include a security decision (`allow`, `review`, `block`, or `incomplete`), exact artifact identity, complete file inventory, direct/transitive dependency inventory, six deterministic security dimensions, executable analysis coverage, provider status, and baseline changes when `--previous-report` is supplied. Declared `main` and `browser` entrypoints are analyzed even when they are bundled under generated directories.
+
+Exact Marketplace versions and a callback-ready JSON bundle can be produced with:
+
+```bash
+IDE_SCANNER_REQUIRE_PROVIDERS=semgrep,yara,dependency_intelligence \
+ide-scanner scan --extension-id publisher.extension --version 1.2.3 \
+  --profile deep --online --format bundle.json --output scan-bundle.json
+```
 
 Optional local analysis providers:
 
