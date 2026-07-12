@@ -13,7 +13,7 @@ from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
 from .rule_registry import RULESET_VERSION, rules_json
 
-SCHEMA_VERSION = "2.1"
+SCHEMA_VERSION = "2.2"
 
 
 def build_report_bundle(
@@ -250,7 +250,9 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         evidence=evidence_store,
         manifest=_manifest(extension),
         dependencies=dict(list(extension.dependencies.items())[:200]),
+        dependency_inventory=list(extension.artifact_inventory.get("dependency_inventory") or [])[:1000],
         artifact_inventory=dict(extension.artifact_inventory),
+        security_dimensions=_security_dimensions(extension),
         capabilities={str(item.get("id") or index): item for index, item in enumerate(extension.capabilities) if isinstance(item, dict)},
         from_cache=bool(getattr(extension, "from_cache", False)),
         scan_incomplete=_scan_incomplete(extension),
@@ -276,6 +278,63 @@ def grade_extension(verdict: str, risk_score: int, malware_score: int, findings:
     if risk_score > 0 or malware_score > 0:
         return "A-"
     return "A"
+
+
+_DIMENSION_CATEGORIES = {
+    "behavior_safety": {"process", "network", "filesystem", "code", "cross-extension-exposure", "agent", "webview"},
+    "supply_chain_integrity": {"supply-chain", "registry", "lifecycle", "provenance"},
+    "dependency_health": {"dependency", "vulnerability"},
+    "artifact_integrity": {"artifact", "obfuscation", "binary", "evasion"},
+    "publisher_project_health": {"reputation", "repository-posture", "license"},
+}
+
+
+def _security_dimensions(extension: ExtensionReport) -> dict[str, Any]:
+    severity_weight = {"CRITICAL": 30, "HIGH": 18, "MEDIUM": 9, "LOW": 3, "INFO": 0}
+    dimensions: dict[str, Any] = {}
+    for dimension, categories in _DIMENSION_CATEGORIES.items():
+        deductions: list[dict[str, Any]] = []
+        score = 100
+        for finding in extension.findings:
+            if finding.category not in categories:
+                continue
+            weight = severity_weight.get(finding.severity, 0)
+            evidence_class = str((finding.evidence or {}).get("evidence_class") or "weak")
+            if evidence_class in {"weak", "reputation"}:
+                weight = max(1 if weight else 0, weight // 2)
+            if weight:
+                score -= weight
+                deductions.append({"rule_id": finding.rule_id, "points": weight, "severity": finding.severity})
+        final_score = max(0, score)
+        dimensions[dimension] = {
+            "score": final_score,
+            "status": _dimension_status(final_score),
+            "deductions": deductions[:20],
+            "basis": "Deterministic evidence deductions; higher is better and is not a probability.",
+        }
+
+    coverage = extension.analysis_coverage or {}
+    coverage_score = int(coverage.get("coverage_percent") or 0)
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    unavailable = [
+        name for name, provider in providers.items()
+        if isinstance(provider, dict) and str(provider.get("status") or "") not in {"complete", "completed", "available"}
+    ]
+    dimensions["analysis_confidence"] = {
+        "score": coverage_score,
+        "status": "unknown" if coverage.get("status") != "complete" else _dimension_status(coverage_score),
+        "deductions": [{"provider": name, "reason": "not complete"} for name in unavailable],
+        "basis": "Executable coverage and recorded analyzer completion; higher is better.",
+    }
+    return dimensions
+
+
+def _dimension_status(score: int) -> str:
+    if score >= 90:
+        return "strong"
+    if score >= 70:
+        return "attention"
+    return "weak"
 
 
 def _verdict_label(extension: ExtensionReport) -> str:

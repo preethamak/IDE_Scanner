@@ -1,0 +1,54 @@
+name: Deep Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: { description: "Durable website scan job id", required: true, type: string }
+      extension_id: { description: "publisher.extension", required: true, type: string }
+      version: { description: "Exact published version", required: true, type: string }
+      callback_url: { description: "Signed result ingestion endpoint", required: true, type: string }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-scan-${{ inputs.extension_id }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install analyzers
+        run: python -m pip install -e '.[analysis]'
+      - name: Scan exact artifact
+        env:
+          IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
+        run: >-
+          ide-scanner scan
+          --extension-id '${{ inputs.extension_id }}'
+          --version '${{ inputs.version }}'
+          --profile deep
+          --online
+          --format bundle.json
+          --include-raw-evidence
+          --output scan-bundle.json
+      - name: Submit signed result
+        env:
+          SCAN_JOB_ID: ${{ inputs.job_id }}
+          SCAN_CALLBACK_URL: ${{ inputs.callback_url }}
+          SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
+        run: python scripts/callback_scan.py scan-bundle.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deep-scan-${{ inputs.job_id }}
+          path: scan-bundle.json
+          retention-days: 7
+          if-no-files-found: ignore

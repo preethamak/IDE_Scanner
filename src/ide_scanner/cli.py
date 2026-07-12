@@ -24,8 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--all", "--installed", dest="installed", action="store_true", help="Scan local VS Code-compatible extension installs.")
     scan.add_argument("--path", "--folder", "--vsix", dest="path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
+    scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Scan profile. smart is the default.")
-    scan.add_argument("--format", choices=["json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to report.zip when --output ends in .zip, otherwise json.")
+    scan.add_argument("--format", choices=["json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to report.zip when --output ends in .zip, otherwise json.")
     scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
     scan.add_argument("--threat-feed", help="JSON feed of known malicious or suspicious extension ids.")
@@ -77,9 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         if args.ui:
             parser.error("scan --ui is not implemented yet. Use `scan --installed --output report.zip` and import the bundle in ide-scanner-web.")
+        if args.version and len(args.extension_id) != 1:
+            parser.error("scan --version requires exactly one --extension-id")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             marketplace_scan_ids=args.extension_id,
+            marketplace_version=args.version,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=args.online or args.profile in {"deep"},
@@ -116,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                 include_raw_evidence=args.include_raw_evidence,
             )
             _emit(receipt, None)
+            return 0
+        if output_format == "bundle.json":
+            from .report_bundle import build_report_bundle
+            _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
             return 0
         if output_format in {"sarif", "sqlite"}:
             parser.error(f"scan --format {output_format} is reserved but not implemented yet")

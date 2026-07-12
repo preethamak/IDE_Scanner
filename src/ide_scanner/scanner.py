@@ -171,6 +171,7 @@ def scan_targets(
     paths: list[Path | str] | None = None,
     extension_ids: list[str] | None = None,
     marketplace_scan_ids: list[str] | None = None,
+    marketplace_version: str | None = None,
     include_fixtures: bool = False,
     all_local: bool = False,
     online: bool = False,
@@ -201,13 +202,29 @@ def scan_targets(
     ]
     extensions.extend(_registry_only_extension(extension_id) for extension_id in extension_ids or [])
     extensions.extend(
-        scan_marketplace_extension(identifier, known_bad_hashes=known_bad_hashes)
+        scan_marketplace_extension(identifier, version=marketplace_version, known_bad_hashes=known_bad_hashes)
         for identifier in marketplace_scan_ids or []
     )
     _apply_threat_feed(extensions, _load_threat_feed(threat_feed_file))
     _apply_sandbox_observations(extensions, _load_sandbox_observations(sandbox_observations_file))
     registry = enrich_registry(extensions, online=online)
     _apply_registry_findings(extensions, registry["findings"])
+    dependency_errors = [
+        item for item in registry.get("errors", [])
+        if isinstance(item, dict) and str(item.get("source") or "").startswith("osv")
+    ]
+    for extension in extensions:
+        providers = extension.analysis_coverage.setdefault("providers", {})
+        providers["dependency_intelligence"] = {
+            "provider": "dependency_intelligence",
+            "status": "completed" if online and not dependency_errors else "failed" if online else "unavailable",
+            "error_count": len(dependency_errors),
+            "required": False,
+        }
+        _finalize_analysis_coverage(extension.analysis_coverage)
+        extension.artifact_inventory["analysis_coverage"] = extension.analysis_coverage
+        extension.artifact_inventory["scan_incomplete"] = extension.analysis_coverage["status"] != "complete"
+        extension.artifact_inventory["skipped_reason"] = "; ".join(extension.analysis_coverage["limitations"])
     return _build_report(extensions, registry, _load_previous_report(previous_report_file), include_posture=include_posture)
 
 
@@ -263,7 +280,11 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
 
     provider_findings, provider_statuses = run_static_providers(path, extension_id, version)
     findings.extend(provider_findings)
-    analysis_coverage["providers"] = provider_statuses
+    analysis_coverage["providers"] = {
+        "native_static": {"provider": "native_static", "status": "completed", "required": True},
+        "javascript_ast": {"provider": "javascript_ast", "status": "completed", "required": True},
+        **provider_statuses,
+    }
     verdict, verdict_reason, malware_authority, severity, malware_score, risk_score, score_details = _classify_findings(findings)
 
     _finalize_analysis_coverage(analysis_coverage)
@@ -271,6 +292,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     artifact_inventory["scan_incomplete"] = analysis_coverage["status"] != "complete"
     artifact_inventory["skipped_reason"] = "; ".join(analysis_coverage["limitations"])
     artifact_hash = str(artifact_inventory.get("package_hash") or "")
+    dependencies = _dependencies(manifest, path)
+    artifact_inventory["dependency_inventory"] = _dependency_inventory(manifest, dependencies)
     report = ExtensionReport(
         instance_id=_stable_id(str(path)),
         extension_id=extension_id,
@@ -293,7 +316,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         artifact_inventory=artifact_inventory,
         findings=findings,
         scanned_files=scanned_files,
-        dependencies=_dependencies(manifest, path),
+        dependencies=dependencies,
         artifact_identity={
             "extension_id": extension_id,
             "version": version,
@@ -2942,6 +2965,19 @@ def _manifest_runtime_dependencies(manifest: dict[str, Any]) -> dict[str, str]:
         if isinstance(name, str) and isinstance(version, str):
             out[name] = version
     return out
+
+
+def _dependency_inventory(manifest: dict[str, Any], dependencies: dict[str, str]) -> list[dict[str, Any]]:
+    direct = set(_manifest_runtime_dependencies(manifest))
+    return [
+        {
+            "name": name,
+            "version": version,
+            "relationship": "direct" if name in direct else "transitive",
+            "ecosystem": "npm",
+        }
+        for name, version in sorted(dependencies.items())
+    ]
 
 
 def _package_lock_dependencies(path: Path) -> dict[str, str]:

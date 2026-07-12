@@ -121,7 +121,7 @@ class ScannerTests(unittest.TestCase):
         report = scan_targets(include_fixtures=True)
         bundle = build_report_bundle(report, profile="smart", source="fixtures")
 
-        self.assertEqual(bundle["metadata"]["schema_version"], "2.1")
+        self.assertEqual(bundle["metadata"]["schema_version"], "2.2")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], 8)
@@ -143,6 +143,20 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("score_explanation", detail)
         self.assertIn("recommendations", detail)
         self.assertTrue(detail["evidence"])
+        self.assertTrue(detail["artifact_inventory"]["files"])
+        self.assertIn("dependency_inventory", detail)
+        self.assertEqual(
+            set(detail["security_dimensions"]),
+            {
+                "behavior_safety",
+                "supply_chain_integrity",
+                "dependency_health",
+                "artifact_integrity",
+                "publisher_project_health",
+                "analysis_confidence",
+            },
+        )
+        self.assertIn("basis", detail["security_dimensions"]["behavior_safety"])
         self.assertIn("evidence_refs", detail["findings"][0])
         self.assertNotIn("evidence", detail["findings"][0])
 

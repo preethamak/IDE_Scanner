@@ -77,7 +77,9 @@ class ExtensionReport:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["artifact_inventory"] = dict(self.artifact_inventory)
-        data["artifact_inventory"].pop("_all_file_hashes", None)
+        file_inventory = data["artifact_inventory"].pop("_all_file_hashes", None)
+        if isinstance(file_inventory, list):
+            data["artifact_inventory"]["files"] = file_inventory
         data["findings"] = [finding.to_dict() for finding in self.findings]
         return data
 
@@ -158,7 +160,9 @@ class ExtensionDetail:
     evidence: dict[str, Any]
     manifest: dict[str, Any]
     dependencies: dict[str, str]
+    dependency_inventory: list[dict[str, Any]]
     artifact_inventory: dict[str, Any]
+    security_dimensions: dict[str, Any]
     capabilities: dict[str, Any]
     from_cache: bool = False
     scan_incomplete: bool = False
