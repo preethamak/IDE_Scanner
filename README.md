@@ -9,6 +9,31 @@ The scanner is built to avoid noisy false positives:
 - Known removed or malicious registry/dependency evidence can become critical.
 - Extension code is scanned locally and is not uploaded.
 
+## Website scanner service
+
+The product website can submit public Marketplace artifacts to the canonical Python engine through the file-backed HTTP job service:
+
+```bash
+PYTHONPATH=src python -m ide_scanner.service --host 127.0.0.1 --port 8787
+```
+
+Connect `ide-scanner-web` with:
+
+```bash
+IDE_SCANNER_API_URL=http://127.0.0.1:8787 npm run dev
+```
+
+Set the same `IDE_SCANNER_API_TOKEN` on both processes to require bearer authorization for scan jobs and reports. `GET /health` and `GET /v1/rules` remain public. Jobs and canonical report bundles are written beneath `IDE_SCANNER_DATA_DIR` (default `.ide-scanner-data`) so a process restart does not erase completed analysis.
+
+Container build:
+
+```bash
+docker build -t ide-scanner .
+docker run --read-only --tmpfs /tmp -v ide-scanner-data:/data -p 8787:8787 ide-scanner
+```
+
+The base container includes the native and JavaScript AST analyzers. Semgrep and YARA are optional analysis providers and must be installed in a derived image when they are required by policy; their availability is always reported rather than assumed.
+
 ## Commands
 
 ```bash
