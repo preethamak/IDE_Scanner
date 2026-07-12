@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import re
@@ -130,6 +131,9 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if path == "/v1/rules":
             self._json(200, rules_json())
             return
+        if not self._authorized():
+            self._json(401, {"error": "Scanner service authorization failed."})
+            return
         if path.startswith("/v1/jobs/"):
             job = self.store.get(path.rsplit("/", 1)[-1])
             self._json(200, job) if job else self._json(404, {"error": "Scan job not found."})
@@ -141,6 +145,9 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         self._json(404, {"error": "Route not found."})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._authorized():
+            self._json(401, {"error": "Scanner service authorization failed."})
+            return
         if self.path.split("?", 1)[0] != "/v1/scans/marketplace":
             self._json(404, {"error": "Route not found."})
             return
@@ -164,6 +171,13 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             return {}
         return value if isinstance(value, dict) else {}
+
+    def _authorized(self) -> bool:
+        token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
+        if not token:
+            return True
+        supplied = self.headers.get("authorization", "")
+        return hmac.compare_digest(supplied, f"Bearer {token}")
 
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
