@@ -2185,7 +2185,8 @@ def _declared_entrypoints(manifest: dict[str, Any], path: Path) -> set[str]:
     for key in ("main", "browser"):
         value = manifest.get(key)
         if isinstance(value, str) and value.strip():
-            entrypoints.add(_normalize_package_path(value))
+            declared = _normalize_package_path(value)
+            entrypoints.add(_resolve_node_entrypoint(path, declared))
     if not entrypoints and (path / "extension.js").is_file():
         entrypoints.add("extension.js")
     return entrypoints
@@ -2196,6 +2197,18 @@ def _normalize_package_path(value: str) -> str:
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized
+
+
+def _resolve_node_entrypoint(root: Path, declared: str) -> str:
+    """Resolve the file forms supported by Node for extension `main` fields."""
+    candidates = [declared]
+    if not Path(declared).suffix:
+        candidates.extend(f"{declared}{suffix}" for suffix in (".js", ".cjs", ".mjs", ".json"))
+        candidates.extend(f"{declared}/index{suffix}" for suffix in (".js", ".cjs", ".mjs", ".json"))
+    for candidate in candidates:
+        if root.joinpath(*candidate.split("/")).is_file():
+            return candidate
+    return declared
 
 
 def _new_analysis_coverage(files: list[Path], entrypoints: set[str], path: Path) -> dict[str, Any]:

@@ -965,6 +965,22 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(report.artifact_inventory["scan_incomplete"])
         self.assertIn("dist/missing.js", report.analysis_coverage["missing_entrypoints"])
 
+    def test_suffixless_node_entrypoint_resolves_to_javascript(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "out").mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"suffixless","version":"1.0.0","main":"out/extension"}',
+                encoding="utf-8",
+            )
+            (root / "out" / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.decision, "allow")
+        self.assertEqual(report.analysis_coverage["missing_entrypoints"], [])
+        self.assertIn("out/extension.js", report.analysis_coverage["resolved_entrypoints"])
+
     def test_weak_standalone_static_indicator_stays_clean(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
