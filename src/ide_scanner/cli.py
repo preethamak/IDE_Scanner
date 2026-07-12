@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --ui is not implemented yet. Use `scan --installed --output report.zip` and import the bundle in ide-scanner-web.")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
-            extension_ids=args.extension_id,
+            marketplace_scan_ids=args.extension_id,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=args.online or args.profile in {"deep"},

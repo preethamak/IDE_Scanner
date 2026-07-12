@@ -364,8 +364,9 @@ def scan_marketplace_extension(
     except MarketplaceDownloadError as exc:
         return _marketplace_error_extension(identifier, str(exc))
 
+    registry_source: dict[str, str] = {}
     try:
-        vsix_path = download_marketplace_vsix(resolved_id, version=version)
+        vsix_path = download_marketplace_vsix(resolved_id, version=version, registry_out=registry_source)
     except MarketplaceDownloadError as exc:
         return _marketplace_error_extension(resolved_id, str(exc))
 
@@ -376,8 +377,8 @@ def scan_marketplace_extension(
     finally:
         vsix_path.unlink(missing_ok=True)
 
-    report.source = "marketplace"
-    report.install_path = f"marketplace:{resolved_id}"
+    report.source = registry_source.get("registry", "marketplace")
+    report.install_path = f"{report.source}:{resolved_id}"
     return report
 
 

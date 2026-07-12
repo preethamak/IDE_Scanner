@@ -11,10 +11,11 @@ import urllib.request
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from typing import Any
 
 MARKETPLACE_EXTENSIONQUERY_URL = "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=7.2-preview.1"
+OPENVSX_API_URL = "https://open-vsx.org/api"
 REMOVED_PACKAGES_URL = "https://raw.githubusercontent.com/microsoft/vsmarketplace/main/RemovedPackages.md"
 REMOVED_ROW = re.compile(r"^\|\s*(?P<id>[a-zA-Z0-9._-]+)\s*\|\s*(?P<date>[0-9/]+)\s*\|\s*(?P<type>[^|]+?)\s*\|", re.M)
 LOW_INSTALL_THRESHOLD = 100
@@ -137,6 +138,7 @@ def download_marketplace_vsix(
     destination_dir: Path | str | None = None,
     max_bytes: int = MAX_VSIX_DOWNLOAD_BYTES,
     timeout: int = VSIX_DOWNLOAD_TIMEOUT,
+    registry_out: dict[str, str] | None = None,
 ) -> Path:
     """Resolve `publisher.name` (optionally pinned to `version`) against the VS
     Marketplace gallery API and download the VSIX package to a temp file.
@@ -145,10 +147,13 @@ def download_marketplace_vsix(
     Caller owns the returned path and is responsible for deleting it."""
     resolved_id = parse_marketplace_reference(extension_id)
     metadata, error = _fetch_marketplace_metadata(resolved_id)
-    if error:
-        raise MarketplaceDownloadError(f"Marketplace lookup failed for {resolved_id}: {error}")
+    if error or not metadata or not metadata.get("found"):
+        metadata, openvsx_error = _fetch_openvsx_metadata(resolved_id)
+        if openvsx_error:
+            reasons = "; ".join(item for item in (error, openvsx_error) if item)
+            raise MarketplaceDownloadError(f"Registry lookup failed for {resolved_id}: {reasons}")
     if not metadata or not metadata.get("found"):
-        raise MarketplaceDownloadError(f"Extension {resolved_id} was not found on the VS Marketplace.")
+        raise MarketplaceDownloadError(f"Extension {resolved_id} was not found on VS Marketplace or Open VSX.")
 
     publisher = metadata.get("publisher") or resolved_id.split(".", 1)[0]
     name = metadata.get("extension_name") or resolved_id.split(".", 1)[1]
@@ -156,10 +161,16 @@ def download_marketplace_vsix(
     if not target_version:
         raise MarketplaceDownloadError(f"Could not resolve a version to download for {resolved_id}.")
 
-    download_url = (
+    download_url = str(metadata.get("download_url") or "") or (
         f"https://marketplace.visualstudio.com/_apis/public/gallery/publishers/{publisher}/"
         f"vsextensions/{name}/{target_version}/vspackage"
     )
+    download_urls = [download_url]
+    if metadata.get("registry") != "openvsx":
+        openvsx_metadata, _ = _fetch_openvsx_metadata(resolved_id)
+        openvsx_url = str((openvsx_metadata or {}).get("download_url") or "")
+        if openvsx_url and openvsx_url not in download_urls:
+            download_urls.append(openvsx_url)
 
     destination_root = Path(destination_dir) if destination_dir else Path(tempfile.gettempdir())
     destination_root.mkdir(parents=True, exist_ok=True)
@@ -169,7 +180,19 @@ def download_marketplace_vsix(
 
     try:
         with os.fdopen(fd, "wb") as handle:
-            _download_to_file(download_url, handle, max_bytes=max_bytes, timeout=timeout)
+            failures: list[str] = []
+            for candidate_url in download_urls:
+                handle.seek(0)
+                handle.truncate(0)
+                try:
+                    _download_to_file(candidate_url, handle, max_bytes=max_bytes, timeout=timeout)
+                    if registry_out is not None:
+                        registry_out["registry"] = "openvsx" if "open-vsx.org" in candidate_url else "vs-marketplace"
+                    break
+                except MarketplaceDownloadError as exc:
+                    failures.append(str(exc))
+            else:
+                raise MarketplaceDownloadError("; ".join(failures))
     except MarketplaceDownloadError:
         out_path.unlink(missing_ok=True)
         raise
@@ -213,11 +236,11 @@ def search_marketplace_extensions(query: str, page_size: int = MAX_SEARCH_RESULT
         }],
         "flags": 914,
     }).encode("utf-8")
-    data = _http_post_json(MARKETPLACE_EXTENSIONQUERY_URL, body, timeout=15)
     try:
+        data = _http_post_json(MARKETPLACE_EXTENSIONQUERY_URL, body, timeout=15)
         raw_results = data.get("results", [{}])[0].get("extensions", [])
-    except (AttributeError, IndexError):
-        return []
+    except (AttributeError, IndexError, OSError, urllib.error.URLError, json.JSONDecodeError):
+        raw_results = []
     results: list[dict[str, Any]] = []
     for raw in raw_results:
         if not isinstance(raw, dict):
@@ -225,7 +248,41 @@ def search_marketplace_extensions(query: str, page_size: int = MAX_SEARCH_RESULT
         row = _normalize_marketplace_search_row(raw)
         if row:
             results.append(row)
-    return results
+    try:
+        openvsx = _search_openvsx_extensions(query, page_size)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        openvsx = []
+    seen = {str(item.get("extension_id") or "").lower() for item in results}
+    results.extend(item for item in openvsx if str(item.get("extension_id") or "").lower() not in seen)
+    return results[:page_size]
+
+
+def _search_openvsx_extensions(query: str, page_size: int) -> list[dict[str, Any]]:
+    url = f"{OPENVSX_API_URL}/-/search?query={quote(query)}&size={page_size}"
+    data = json.loads(_http_get_text(url, timeout=15))
+    extensions = data.get("extensions") if isinstance(data, dict) else []
+    return [_normalize_openvsx_search_row(item) for item in extensions or [] if isinstance(item, dict)]
+
+
+def _normalize_openvsx_search_row(raw: dict[str, Any]) -> dict[str, Any]:
+    namespace = str(raw.get("namespace") or "")
+    name = str(raw.get("name") or "")
+    files = raw.get("files") if isinstance(raw.get("files"), dict) else {}
+    return {
+        "extension_id": f"{namespace}.{name}",
+        "display_name": raw.get("displayName") or name,
+        "publisher": namespace,
+        "publisher_display_name": namespace,
+        "publisher_verified": bool(raw.get("verified")),
+        "short_description": raw.get("description") or "",
+        "version": raw.get("version") or "",
+        "last_updated": raw.get("timestamp") or "",
+        "install_count": int(raw.get("downloadCount") or 0),
+        "rating_average": float(raw.get("averageRating") or 0),
+        "rating_count": int(raw.get("reviewCount") or 0),
+        "icon_url": files.get("icon") or "",
+        "registry": "openvsx",
+    }
 
 
 def _normalize_marketplace_search_row(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -510,6 +567,35 @@ def _fetch_marketplace_metadata(extension_id: str) -> tuple[dict[str, Any] | Non
     return _normalize_marketplace_extension(extension_id, extensions[0]), None
 
 
+def _fetch_openvsx_metadata(extension_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    publisher, name = extension_id.split(".", 1)
+    try:
+        raw = json.loads(_http_get_text(f"{OPENVSX_API_URL}/{publisher}/{name}", timeout=15))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {"extension_id": extension_id, "found": False}, None
+        return None, str(exc)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return None, str(exc)
+    files = raw.get("files") if isinstance(raw.get("files"), dict) else {}
+    return {
+        "extension_id": extension_id,
+        "found": True,
+        "publisher": raw.get("namespace") or publisher,
+        "publisher_display_name": raw.get("namespaceDisplayName") or raw.get("namespace") or publisher,
+        "publisher_verified": bool(raw.get("verified")),
+        "display_name": raw.get("displayName") or name,
+        "extension_name": raw.get("name") or name,
+        "version": raw.get("version") or "",
+        "last_updated": raw.get("timestamp") or "",
+        "install_count": int(raw.get("downloadCount") or 0),
+        "rating_average": float(raw.get("averageRating") or 0),
+        "rating_count": int(raw.get("reviewCount") or 0),
+        "download_url": files.get("download") or "",
+        "registry": "openvsx",
+    }, None
+
+
 def _fetch_repository_metadata_many(repo_urls: list[str]) -> tuple[dict[str, dict[str, Any] | None], list[dict[str, str]]]:
     unique = [url for url in dict.fromkeys(repo_urls) if url]
     out: dict[str, dict[str, Any] | None] = {}
@@ -576,6 +662,7 @@ def _normalize_marketplace_extension(extension_id: str, raw: dict[str, Any]) -> 
         "install_count": int(stats.get("install") or stats.get("installs") or 0),
         "rating_average": float(stats.get("averagerating") or stats.get("averageRating") or 0),
         "rating_count": int(stats.get("ratingcount") or stats.get("ratingCount") or 0),
+        "registry": "vs-marketplace",
     }
     return metadata
 
