@@ -1,63 +1,65 @@
-name: Deep Scan
+name: Deep Scan worker
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
-    inputs:
-      job_id: { description: "Durable website scan job id", required: true, type: string }
-      extension_id: { description: "publisher.extension", required: true, type: string }
-      version: { description: "Exact published version", required: true, type: string }
-      callback_url: { description: "Signed result ingestion endpoint", required: true, type: string }
 
 permissions:
   contents: read
 
-concurrency:
-  group: deep-scan-${{ inputs.extension_id }}-${{ inputs.version }}
-  cancel-in-progress: false
-
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      - name: Claim queued scan
+        id: claim
+        env:
+          SCAN_CLAIM_URL: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim
+          SCAN_RUNNER_ID: github-actions-${{ github.run_id }}
+          SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
+        run: python scripts/claim_scan.py
       - name: Install analyzers
+        if: steps.claim.outputs.has_job == 'true'
         run: python -m pip install -e '.[analysis]'
       - name: Scan exact artifact
+        if: steps.claim.outputs.has_job == 'true'
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
         run: >-
           ide-scanner scan
-          --extension-id '${{ inputs.extension_id }}'
-          --version '${{ inputs.version }}'
+          --extension-id '${{ steps.claim.outputs.extension_id }}'
+          --version '${{ steps.claim.outputs.version }}'
           --profile deep
           --online
           --format bundle.json
           --include-raw-evidence
           --output scan-bundle.json
       - name: Submit signed result
-        if: success()
+        if: steps.claim.outputs.has_job == 'true' && success()
         env:
-          SCAN_JOB_ID: ${{ inputs.job_id }}
-          SCAN_CALLBACK_URL: ${{ inputs.callback_url }}
+          SCAN_JOB_ID: ${{ steps.claim.outputs.job_id }}
+          SCAN_CALLBACK_URL: ${{ steps.claim.outputs.callback_url }}
           SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
         run: python scripts/callback_scan.py scan-bundle.json
       - name: Report workflow failure
-        if: failure()
+        if: steps.claim.outputs.has_job == 'true' && failure()
         env:
-          SCAN_JOB_ID: ${{ inputs.job_id }}
-          SCAN_CALLBACK_URL: ${{ inputs.callback_url }}
+          SCAN_JOB_ID: ${{ steps.claim.outputs.job_id }}
+          SCAN_CALLBACK_URL: ${{ steps.claim.outputs.callback_url }}
           SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
-          SCAN_ERROR: Deep Scan failed. Inspect the linked GitHub Actions run for analyzer or registry errors.
+          SCAN_ERROR: Deep Scan failed before a canonical report was produced.
         run: python scripts/callback_scan.py
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: steps.claim.outputs.has_job == 'true' && always()
         with:
-          name: deep-scan-${{ inputs.job_id }}
+          name: deep-scan-${{ steps.claim.outputs.job_id }}
           path: scan-bundle.json
           retention-days: 7
           if-no-files-found: ignore
