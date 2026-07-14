@@ -28,6 +28,7 @@ jobs:
         if: steps.claim.outputs.has_job == 'true'
         run: python -m pip install -e '.[analysis]'
       - name: Scan exact artifact
+        id: analyze
         if: steps.claim.outputs.has_job == 'true'
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
@@ -48,7 +49,7 @@ jobs:
           SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
         run: python scripts/callback_scan.py scan-bundle.json
       - name: Report workflow failure
-        if: steps.claim.outputs.has_job == 'true' && failure()
+        if: steps.claim.outputs.has_job == 'true' && steps.analyze.outcome == 'failure'
         env:
           SCAN_JOB_ID: ${{ steps.claim.outputs.job_id }}
           SCAN_CALLBACK_URL: ${{ steps.claim.outputs.callback_url }}
