@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Scan profile. smart is the default.")
-    scan.add_argument("--format", choices=["json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to report.zip when --output ends in .zip, otherwise json.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
     scan.add_argument("--threat-feed", help="JSON feed of known malicious or suspicious extension ids.")
@@ -125,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
             from .report_bundle import build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
             return 0
+        if output_format == "terminal":
+            if args.output:
+                parser.error("scan --format terminal cannot write an output file; use --format report.zip or json.")
+            _emit_terminal_brief(report)
+            return 0
         if output_format in {"sarif", "sqlite"}:
             parser.error(f"scan --format {output_format} is reserved but not implemented yet")
         _emit(report, args.output)
@@ -209,7 +214,34 @@ def _scan_output_format(output: str | None, explicit_format: str | None) -> str:
         return explicit_format
     if output and output.lower().endswith(".zip"):
         return "report.zip"
-    return "json"
+    return "terminal" if sys.stdout.isatty() and not output else "json"
+
+
+def _emit_terminal_brief(report: dict[str, Any]) -> None:
+    """Human summary for interactive use; structured output remains the script contract."""
+    extensions = [item for item in report.get("extensions", []) if isinstance(item, dict)]
+    print("IDE Scanner security brief")
+    print(f"{len(extensions)} extension(s) assessed")
+    for extension in extensions:
+        extension_id = str(extension.get("extension_id") or extension.get("name") or "unknown extension")
+        decision = str(extension.get("decision") or "incomplete").upper()
+        risk = int(extension.get("risk_score") or 0)
+        malware = int(extension.get("malware_score") or 0)
+        coverage = extension.get("analysis_coverage") if isinstance(extension.get("analysis_coverage"), dict) else {}
+        percent = int(coverage.get("coverage_percent") or 0)
+        print(f"\n{extension_id}  {decision}")
+        print(f"  Review priority {risk}/100 | Malware evidence {malware}/100 | Coverage {percent}%")
+        reason = str(extension.get("decision_reason") or extension.get("verdict_reason") or "No decision explanation recorded.")
+        print(f"  {reason}")
+        findings = [item for item in extension.get("findings", []) if isinstance(item, dict)]
+        for finding in findings[:3]:
+            severity = str(finding.get("severity") or "INFO")
+            summary = str(finding.get("evidence_summary") or finding.get("rule_id") or "Scanner observation")
+            refs = finding.get("file_refs") if isinstance(finding.get("file_refs"), list) else []
+            location = f" · {refs[0]}" if refs else ""
+            print(f"  [{severity}] {summary}{location}")
+        if len(findings) > 3:
+            print(f"  + {len(findings) - 3} additional observation(s) in JSON or report bundle")
 
 
 def _scan_source(installed: bool, paths: list[str], extension_ids: list[str], fixtures: bool) -> str:
