@@ -273,13 +273,16 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
             _add_code_findings(extension_id, version, rel, text, findings, capabilities, analyze_generated=is_entrypoint)
-        if suffix in JS_AST_EXTS and (is_entrypoint or not _is_generated_code_blob(rel, text)):
-            _add_ast_findings(extension_id, version, rel, text, findings)
+        if suffix in JS_AST_EXTS:
+            generated_blob = _is_generated_code_blob(rel, text)
+            if is_entrypoint or not generated_blob:
+                _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
     provider_findings, provider_statuses = run_static_providers(path, extension_id, version)
     findings.extend(provider_findings)
+    findings = _dedupe_findings(findings)
     analysis_coverage["providers"] = {
         "native_static": {"provider": "native_static", "status": "completed", "required": True},
         "javascript_ast": {"provider": "javascript_ast", "status": "completed", "required": True},
@@ -880,6 +883,13 @@ def _add_workflow_findings(extension_id: str, version: str, rel: str, text: str,
         ))
 
 
+def _artifact_evidence(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"path": str(a["path"]), "sha256": a["sha256"], "size_bytes": a["size_bytes"]}
+        for a in artifacts
+    ]
+
+
 def _add_artifact_inventory_findings(
     extension_id: str,
     version: str,
@@ -890,48 +900,73 @@ def _add_artifact_inventory_findings(
     path: Path | None = None,
 ) -> None:
     all_paths = {str(entry.get("path")) for entry in artifact_inventory.get("_all_file_hashes", [])}
+    packed_artifacts: list[dict[str, Any]] = []
+    native_artifacts: list[dict[str, Any]] = []
     for artifact in artifact_inventory["risky_artifacts"]:
         rel = str(artifact["path"])
         kind = str(artifact["kind"])
-        rule_id = "native-or-packed-artifact" if kind == "native" else "packed-artifact"
-        category = "artifact" if kind == "native" else "provenance"
-        recommendation = (
-            "Confirm the binary is expected, signed, and published by the same trusted vendor."
-            if kind == "native"
-            else "Inspect archive contents and verify the packed artifact is expected and reproducible."
+        if kind == "native":
+            native_artifacts.append(artifact)
+            capabilities.setdefault("native_code", {"id": "native_code", "evidence": []})["evidence"].append(rel)
+            if not _has_origin_evidence(path, rel, all_paths):
+                findings.append(_finding(
+                    extension_id,
+                    version,
+                    "binary-without-origin",
+                    "provenance",
+                    "MEDIUM",
+                    0.55,
+                    f"Native binary {rel} has no companion checksum or signature file and no documented provenance.",
+                    [rel],
+                    "Publish a checksum/signature alongside the binary or document its build origin in SECURITY.md/README.",
+                    {"sha256": artifact["sha256"]},
+                ))
+        else:
+            packed_artifacts.append(artifact)
+            capabilities.setdefault("packed_artifacts", {"id": "packed_artifacts", "evidence": []})["evidence"].append(rel)
+
+    # Emit one aggregate finding per kind rather than one per file. A language
+    # server that legitimately ships dozens of jars or native binaries would
+    # otherwise flood the report with identical review evidence and read as
+    # broken. Scoring is unaffected: component scores use max(), not counts.
+    if native_artifacts:
+        rels = [str(a["path"]) for a in native_artifacts]
+        summary = (
+            f"Extension contains a native artifact: {rels[0]}."
+            if len(native_artifacts) == 1
+            else f"Extension contains {len(native_artifacts)} native artifacts (e.g. {rels[0]})."
         )
         findings.append(_finding(
             extension_id,
             version,
-            rule_id,
-            category,
+            "native-or-packed-artifact",
+            "artifact",
             "MEDIUM",
-            0.62 if kind == "native" else 0.58,
-            f"Extension contains a {kind} artifact: {rel}.",
-            [rel],
-            recommendation,
-            {
-                "sha256": artifact["sha256"],
-                "size_bytes": artifact["size_bytes"],
-                "kind": kind,
-            },
+            0.62,
+            summary,
+            rels,
+            "Confirm the binaries are expected, signed, and published by the same trusted vendor.",
+            {"kind": "native", "count": len(native_artifacts), "artifacts": _artifact_evidence(native_artifacts)},
         ))
-        capability_id = "native_code" if kind == "native" else "packed_artifacts"
-        capabilities.setdefault(capability_id, {"id": capability_id, "evidence": []})["evidence"].append(rel)
-
-        if kind == "native" and not _has_origin_evidence(path, rel, all_paths):
-            findings.append(_finding(
-                extension_id,
-                version,
-                "binary-without-origin",
-                "provenance",
-                "MEDIUM",
-                0.55,
-                f"Native binary {rel} has no companion checksum or signature file and no documented provenance.",
-                [rel],
-                "Publish a checksum/signature alongside the binary or document its build origin in SECURITY.md/README.",
-                {"sha256": artifact["sha256"]},
-            ))
+    if packed_artifacts:
+        rels = [str(a["path"]) for a in packed_artifacts]
+        summary = (
+            f"Extension contains a packed artifact: {rels[0]}."
+            if len(packed_artifacts) == 1
+            else f"Extension contains {len(packed_artifacts)} packed artifacts (e.g. {rels[0]})."
+        )
+        findings.append(_finding(
+            extension_id,
+            version,
+            "packed-artifact",
+            "provenance",
+            "MEDIUM",
+            0.58,
+            summary,
+            rels,
+            "Inspect archive contents and verify the packed artifacts are expected and reproducible.",
+            {"kind": "packed", "count": len(packed_artifacts), "artifacts": _artifact_evidence(packed_artifacts)},
+        ))
 
     matches = _known_bad_matches(artifact_inventory, known_bad_hashes)
     if matches:
@@ -2353,16 +2388,46 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+# AST rules that are noise on minified/generated bundles because the pattern is
+# structurally ubiquitous there. Retained on hand-written code.
+_GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-sensitive-access"}
+
+
+def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
+    """Collapse findings that share a finding_id (identical rule + file_refs +
+    evidence summary) to the first occurrence, preserving order. Multiple
+    analyzers and code paths can surface the same fact; the report should state
+    it once. Scoring is unaffected -- component scores use max(), not counts."""
+    seen: set[str] = set()
+    unique: list[Finding] = []
+    for finding in findings:
+        if finding.finding_id in seen:
+            continue
+        seen.add(finding.finding_id)
+        unique.append(finding)
+    return unique
+
+
 def _add_ast_findings(
     extension_id: str,
     version: str,
     rel: str,
     text: str,
     findings: list[Finding],
+    generated: bool = False,
 ) -> None:
     for item in analyze_js_source(rel, text):
         rule_id = str(item.get("rule") or "")
         if not rule_id:
+            continue
+        # Minified/bundled output makes computed member access (obj[x]()) and
+        # bracket-notation property access ubiquitous and structurally
+        # meaningless -- every property is emitted this way. Suppressing these
+        # two rules on generated blobs removes hundreds of zero-signal findings
+        # per bundle. `ast-constructed-dynamic-argument` (call target built via
+        # string-concat/fromCharCode) is a genuine obfuscation signal even in
+        # minified code, so it is retained.
+        if generated and rule_id in _GENERATED_NOISE_AST_RULES:
             continue
         severity = str(item.get("severity") or "MEDIUM")
         if severity not in _SEVERITY_TO_CONFIDENCE:
