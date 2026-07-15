@@ -1,0 +1,33 @@
+name: IDE Scanner extension policy
+description: Scan repository-declared VS Code extensions as exact VSIX artifacts and enforce approvals.
+inputs:
+  policy:
+    description: Path to policy JSON relative to the repository root.
+    required: false
+    default: .ide-scanner/policy.json
+  lock:
+    description: Path to exact-artifact lock JSON relative to the repository root.
+    required: false
+    default: .ide-scanner/extensions.lock.json
+  write-lock:
+    description: Generate or update the lock file instead of enforcing it.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: python -m pip install -e '${{ github.action_path }}[analysis]'
+    - shell: bash
+      run: >-
+        python '${{ github.action_path }}/scripts/policy_gate.py'
+        --policy '${{ inputs.policy }}'
+        --lock '${{ inputs.lock }}'
+        --output ide-scanner-policy-result.json
+        ${{ inputs.write-lock == 'true' && '--write-lock' || '' }}
+    - shell: bash
+      if: always()
+      run: |
+        if [ -f ide-scanner-policy-result.json ]; then
+          cat ide-scanner-policy-result.json >> "$GITHUB_STEP_SUMMARY"
+        fi
