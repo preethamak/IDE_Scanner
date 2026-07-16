@@ -3,7 +3,7 @@ from __future__ import annotations
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.07.11"
+RULESET_VERSION = "2026.07.16"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -46,10 +46,10 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
     "encoded-dynamic-execution": {
         "title": "Encoded dynamic execution",
         "category": "code",
-        "evidence_class": "correlated",
+        "evidence_class": "weak",
         "default_severity": "HIGH",
-        "description": "YARA matched encoded payload handling combined with dynamic execution markers.",
-        "recommendation": "Inspect the decoded payload and block the artifact when its origin cannot be verified.",
+        "description": "YARA matched encoded payload handling and dynamic-execution markers in one file.",
+        "recommendation": "Use this as supporting context. Escalate only when a data-flow or runtime rule confirms decoded content reaches execution.",
         "benchmark_tags": ["yara", "obfuscation", "execution"],
     },
     "embedded-pe-artifact": {

@@ -18,6 +18,7 @@ class RuleRegistryTests(unittest.TestCase):
         self.assertEqual(rules["untrusted-workspace-input-to-process"].engine, "semgrep")
         self.assertEqual(rules["unicode-evasion"].engine, "yara")
         self.assertEqual(rules["ast-dynamic-call-target"].engine, "javascript-ast")
+        self.assertEqual(rules["encoded-dynamic-execution"].decision_effect, "review-context")
         self.assertEqual(rules["known-bad-artifact"].decision_effect, "block-by-default")
         self.assertEqual(rules["network-access"].decision_effect, "review-context")
 

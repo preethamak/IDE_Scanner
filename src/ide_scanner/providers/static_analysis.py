@@ -18,7 +18,10 @@ _SEMGREP_RULES = _PROJECT_ROOT / "rules" / "semgrep"
 _YARA_RULES = _PROJECT_ROOT / "rules" / "yara" / "ide-scanner.yar"
 _YARA_RULE_MAP = {
     "ide_scanner_unicode_evasion": ("unicode-evasion", "code", "MEDIUM", "weak"),
-    "ide_scanner_encoded_dynamic_execution": ("encoded-dynamic-execution", "code", "HIGH", "correlated"),
+    # YARA can only establish that markers co-occur in one file; it cannot prove
+    # that decoded data reaches execution. Keep it as context. The Semgrep taint
+    # rule is responsible for the verdict-driving source-to-sink claim.
+    "ide_scanner_encoded_dynamic_execution": ("encoded-dynamic-execution", "code", "HIGH", "weak"),
     "ide_scanner_embedded_pe": ("embedded-pe-artifact", "artifact", "MEDIUM", "provenance"),
 }
 

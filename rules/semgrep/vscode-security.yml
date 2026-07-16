@@ -10,10 +10,12 @@ rules:
       ide_scanner_severity: CRITICAL
     pattern-sources:
       - pattern-either:
-          - pattern: $VSCODE.window.showInputBox(...)
           - pattern: $CTX.secrets.get(...)
-          - pattern: $CONFIG.get(...)
-          - pattern: process.env.$KEY
+          - patterns:
+              - pattern: process.env.$KEY
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: '(?i).*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH).*'
     pattern-sinks:
       - pattern-either:
           - pattern: 'fetch($URL, {..., body: $DATA, ...})'
