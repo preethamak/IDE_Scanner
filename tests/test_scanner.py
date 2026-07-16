@@ -299,11 +299,32 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("credential-command-registration", rule_ids)
         self.assertIn("credential-inputbox-prompt", rule_ids)
         self.assertIn("credential-global-state-storage", rule_ids)
+        self.assertIn("credential-command-control", rule_ids)
         self.assertIn("clipboard-read-near-secret-input", rule_ids)
         self.assertIn("credential-dataflow-to-network", rule_ids)
         self.assertEqual(report.verdict, "suspicious")
         self.assertEqual(report.score_details["basis"], "cross_extension_exposure")
         self.assertGreaterEqual(report.risk_score, 90)
+
+    def test_far_apart_credential_surfaces_do_not_create_control_chain(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"far-surfaces","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            padding = "// unrelated implementation detail\n" * 200
+            (root / "extension.js").write_text(
+                "vscode.window.showInputBox({ prompt: 'Enter API token' });\n"
+                + padding
+                + "context.globalState.update('apiToken', 'documented default');\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("credential-command-control", rule_ids)
 
     def test_protect_your_secrets_csv_adapter_normalizes_labels(self) -> None:
         with TemporaryDirectory() as tmp:

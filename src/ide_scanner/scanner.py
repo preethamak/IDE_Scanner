@@ -1026,7 +1026,14 @@ def _add_code_findings(
     has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
-    has_agent_surface = bool(re.search(r"(languageModel|chatParticipant|mcp|toolInvocation|invokeTool)", text, re.I))
+    # A standalone "mcp" token is common in documentation, error messages, and
+    # word lists. Require an actual agent API or protocol identifier before using
+    # it as one leg of an exfiltration chain.
+    has_agent_surface = bool(re.search(
+        r"(?:languageModel|chatParticipant|toolInvocation|invokeTool|mcpServer|@modelcontextprotocol|register(?:Tool|ChatParticipant))",
+        text,
+        re.I,
+    ))
     secret_regex = _combined_secret_regex(secret_refs)
 
     for rule in CODE_RULES:
@@ -1127,9 +1134,9 @@ def _add_code_findings(
             [rel],
             "Treat as suspicious unless this is a clearly documented backup, cleanup, or migration tool.",
         ))
-    if has_obfuscation and has_dynamic_exec and has_network and _features_nearby(text, [
+    if has_obfuscation and _OBFUSCATION_EXEC_SINK_RE.search(text) and has_network and _features_nearby(text, [
         _OBFUSCATION_RE,
-        _DYNAMIC_EVAL_RE,
+        _OBFUSCATION_EXEC_SINK_RE,
         NETWORK_SINK_RE,
     ]):
         findings.append(_finding(
@@ -1160,7 +1167,7 @@ def _add_code_findings(
             "Block or manually review persistence behavior in IDE extensions.",
         ))
     if has_agent_surface and secret_refs and has_network and _features_nearby(text, [
-        re.compile(r"(languageModel|chatParticipant|mcp|toolInvocation|invokeTool)", re.I),
+        re.compile(r"(?:languageModel|chatParticipant|toolInvocation|invokeTool|mcpServer|@modelcontextprotocol|register(?:Tool|ChatParticipant))", re.I),
         secret_regex,
         NETWORK_SINK_RE,
     ]):
@@ -1226,11 +1233,30 @@ _OBFUSCATION_RE = re.compile(
 # match RegExp.prototype.exec()/EventEmitter and unrelated identifiers, the latter matches
 # ordinary dynamic ES module imports. spawn(/exec( are only honored when qualified by the
 # child_process module or the unambiguous *Sync/*File variants (see _PROCESS_EXEC_RE).
+# Real OS-process execution: the child_process module or its unambiguous *Sync/*File
+# helpers, plus JVM process APIs. Module imports alone are not execution, and bare
+# exec(/spawn( are deliberately excluded — they match RegExp.prototype.exec(),
+# EventEmitter.spawn, and any identifier ending in those letters.
+_PROCESS_EXEC_RE = re.compile(
+    r"(?:\b(?:child_process|cp)\b|require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\))"
+    r"\s*\.\s*(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\("
+    r"|\b(?:execSync|execFile|execFileSync|spawnSync)\s*\("
+    r"|\bProcessBuilder\b|Runtime\.getRuntime\(\)\.exec"
+)
+
+# Dynamic execution used by general correlation rules: dynamic code evaluation
+# or an identifiable OS-process call. It intentionally does not match an import
+# string, bare exec(), bare spawn(), or ordinary dynamic import().
 _DYNAMIC_EVAL_RE = re.compile(
     r"\beval\s*\(|new Function\s*\(|vm\.runIn|vm\.compileFunction\s*\("
-    r"|child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
-    r"|\bspawnSync\s*\(|\bspawn\s*\(|\bexec\s*\("
+    + "|" + _PROCESS_EXEC_RE.pattern
 )
+
+# The obfuscation chain has an independent strong signal (decode/obfuscation plus
+# network transfer). Keep bare exec/spawn as a sink only in this narrow context so
+# the synthetic and real decoded-payload patterns retain recall without turning
+# ordinary RegExp.exec() into a general execution capability.
+_OBFUSCATION_EXEC_SINK_RE = re.compile(_DYNAMIC_EVAL_RE.pattern + r"|\b(?:exec|spawn)\s*\(")
 
 # Explicit shell execution. Bare exec() is deliberately excluded because it is
 # overwhelmingly RegExp.prototype.exec() in bundled JavaScript. This pattern
@@ -1240,21 +1266,10 @@ _SHELL_EXEC_RE = re.compile(
     r"|(?:\b(?:child_process|cp)\b|require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\))\s*\.\s*exec(?:Sync)?\s*\("
 )
 
-# Real OS-process execution: the child_process module or its unambiguous *Sync/*File
-# helpers, plus JVM process APIs. Bare exec(/spawn( are deliberately excluded — they match
-# RegExp.prototype.exec(), EventEmitter.spawn, and any identifier ending in those letters,
-# which flooded legitimate bundles with false positives.
-_PROCESS_EXEC_RE = re.compile(
-    r"child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
-    r"|\bspawnSync\s*\(|\bProcessBuilder\b|Runtime\.getRuntime\(\)\.exec"
-)
-
 # Execution sinks for credential-dataflow-to-process: real process execution (above) or
 # dynamic code evaluation. Used with a proximity gate against credential source surfaces.
 _EXEC_SINK_RE = re.compile(
-    r"child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
-    r"|\bspawnSync\s*\(|\bProcessBuilder\b|Runtime\.getRuntime\(\)\.exec"
-    r"|\beval\s*\(|new Function\s*\(|vm\.runIn"
+    _PROCESS_EXEC_RE.pattern + r"|\beval\s*\(|new Function\s*\(|vm\.runIn"
 )
 
 _CLIPBOARD_READ_RE = re.compile(r"(?:env\s*\.\s*)?clipboard\s*\.\s*readText\s*\(")
@@ -1409,7 +1424,16 @@ def _add_cross_extension_code_findings(
                 return True
         return False
 
-    if sensitive_input and sensitive_global_state:
+    def _surfaces_nearby(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> bool:
+        return any(
+            isinstance(a.get("pos"), int)
+            and isinstance(b.get("pos"), int)
+            and abs(a["pos"] - b["pos"]) <= CREDENTIAL_FLOW_WINDOW
+            for a in left
+            for b in right
+        )
+
+    if sensitive_input and sensitive_global_state and _surfaces_nearby(sensitive_input, sensitive_global_state):
         findings.append(_finding(
             extension_id,
             version,
