@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "corrections": [
+    {
+      "extension_id": "ms-azuretools.vscode-docker",
+      "version": "2.0.0",
+      "original_expected_decision": "review",
+      "corrected_expected_decision": "allow",
+      "status": "label-hypothesis-corrected-after-first-pass",
+      "reason": "Version 2.0.0 is a declarative Docker Extension Pack with no executable entrypoint. Its Container Tools dependency provides the privileged runtime behavior described by the original benchmark row.",
+      "evidence": "https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker"
+    }
+  ]
+}

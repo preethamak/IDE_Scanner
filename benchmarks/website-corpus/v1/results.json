@@ -1,0 +1,1267 @@
+{
+  "artifact_bytes": 697056453,
+  "artifact_count": 30,
+  "cohort_id": "benchmarklist-website-v1",
+  "final_decision_counts": {
+    "allow": 4,
+    "review": 26
+  },
+  "final_regression_metrics": {
+    "admitted": 30,
+    "complete": 30,
+    "coverage_rate": {
+      "denominator": 30,
+      "numerator": 30,
+      "rate": 1.0,
+      "wilson_95": [
+        0.886487,
+        1.0
+      ]
+    },
+    "exact_routing_among_complete": {
+      "denominator": 30,
+      "numerator": 30,
+      "rate": 1.0,
+      "wilson_95": [
+        0.886487,
+        1.0
+      ]
+    },
+    "fresh_admitted": 21,
+    "fresh_complete": 21,
+    "fresh_exact_routing_among_complete": {
+      "denominator": 21,
+      "numerator": 21,
+      "rate": 1.0,
+      "wilson_95": [
+        0.845361,
+        1
+      ]
+    },
+    "legitimate_false_block_rate_among_complete": {
+      "denominator": 30,
+      "numerator": 0,
+      "rate": 0.0,
+      "wilson_95": [
+        0,
+        0.113513
+      ]
+    }
+  },
+  "first_pass_metrics": {
+    "admitted": 30,
+    "complete": 23,
+    "coverage_rate": {
+      "denominator": 30,
+      "numerator": 23,
+      "rate": 0.766667,
+      "wilson_95": [
+        0.590717,
+        0.882076
+      ]
+    },
+    "exact_routing_among_complete": {
+      "denominator": 23,
+      "numerator": 20,
+      "rate": 0.869565,
+      "wilson_95": [
+        0.678725,
+        0.954623
+      ]
+    },
+    "fresh_admitted": 21,
+    "fresh_complete": 15,
+    "fresh_exact_routing_among_complete": {
+      "denominator": 15,
+      "numerator": 13,
+      "rate": 0.866667,
+      "wilson_95": [
+        0.62118,
+        0.962639
+      ]
+    },
+    "legitimate_false_block_rate_among_complete": {
+      "denominator": 23,
+      "numerator": 1,
+      "rate": 0.043478,
+      "wilson_95": [
+        0.007717,
+        0.209912
+      ]
+    }
+  },
+  "malicious_development_regression": {
+    "metric_eligible": false,
+    "reason": "The malicious sample informed scanner policy and is development data, not a frozen holdout.",
+    "rows": [
+      {
+        "coverage_status": "complete",
+        "decision": "allow",
+        "extension_id": "redhat.vscode-yaml",
+        "malware_score": 0,
+        "risk_score": 0,
+        "verdict": "clean",
+        "version": "1.24.0"
+      },
+      {
+        "coverage_status": "complete",
+        "decision": "review",
+        "extension_id": "streetsidesoftware.code-spell-checker",
+        "malware_score": 0,
+        "risk_score": 51,
+        "verdict": "review",
+        "version": "4.5.6"
+      },
+      {
+        "coverage_status": "complete",
+        "decision": "review",
+        "extension_id": "rust-lang.rust-analyzer",
+        "malware_score": 0,
+        "risk_score": 41,
+        "verdict": "review",
+        "version": "0.3.2971"
+      },
+      {
+        "coverage_status": "complete",
+        "decision": "block",
+        "extension_id": "bingcha.bcai-tools",
+        "malware_score": 82,
+        "risk_score": 87,
+        "verdict": "suspicious",
+        "version": "4.0.37"
+      }
+    ]
+  },
+  "publication_status": {
+    "ecosystem_accuracy_claim": "not-supported",
+    "malicious_recall_claim": "not-supported-no-fresh-malicious-holdout",
+    "methodology_and_results": "publishable-with-limitations"
+  },
+  "raw_report_sha256": {
+    "final": "391bb2fef6f85405d02a246e7f720daa117062937913e591bf7f9c8b6bb13979",
+    "first_pass": "e0040281192d0b9883b7ee95684816c0506d29ef08b11f3618017e47e76db73c",
+    "malicious_regression": "cc4b0428e9241ca2b54a5dc64e986d6750db765ce7ff1b37885955993f3ae89c",
+    "post_fix": "73b66cdea01dd0fd9f1f4be9a0a2456355b61472e62a103bac93b657b6c9999e"
+  },
+  "rows": [
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "amazonwebservices.aws-toolkit-vscode",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "9197f84348510b68ed96e7f621f55b9fae434cfd651b5ff458e32c6ca21f3e03",
+      "split": "fresh-artifact-holdout",
+      "version": "4.10.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "security-tool-control",
+      "extension_id": "aquasecurityofficial.trivy-vulnerability-scanner",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 71,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 71,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 71,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "421289db1a46d354144f4539dd86218ab4b94c13098fdf4ef4ee1b44a7179d02",
+      "split": "fresh-artifact-holdout",
+      "version": "1.8.11"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "ai-agentic",
+      "extension_id": "Continue.continue",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 98,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "block",
+        "malware_score": 89,
+        "risk_score": 98,
+        "severity": "HIGH",
+        "verdict": "suspicious"
+      },
+      "sha256": "28e1c4691f090080f9872ddbbd450e32a822759fefea6e6c12f96a45929351b9",
+      "split": "fresh-artifact-holdout",
+      "version": "2.1.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "dbaeumer.vscode-eslint",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "a2ed5477988332d5137af55bbed24d5e319d2f3eca32ab33a2b07bfeccb58a18",
+      "split": "prior-exposure",
+      "version": "3.0.33"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "eamodio.gitlens",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "20a80baa19fbeb69f75121bb209f8944ac6223dd0a28c6133884a8fbce2bfd1f",
+      "split": "prior-exposure",
+      "version": "2026.7.160544"
+    },
+    {
+      "artifact_aware_expected_decision": "allow",
+      "classification": "benign-control",
+      "extension_id": "esbenp.prettier-vscode",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "frozen_expected_decision": "allow",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "sha256": "46d22a567b35ebe5bdffd7280457742cd67e65d7e1b250bb775ab2be86479a42",
+      "split": "fresh-artifact-holdout",
+      "version": "12.4.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "formulahendry.code-runner",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 47,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 47,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 47,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144",
+      "split": "fresh-artifact-holdout",
+      "version": "0.12.2"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "ai-agentic",
+      "extension_id": "GitHub.copilot",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 88,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 89,
+        "risk_score": 99,
+        "severity": "HIGH",
+        "verdict": "suspicious"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "block",
+        "malware_score": 89,
+        "risk_score": 99,
+        "severity": "HIGH",
+        "verdict": "suspicious"
+      },
+      "sha256": "ed18caf3e3cd23eac8b9141f0b0a6fb30022cfdf7575a7113b6a9885cbf5be19",
+      "split": "fresh-artifact-holdout",
+      "version": "1.388.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "ai-agentic",
+      "extension_id": "GitHub.copilot-chat",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 63,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 78,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 63,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "block",
+        "malware_score": 82,
+        "risk_score": 87,
+        "severity": "HIGH",
+        "verdict": "suspicious"
+      },
+      "sha256": "7852df60c171be0b59b66c0bb317e778c8c3e233a0f3f524d04bbfebe03aa1d6",
+      "split": "prior-exposure",
+      "version": "0.48.1"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "GitHub.vscode-pull-request-github",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 58,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 68,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 68,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "5e40bb78c3af7ad2df6c30d6c58a5f3b1c483e4151db3e07640007859e9e2907",
+      "split": "fresh-artifact-holdout",
+      "version": "0.159.2026071604"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "golang.go",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "9f5959fb17ba0a8dbd804387ddda50975fcaa9dd5267aa33eaaa89912072aacb",
+      "split": "fresh-artifact-holdout",
+      "version": "0.56.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "humao.rest-client",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "0d2cd9f70181d0854af2060eccb2db4f4dd65f7c52991fc85156640f371ccca7",
+      "split": "fresh-artifact-holdout",
+      "version": "0.25.1"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "mhutchie.git-graph",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 57,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 57,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 57,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "b0779a30caf9866434900159c71322464e9fd267e3920d9732703819ff831f00",
+      "split": "prior-exposure",
+      "version": "1.30.0"
+    },
+    {
+      "artifact_aware_expected_decision": "allow",
+      "classification": "legitimate-privileged",
+      "extension_id": "ms-azuretools.vscode-docker",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": {
+        "corrected_expected_decision": "allow",
+        "evidence": "https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker",
+        "extension_id": "ms-azuretools.vscode-docker",
+        "original_expected_decision": "review",
+        "reason": "Version 2.0.0 is a declarative Docker Extension Pack with no executable entrypoint. Its Container Tools dependency provides the privileged runtime behavior described by the original benchmark row.",
+        "status": "label-hypothesis-corrected-after-first-pass",
+        "version": "2.0.0"
+      },
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "sha256": "631cac7a4a7d9c2f7583b339a17a69385f917f825ffcf0fe5f78a799d55f566a",
+      "split": "prior-exposure",
+      "version": "2.0.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "ms-kubernetes-tools.vscode-kubernetes-tools",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 54,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 54,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 54,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "b7ae0e17eaf14e98675abd413546311b4fd6fa000ff1dce2011a502bc148cd4e",
+      "split": "fresh-artifact-holdout",
+      "version": "1.4.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "ms-python.python",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 58,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 58,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 58,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8",
+      "split": "prior-exposure",
+      "version": "2026.5.2026070801"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "ms-vscode-remote.remote-containers",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 56,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 56,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 56,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "b3bd40702da5dd7d1a99aac697da5c437f28deeec899d0bb6e78dd76a5c1b012",
+      "split": "prior-exposure",
+      "version": "0.467.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "ms-vscode-remote.remote-ssh",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 56,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "block",
+        "malware_score": 89,
+        "risk_score": 97,
+        "severity": "HIGH",
+        "verdict": "suspicious"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 56,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "862aaf35b715401389ff1e268d01e52a9efab3f077186bf1bb2e8b1a2d4e28ab",
+      "split": "fresh-artifact-holdout",
+      "version": "0.125.2026062315"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "credential-sensitive",
+      "extension_id": "ms-vscode.azure-account",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 30,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 30,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "c7fb78223cf1b0e1afd380734835ab43f2e1778276989fe25f0b755d7a709bbe",
+      "split": "fresh-artifact-holdout",
+      "version": "0.13.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "native-packed",
+      "extension_id": "ms-vscode.cpptools",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 63,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 63,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 63,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "e05cf0f982318849bae3ddf2ce930954826ad7075095e05c685befb8092db966",
+      "split": "fresh-artifact-holdout",
+      "version": "1.33.4"
+    },
+    {
+      "artifact_aware_expected_decision": "allow",
+      "classification": "benign-control",
+      "extension_id": "PKief.material-icon-theme",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "frozen_expected_decision": "allow",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "sha256": "d72c538c8b328fca3ded596f0e55aa3c2348c5de9781b8e9a85e6a35b56d1308",
+      "split": "prior-exposure",
+      "version": "5.36.1"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "redhat.java",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 55,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 55,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 55,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "1f6099292a4e811a6c437ef71ee25e4f1096a15aff88854822552e6b89161568",
+      "split": "fresh-artifact-holdout",
+      "version": "1.56.2026071508"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "legitimate-privileged",
+      "extension_id": "ritwickdey.LiveServer",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 53,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 53,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 53,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "0f8ef819d4c2007f1bfb3b8efb533e72796e29f06fee600c76d1fb17befb5b95",
+      "split": "prior-exposure",
+      "version": "5.7.10"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "ai-agentic",
+      "extension_id": "RooVeterinaryInc.roo-cline",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 61,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "caf96d596d69cb3427f00c3ca60492693135cc6b9f621aa062202903aa652735",
+      "split": "fresh-artifact-holdout",
+      "version": "3.54.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "native-packed",
+      "extension_id": "rust-lang.rust-analyzer",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 41,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 41,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 41,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "5ff02c55c7d5a7326e1a5087da6f680e73e14350602d6131b6e86c260e7f3085",
+      "split": "fresh-artifact-holdout",
+      "version": "0.4.2976"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "ai-agentic",
+      "extension_id": "saoudrizwan.claude-dev",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 55,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 96,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 55,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 73,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "a92973db05d0c293b55a2f4fe348559be00267e55f0a257d2c5de59ce90ca170",
+      "split": "fresh-artifact-holdout",
+      "version": "4.0.8"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "security-tool-control",
+      "extension_id": "semgrep.semgrep",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 51,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "a06ce8efc863025606cb98aff93f7f858121d90c88fb84df943e5d2073d79c36",
+      "split": "fresh-artifact-holdout",
+      "version": "1.17.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "security-tool-control",
+      "extension_id": "snyk-security.snyk-vulnerability-scanner",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 48,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 48,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 48,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "sha256": "5e6ea92b390f755218f17b5fbee4273406909dbcf0bf33e273558546dc8998b4",
+      "split": "fresh-artifact-holdout",
+      "version": "2.31.0"
+    },
+    {
+      "artifact_aware_expected_decision": "review",
+      "classification": "security-tool-control",
+      "extension_id": "SonarSource.sonarlint-vscode",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 58,
+        "severity": "MEDIUM",
+        "verdict": "review"
+      },
+      "first_pass": {
+        "coverage_percent": 99,
+        "coverage_status": "incomplete",
+        "decision": "incomplete",
+        "malware_score": 0,
+        "risk_score": 68,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "frozen_expected_decision": "review",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "review",
+        "malware_score": 0,
+        "risk_score": 68,
+        "severity": "HIGH",
+        "verdict": "review"
+      },
+      "sha256": "d755728fcd9d87b122717b34868fc5a88908b571432e387f9f601f229307fdcf",
+      "split": "fresh-artifact-holdout",
+      "version": "5.5.0"
+    },
+    {
+      "artifact_aware_expected_decision": "allow",
+      "classification": "benign-control",
+      "extension_id": "usernamehw.errorlens",
+      "final": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "first_pass": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "frozen_expected_decision": "allow",
+      "label_correction": null,
+      "post_fix": {
+        "coverage_percent": 100,
+        "coverage_status": "complete",
+        "decision": "allow",
+        "malware_score": 0,
+        "risk_score": 0,
+        "severity": "INFO",
+        "verdict": "clean"
+      },
+      "sha256": "edebbbcbd211d6ec52159d08a650e2785b778966dc99dc1fd6501c5eaf92e02f",
+      "split": "fresh-artifact-holdout",
+      "version": "3.28.0"
+    }
+  ],
+  "schema_version": "1.0"
+}
