@@ -25,6 +25,15 @@ _YARA_RULE_MAP = {
     "ide_scanner_embedded_pe": ("embedded-pe-artifact", "artifact", "MEDIUM", "provenance"),
 }
 
+_YARA_NON_EXECUTABLE_SUFFIXES = {".map", ".md", ".txt", ".json", ".jsonc"}
+
+
+def _ignore_yara_match(rule_name: str, rel: str) -> bool:
+    suffix = Path(rel).suffix.lower()
+    if rule_name == "ide_scanner_embedded_pe" and suffix in _YARA_NON_EXECUTABLE_SUFFIXES:
+        return True
+    return False
+
 
 def run_static_providers(root: Path, extension_id: str, version: str) -> tuple[list[Finding], dict[str, Any]]:
     findings: list[Finding] = []
@@ -154,6 +163,8 @@ def _run_yara(root: Path, extension_id: str, version: str) -> tuple[list[Finding
             rel = path.resolve().relative_to(root.resolve()).as_posix()
         except (OSError, ValueError):
             rel = path.as_posix()
+        if _ignore_yara_match(rule_name, rel):
+            continue
         findings.append(_provider_finding(
             extension_id,
             version,
@@ -195,6 +206,8 @@ def _run_yara_python(
                     continue
                 rule_id, category, severity, evidence_class = _YARA_RULE_MAP[match.rule]
                 rel = path.relative_to(root).as_posix()
+                if _ignore_yara_match(match.rule, rel):
+                    continue
                 findings.append(_provider_finding(
                     extension_id,
                     version,

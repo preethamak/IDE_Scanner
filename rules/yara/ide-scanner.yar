@@ -34,9 +34,12 @@ rule ide_scanner_encoded_dynamic_execution
 rule ide_scanner_embedded_pe
 {
   meta:
-    description = "Portable executable content embedded away from the start of a file"
+    description = "Portable executable content with DOS and PE signatures embedded in a file"
   strings:
     $mz = { 4D 5A }
+    $pe = { 50 45 00 00 }
   condition:
-    $mz in (1..filesize)
+    for any i in (1..#mz): (
+      @mz[i] > 0 and $pe in (@mz[i] + 0x20 .. @mz[i] + 0x1000)
+    )
 }
