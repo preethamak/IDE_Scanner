@@ -155,7 +155,7 @@ SENSITIVE_TEXT_RE = re.compile(
     r"refresh[-_ ]?token|refreshToken|auth[-_ ]?token|authToken|bearer|"
     r"password|passwd|pwd|secret|credential|private[-_ ]?key|privateKey|"
     r"client[-_ ]?secret|clientSecret|github[-_ ]?token|githubToken|npm[-_ ]?token|npmToken|"
-    r"openai\w*|anthropic\w*|claude\w*|gemini\w*|azure[-_ ]?key|azureKey|"
+    r"(?:openai|anthropic|claude|gemini|azure|cohere|mistral|huggingface|hf)[-_ ]?(?:api[-_ ]?)?(?:key|token|secret|credential)|"
     r"aws[-_ ]?(secret|key)|aws(secret|key)|webhook|session[-_ ]?token|sessionToken|cookie"
     r")",
     re.I,
@@ -1136,8 +1136,8 @@ def _add_code_findings(
             "Treat as suspicious unless this is a clearly documented backup, cleanup, or migration tool.",
         ))
     if has_obfuscation and has_dynamic_exec and has_network and _features_nearby(text, [
-        re.compile(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", re.I),
-        re.compile(r"\b(eval\(|new Function\(|vm\.runIn|import\s*\(|exec\(|spawn\()"),
+        _OBFUSCATION_RE,
+        _DYNAMIC_EVAL_RE,
         NETWORK_SINK_RE,
     ]):
         findings.append(_finding(
@@ -1185,7 +1185,7 @@ def _add_code_findings(
         ))
     if has_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
         DOWNLOAD_RE,
-        re.compile(r"\b(child_process|spawnSync|execSync|execFileSync|spawn\(|exec\(|ProcessBuilder|Runtime\.getRuntime\(\)\.exec)"),
+        _PROCESS_EXEC_RE,
     ]):
         findings.append(_finding(
             extension_id,
@@ -1209,6 +1209,55 @@ def _add_code_findings(
         has_network=has_network,
         has_shell_or_dynamic_exec=has_shell_exec or has_dynamic_exec or has_exec_file,
     )
+
+
+# Maximum character distance between a credential source surface and a sink for the
+# credential-dataflow-to-* correlated rules to fire. Sized to a few source lines: tight
+# enough to reject whole-bundle co-occurrence in minified files, loose enough to keep a
+# genuinely local capture->exfil sequence. Kept in sync with the _features_nearby budget.
+CREDENTIAL_FLOW_WINDOW = 1500
+
+# Obfuscation signal for the obfuscation-execution-network chain. Requires a RUN of at
+# least four consecutive \xNN hex escapes (real string-obfuscation) or an explicit base64
+# decode. A single \xNN matches benign ANSI terminal color codes (e.g. "\x1B[3...") which
+# every CLI-rendering extension contains, so a lone escape must not qualify.
+_OBFUSCATION_RE = re.compile(
+    r"(?:\\x[0-9a-f]{2}){4,}"
+    r"|atob\s*\("
+    r"|[Bb]uffer\.from\s*\([^)]*,\s*['\"]base64['\"]",
+    re.I,
+)
+
+# Dynamic execution sinks for the obfuscation-execution-network chain: dynamic code
+# evaluation (eval / Function constructor / vm) OR real OS-process execution (child_process
+# family). Deliberately excludes bare exec(/spawn( standing alone and import() — the former
+# match RegExp.prototype.exec()/EventEmitter and unrelated identifiers, the latter matches
+# ordinary dynamic ES module imports. spawn(/exec( are only honored when qualified by the
+# child_process module or the unambiguous *Sync/*File variants (see _PROCESS_EXEC_RE).
+_DYNAMIC_EVAL_RE = re.compile(
+    r"\beval\s*\(|new Function\s*\(|vm\.runIn|vm\.compileFunction\s*\("
+    r"|child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
+    r"|\bspawnSync\s*\(|\bspawn\s*\(|\bexec\s*\("
+)
+
+# Real OS-process execution: the child_process module or its unambiguous *Sync/*File
+# helpers, plus JVM process APIs. Bare exec(/spawn( are deliberately excluded — they match
+# RegExp.prototype.exec(), EventEmitter.spawn, and any identifier ending in those letters,
+# which flooded legitimate bundles with false positives.
+_PROCESS_EXEC_RE = re.compile(
+    r"child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
+    r"|\bspawnSync\s*\(|\bProcessBuilder\b|Runtime\.getRuntime\(\)\.exec"
+)
+
+# Execution sinks for credential-dataflow-to-process: real process execution (above) or
+# dynamic code evaluation. Used with a proximity gate against credential source surfaces.
+_EXEC_SINK_RE = re.compile(
+    r"child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
+    r"|\bspawnSync\s*\(|\bProcessBuilder\b|Runtime\.getRuntime\(\)\.exec"
+    r"|\beval\s*\(|new Function\s*\(|vm\.runIn"
+)
+
+_CLIPBOARD_READ_RE = re.compile(r"(?:env\s*\.\s*)?clipboard\s*\.\s*readText\s*\(")
 
 
 def _add_cross_extension_code_findings(
@@ -1338,6 +1387,28 @@ def _add_cross_extension_code_findings(
         ))
 
     has_sensitive_source = bool(sensitive_input or sensitive_config_reads or sensitive_config_updates or sensitive_global_state)
+    # Character offsets of every sensitive credential source surface in this file. The
+    # dataflow-to-* rules below require a sink to sit within CREDENTIAL_FLOW_WINDOW chars
+    # of one of these sources. Without this, minified bundles (entire program in one file)
+    # trivially satisfy "source and sink in the same file" and every legitimate bundled
+    # extension is flagged CRITICAL. Proximity is a weak proxy for dataflow, but it rejects
+    # the whole-bundle co-occurrence that produced the false positives.
+    _sensitive_source_positions = [
+        item["pos"]
+        for group in (sensitive_input, sensitive_config_reads, sensitive_config_updates, sensitive_global_state)
+        for item in group
+        if isinstance(item.get("pos"), int)
+    ]
+
+    def _sink_near_credential_source(sink_pattern: "re.Pattern[str]") -> bool:
+        if not _sensitive_source_positions:
+            return False
+        for match in sink_pattern.finditer(text):
+            sink_pos = match.start()
+            if any(abs(sink_pos - src) <= CREDENTIAL_FLOW_WINDOW for src in _sensitive_source_positions):
+                return True
+        return False
+
     if sensitive_input and sensitive_global_state:
         findings.append(_finding(
             extension_id,
@@ -1351,7 +1422,7 @@ def _add_cross_extension_code_findings(
             "Manually verify whether credential input can be stored in cross-extension-accessible state or command-controlled flows.",
             {"surfaces": ["InputBox", "GlobalState"], "evidence_class": "correlated"},
         ))
-    if has_clipboard_read and has_sensitive_source:
+    if has_clipboard_read and has_sensitive_source and _sink_near_credential_source(_CLIPBOARD_READ_RE):
         findings.append(_finding(
             extension_id,
             version,
@@ -1364,7 +1435,7 @@ def _add_cross_extension_code_findings(
             "Avoid reading clipboard contents around secret capture flows unless the user explicitly requested the paste/import action.",
             {"surfaces": ["clipboard", "credential"], "evidence_class": "correlated"},
         ))
-    if has_sensitive_source and has_network:
+    if has_sensitive_source and has_network and _sink_near_credential_source(NETWORK_SINK_RE):
         findings.append(_finding(
             extension_id,
             version,
@@ -1377,7 +1448,7 @@ def _add_cross_extension_code_findings(
             "Manually verify the data flow. If credential data reaches network sinks unexpectedly, block the extension.",
             {"sink": "network", "evidence_class": "correlated"},
         ))
-    if has_sensitive_source and has_shell_or_dynamic_exec:
+    if has_sensitive_source and has_shell_or_dynamic_exec and _sink_near_credential_source(_EXEC_SINK_RE):
         findings.append(_finding(
             extension_id,
             version,
@@ -1390,7 +1461,7 @@ def _add_cross_extension_code_findings(
             "Manually verify whether credentials can influence process execution or command arguments.",
             {"sink": "process", "evidence_class": "correlated"},
         ))
-    if has_sensitive_source and has_file_write:
+    if has_sensitive_source and has_file_write and _sink_near_credential_source(FILE_WRITE_RE):
         findings.append(_finding(
             extension_id,
             version,
@@ -1416,6 +1487,7 @@ def _find_sensitive_api_text(text: str, pattern: str, surface: str) -> list[dict
             "text": _truncate_evidence_text(snippet),
             "snippet": _truncate_evidence_text(match.group(0)),
             "confidence": _sensitive_text_confidence(snippet, base=0.64),
+            "pos": match.start(),
         })
     return out[:10]
 
@@ -1484,17 +1556,26 @@ def _combined_secret_regex(secret_refs: list[tuple[str, str]]) -> re.Pattern[str
 
 
 def _features_nearby(text: str, patterns: list[re.Pattern[str]], window_lines: int = 45) -> bool:
+    # Proximity is measured in CHARACTER offsets, not line indices. Minified/bundled
+    # extensions pack the entire program onto a handful of enormous lines (mean ~900+
+    # chars/line, single lines over 100k chars), so a line-index window degenerates into
+    # "these features exist somewhere in the same multi-megabyte file" and fires the
+    # correlated chains on every legitimate bundled extension. A genuine exfil/execute
+    # chain is locally adjacent; scattered features across a huge bundle are not.
     if not patterns:
         return False
-    line_hits: list[list[int]] = []
-    lines = text.splitlines() or [text]
+    # ~72 chars/line is a generous upper bound for hand-written code, so the character
+    # budget stays behaviorally equivalent to the old line window on non-minified files
+    # while remaining tight on minified bundles.
+    window_chars = max(window_lines * 72, 240)
+    char_hits: list[list[int]] = []
     for pattern in patterns:
-        hits = [index for index, line in enumerate(lines) if pattern.search(line)]
+        hits = [match.start() for match in pattern.finditer(text)]
         if not hits:
             return False
-        line_hits.append(hits)
-    for anchor in line_hits[0]:
-        if all(any(abs(hit - anchor) <= window_lines for hit in hits) for hits in line_hits[1:]):
+        char_hits.append(hits)
+    for anchor in char_hits[0]:
+        if all(any(abs(hit - anchor) <= window_chars for hit in hits) for hits in char_hits[1:]):
             return True
     return False
 

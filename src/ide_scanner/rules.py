@@ -23,7 +23,7 @@ SECRET_PATTERNS = [
     ("gcp-credentials", "Google Cloud credentials", re.compile(r"application_default_credentials|GOOGLE_APPLICATION_CREDENTIALS", re.I)),
     ("npm-token", "npm tokens", re.compile(r"\.npmrc|NPM_TOKEN|:_authToken", re.I)),
     ("github-token", "GitHub tokens", re.compile(r"GITHUB_TOKEN|ghp_[A-Za-z0-9_]{20,}|github\.com/settings/tokens", re.I)),
-    ("env-file", "environment files", re.compile(r"\.env(\.|$)|process\.env\.[A-Z0-9_]+", re.I)),
+    ("env-file", "environment files", re.compile(r"""(?:['"/`]|readfilesync\s*\(\s*['"`])\.env(?:\.[a-z]+)?['"`]|process\.env\.[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API|AUTH)[A-Z0-9_]*""", re.I)),
 ]
 
 CODE_RULES = [
