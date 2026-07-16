@@ -86,6 +86,21 @@ CORRELATED_RULES = {
     "persistence-chain",
     "supply-chain-dropper-chain",
 }
+BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {"download-and-execute"}
+BLOCKING_OBSERVED_RULES = {
+    "observed-destructive-behavior",
+    "observed-download-execute",
+    "observed-persistence",
+    "observed-secret-exfil",
+}
+DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS = {
+    "credential-command-control",
+    "credential-config-key",
+    "credential-config-update",
+    "credential-global-state-key",
+    "credential-global-state-storage",
+    "credential-inputbox-prompt",
+}
 CAPABILITY_RULES = {
     "agent-filesystem-tool",
     "agent-network-tool",
@@ -1084,6 +1099,13 @@ def _add_code_findings(
     *,
     analyze_generated: bool = False,
 ) -> None:
+    aliased_process_re, aliased_process_methods = _aliased_process_execution(text)
+    process_exec_re = re.compile(
+        _PROCESS_EXEC_RE.pattern + (f"|{aliased_process_re.pattern}" if aliased_process_re else "")
+    )
+    process_sink_re = re.compile(
+        _EXEC_SINK_RE.pattern + (f"|{aliased_process_re.pattern}" if aliased_process_re else "")
+    )
     secret_refs = [(secret_id, label) for secret_id, label, regex in SECRET_PATTERNS if regex.search(text)]
     has_file_read = bool(FILE_READ_RE.search(text))
     has_file_write = bool(FILE_WRITE_RE.search(text))
@@ -1093,8 +1115,10 @@ def _add_code_findings(
     has_download = bool(DOWNLOAD_RE.search(text))
     has_obfuscation = bool(re.search(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", text, re.I))
     has_dynamic_exec = bool(_DYNAMIC_EVAL_RE.search(text))
-    has_exec_file = bool(re.search(r"\b(?:execFile|execFileSync)\s*\(", text))
-    has_shell_exec = bool(_SHELL_EXEC_RE.search(text))
+    has_exec_file = bool(re.search(r"\b(?:execFile|execFileSync)\s*\(", text)) or bool(
+        aliased_process_methods & {"execFile", "execFileSync"}
+    )
+    has_shell_exec = bool(_SHELL_EXEC_RE.search(text)) or bool(aliased_process_methods & {"exec", "execSync"})
     has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
@@ -1123,6 +1147,21 @@ def _add_code_findings(
             "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
         ))
         capabilities.setdefault(rule.capability, {"id": rule.capability, "evidence": []})["evidence"].append(rel)
+
+    if aliased_process_re and not any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "process-execution",
+            "execution",
+            "LOW",
+            0.7,
+            "Code invokes an aliased child_process execution API.",
+            [rel],
+            "Review the executable, arguments, and input sources passed through the alias.",
+            {"methods": sorted(aliased_process_methods), "evidence_class": "weak"},
+        ))
+        capabilities.setdefault("process_execution", {"id": "process_execution", "evidence": []})["evidence"].append(rel)
 
     if _is_generated_code_blob(rel, text) and not analyze_generated:
         return
@@ -1256,7 +1295,7 @@ def _add_code_findings(
         ))
     if has_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
         DOWNLOAD_RE,
-        _PROCESS_EXEC_RE,
+        process_exec_re,
     ]):
         findings.append(_finding(
             extension_id,
@@ -1279,6 +1318,7 @@ def _add_code_findings(
         has_file_write=has_file_write,
         has_network=has_network,
         has_shell_or_dynamic_exec=has_shell_exec or has_dynamic_exec or has_exec_file,
+        process_exec_re=process_sink_re,
     )
 
 
@@ -1348,6 +1388,31 @@ _EXEC_SINK_RE = re.compile(
     _PROCESS_EXEC_RE.pattern + r"|\beval\s*\(|new Function\s*\(|vm\.runIn"
 )
 
+_CHILD_PROCESS_METHODS = {"exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync"}
+_CHILD_PROCESS_DESTRUCTURE_RE = re.compile(
+    r"\{(?P<bindings>[^}]{1,500})\}\s*=\s*require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\)"
+    r"|import\s*\{(?P<imports>[^}]{1,500})\}\s*from\s*['\"](?:node:)?child_process['\"]",
+    re.I,
+)
+
+
+def _aliased_process_execution(text: str) -> tuple[re.Pattern[str] | None, set[str]]:
+    """Resolve common destructured/ESM child_process aliases that regex qualifiers miss."""
+    aliases: dict[str, str] = {}
+    for match in _CHILD_PROCESS_DESTRUCTURE_RE.finditer(text):
+        bindings = str(match.group("bindings") or match.group("imports") or "")
+        for binding in bindings.split(","):
+            parts = re.split(r"\s*(?::|\bas\b)\s*", binding.strip(), maxsplit=1, flags=re.I)
+            method = parts[0].strip()
+            alias = parts[1].strip() if len(parts) == 2 else method
+            if method in _CHILD_PROCESS_METHODS and re.fullmatch(r"[A-Za-z_$][\w$]*", alias):
+                aliases[alias] = method
+    called = {alias: method for alias, method in aliases.items() if re.search(rf"\b{re.escape(alias)}\s*\(", text)}
+    if not called:
+        return None, set()
+    pattern = re.compile(r"\b(?:" + "|".join(re.escape(alias) for alias in sorted(called, key=len, reverse=True)) + r")\s*\(")
+    return pattern, set(called.values())
+
 _CLIPBOARD_READ_RE = re.compile(r"(?:env\s*\.\s*)?clipboard\s*\.\s*readText\s*\(")
 
 
@@ -1362,6 +1427,7 @@ def _add_cross_extension_code_findings(
     has_file_write: bool,
     has_network: bool,
     has_shell_or_dynamic_exec: bool,
+    process_exec_re: re.Pattern[str],
 ) -> None:
     sensitive_input = _find_sensitive_api_text(text, r"showInputBox\s*\((?P<args>[^;\n]{0,800})", "InputBox")
     sensitive_config_reads = _find_sensitive_api_text(
@@ -1548,7 +1614,7 @@ def _add_cross_extension_code_findings(
             "Review the cited code. Character proximity does not establish that credential data reaches the sink.",
             {"sink": "network", "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
-    if has_sensitive_source and has_shell_or_dynamic_exec and _sink_near_credential_source(_EXEC_SINK_RE):
+    if has_sensitive_source and has_shell_or_dynamic_exec and _sink_near_credential_source(process_exec_re):
         findings.append(_finding(
             extension_id,
             version,
@@ -2123,6 +2189,14 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         extension.decision = "incomplete"
         extension.decision_reason = str(extension.artifact_inventory.get("skipped_reason") or "Executable analysis did not complete.")
         return
+    blocking_rule_ids = _preventive_blocking_rule_ids(extension.findings)
+    if blocking_rule_ids:
+        extension.decision = "block"
+        extension.decision_reason = (
+            "Prevent execution pending review: high-confidence abuse-chain evidence matched "
+            f"({', '.join(sorted(blocking_rule_ids))}). This is a preventive policy decision, not a confirmed-malicious label."
+        )
+        return
     added_capabilities = list(extension.baseline_diff.get("added_capabilities") or [])
     added_findings = list(extension.baseline_diff.get("added_findings") or [])
     artifact_changed = bool(extension.baseline_diff.get("artifact_changed"))
@@ -2135,6 +2209,25 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         return
     extension.decision = "allow"
     extension.decision_reason = "Analysis completed without actionable evidence or unapproved baseline changes."
+
+
+def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
+    """Return behavior rules strong enough to prevent execution without threat intelligence.
+
+    Generic download-and-execute behavior is intentionally insufficient by itself:
+    legitimate language servers and tool installers can look similar. It becomes a
+    preventive block only when automatic activation and credential handling occur in
+    the same extension. Confirmed intelligence is handled separately by verdict.
+    """
+    rule_ids = {finding.rule_id for finding in findings}
+    blocking = rule_ids & (BLOCKING_CORRELATED_RULES | BLOCKING_OBSERVED_RULES)
+    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS) or any(
+        rule_id.startswith("secret-reference:") for rule_id in rule_ids
+    )
+    automatic_activation = bool(rule_ids & {"broad-activation", "startup-activation", "sensitive-activation"})
+    if "download-and-execute" in rule_ids and credential_signal and automatic_activation:
+        blocking.add("download-and-execute")
+    return blocking
 
 
 def _artifact_paths(extension: dict[str, Any]) -> set[str]:

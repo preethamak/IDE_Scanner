@@ -51,6 +51,18 @@ The audit corrected these root causes:
    - A new manifest-aware rule detects a declared workspace setting used as an `execFile` executable when the setting is not restricted in untrusted workspaces.
    - The equivalent extension with `capabilities.untrustedWorkspaces.restrictedConfigurations` remains clean.
 
+7. Preventive decision policy
+   - Confirmed intelligence still produces `malicious / block`.
+   - High-confidence behavioral abuse chains now produce a preventive `block` while retaining the honest, non-authoritative `suspicious` verdict.
+   - Generic `download-and-execute` remains `review` by itself because legitimate language servers and tool installers can share that shape.
+   - It becomes a preventive block only when the same extension also has automatic activation and credential-handling evidence.
+
+8. Common process-alias evasions
+   - Destructured CommonJS aliases such as `const {execFile: run} = require('child_process')` are resolved.
+   - ESM aliases such as `import {spawn as run} from 'child_process'` are resolved.
+   - A malformed `fetch(...)` download regex boundary was corrected.
+   - Regression tests retain the earlier false-positive guard: ordinary `RegExp.exec()` is not process execution.
+
 ## Residual suspicious-case triage
 
 Before the final correction, six installed instances remained suspicious. Direct source inspection showed that all six were false-suspicious classifications:
@@ -90,7 +102,7 @@ The audit also found that 26 native rules could emit findings without appearing 
 
 ## Validation
 
-- Unit/integration suite: **89/89 passing**.
+- Unit/integration suite: **93/93 passing**.
 - Labeled fixture benchmark: **8/8 correct**.
 - Fixture benchmark false positives: **0**.
 - Fixture benchmark false negatives: **0**.
@@ -99,6 +111,27 @@ The audit also found that 26 native rules could emit findings without appearing 
 - Final installed scan: 151 instances, no suspicious or malicious verdicts.
 
 The fixture benchmark is small and partially synthetic. Its perfect result is regression evidence, not a general estimate of scanner accuracy on the ecosystem.
+
+## Hash-pinned malicious VSIX adversarial check
+
+An exact externally labeled malicious artifact, `bingcha.bcai-tools@4.0.37`, was acquired by its pre-recorded SHA-256 (`b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216`) and scanned without installation or execution. Acquisition used a disposable container. Static scanning used a separate network-disabled, read-only, capability-dropped container running as UID 65534.
+
+| Scanner state | Verdict | Decision | Malware score | Risk score |
+|---|---|---|---:|---:|
+| Before preventive-policy correction | Suspicious | Review | 82 | 87 |
+| After correction | Suspicious | Block | 82 | 87 |
+
+The scanner identified a high-severity `download-and-execute` chain plus automatic activation and credential-handling evidence. The verdict intentionally remains `suspicious`, not `malicious`, because static behavior does not establish identity or intent with authoritative certainty. The `block` is a preventive execution policy.
+
+Three retained non-malicious control artifacts were rescanned in the same sandbox after the correction:
+
+| Artifact | Verdict | Decision | Malware score | Risk score |
+|---|---|---|---:|---:|
+| `redhat.vscode-yaml@1.24.0` | Clean | Allow | 0 | 0 |
+| `streetsidesoftware.code-spell-checker@4.5.6` | Review | Review | 0 | 51 |
+| `rust-lang.rust-analyzer@0.3.2971` | Review | Review | 0 | 41 |
+
+This is an adversarial regression check, not a publishable accuracy estimate: the malicious sample informed the policy correction and is therefore development data, not a holdout. The three controls are useful false-positive sentinels but are not a representative benign population. A fresh, frozen, independently labeled holdout is still required before publishing ecosystem recall or false-positive rates.
 
 ## Coverage and limitations
 
