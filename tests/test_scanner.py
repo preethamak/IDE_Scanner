@@ -85,7 +85,7 @@ class ScannerTests(unittest.TestCase):
 
     def test_fixture_scan_classifies_extensions(self) -> None:
         report = scan_targets(include_fixtures=True)
-        self.assertEqual(report["summary"]["total_extensions"], 8)
+        self.assertEqual(report["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
         self.assertIn("posture_summary", report)
         self.assertIn("posture_score", report["summary"])
         by_id = {extension["extension_id"]: extension for extension in report["extensions"]}
@@ -124,12 +124,12 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.2")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["summary"]["summary"]["total_extensions"], 8)
+        self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
         self.assertEqual(bundle["summary"]["summary"]["suspicious"], 2)
         self.assertIn("rules", bundle["rules"])
 
         rows = bundle["leaderboard"]["extensions"]
-        self.assertEqual(len(rows), 8)
+        self.assertEqual(len(rows), len(discover_from_path(Path("fixtures"))))
         self.assertTrue(all("detail_ref" in row for row in rows))
         suspicious = next(row for row in rows if row["extension_id"] == "unknown.shadow-helper")
         self.assertEqual(suspicious["grade"], "D")
@@ -210,6 +210,48 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["verdict_state"], "safe_with_notes")
         self.assertEqual(row["verdict_label"], "Safe with notes")
         self.assertGreater(row["context_score"], 0)
+
+    def test_workspace_configured_cli_requires_untrusted_workspace_restriction(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = (
+                "const vscode = require('vscode');\n"
+                "const { execFile } = require('child_process');\n"
+                "const cliPath = vscode.workspace.getConfiguration('tool').get('executablePath', 'tool');\n"
+                "execFile(cliPath, ['analyze', filePath], { shell: false });\n"
+            )
+
+            unsafe = root / "unsafe"
+            unsafe.mkdir()
+            (unsafe / "package.json").write_text(json.dumps({
+                "publisher": "example", "name": "unsafe-cli", "version": "1.0.0", "main": "extension.js",
+                "contributes": {"configuration": {"properties": {
+                    "tool.executablePath": {"type": "string", "default": "tool"}
+                }}},
+            }), encoding="utf-8")
+            (unsafe / "extension.js").write_text(source, encoding="utf-8")
+
+            safe = root / "safe"
+            safe.mkdir()
+            (safe / "package.json").write_text(json.dumps({
+                "publisher": "example", "name": "safe-cli", "version": "1.0.0", "main": "extension.js",
+                "capabilities": {"untrustedWorkspaces": {
+                    "supported": True,
+                    "restrictedConfigurations": ["tool.executablePath"],
+                }},
+                "contributes": {"configuration": {"properties": {
+                    "tool.executablePath": {"type": "string", "default": "tool"}
+                }}},
+            }), encoding="utf-8")
+            (safe / "extension.js").write_text(source, encoding="utf-8")
+
+            unsafe_report = scan_extension(unsafe)
+            safe_report = scan_extension(safe)
+
+        self.assertEqual(unsafe_report.verdict, "review")
+        self.assertIn("unrestricted-workspace-cli-path", {f.rule_id for f in unsafe_report.findings})
+        self.assertEqual(safe_report.verdict, "clean")
+        self.assertNotIn("unrestricted-workspace-cli-path", {f.rule_id for f in safe_report.findings})
 
     def test_regex_exec_and_workspace_tokens_do_not_create_execution_review(self) -> None:
         """RegExp.exec and ordinary editor metadata are not shell execution or a flow."""
@@ -299,12 +341,12 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("credential-command-registration", rule_ids)
         self.assertIn("credential-inputbox-prompt", rule_ids)
         self.assertIn("credential-global-state-storage", rule_ids)
-        self.assertIn("credential-command-control", rule_ids)
-        self.assertIn("clipboard-read-near-secret-input", rule_ids)
-        self.assertIn("credential-dataflow-to-network", rule_ids)
-        self.assertEqual(report.verdict, "suspicious")
+        self.assertIn("credential-input-near-state", rule_ids)
+        self.assertIn("clipboard-near-credential-surface", rule_ids)
+        self.assertIn("credential-source-near-network", rule_ids)
+        self.assertEqual(report.verdict, "review")
         self.assertEqual(report.score_details["basis"], "cross_extension_exposure")
-        self.assertGreaterEqual(report.risk_score, 90)
+        self.assertGreaterEqual(report.risk_score, 50)
 
     def test_far_apart_credential_surfaces_do_not_create_control_chain(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -324,7 +366,7 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         rule_ids = {finding.rule_id for finding in report.findings}
-        self.assertNotIn("credential-command-control", rule_ids)
+        self.assertNotIn("credential-input-near-state", rule_ids)
 
     def test_protect_your_secrets_csv_adapter_normalizes_labels(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -460,7 +502,11 @@ class ScannerTests(unittest.TestCase):
 
     def test_path_discovery_finds_fixture_extensions(self) -> None:
         targets = discover_from_path(Path("fixtures"))
-        self.assertEqual(len(targets), 8)
+        paths = {Path(item["path"]).name for item in targets}
+        self.assertTrue({
+            "agent-tool", "benign-formatter", "credential-exfil", "lifecycle-dropper",
+            "mutable-dependency", "native-artifact", "startup-theme", "threat-feed-malware",
+        }.issubset(paths))
 
     def test_benchmark_uses_known_malicious_feed_fixture(self) -> None:
         result = _run_benchmark()
@@ -980,8 +1026,8 @@ class ScannerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             token_blob = (
-                "process.env.SECRET_FILE; fetch('https://example.com'); spawn('x'); "
-                "Buffer.from('abc','base64'); unlinkSync('x'); rmSync('x',{recursive:true}); "
+                "process.env.SECRET_FILE; fetch('https://example.com'); "
+                "eval(Buffer.from('YWxlcnQoMSk=','base64').toString()); rmSync('x',{recursive:true}); "
             )
             (root / "main.js").write_text("var bundle=1;\n" * 35 + token_blob * 4000, encoding="utf-8")
 

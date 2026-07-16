@@ -134,6 +134,7 @@ REPUTATION_RULES = {
     "license-missing",
 }
 EXPOSURE_RULES = {
+    "agent-sensitive-data-near-network",
     "credential-command-control",
     "credential-command-execution",
     "credential-command-registration",
@@ -142,10 +143,16 @@ EXPOSURE_RULES = {
     "credential-dataflow-to-file",
     "credential-dataflow-to-network",
     "credential-dataflow-to-process",
+    "credential-source-near-file",
+    "credential-source-near-network",
+    "credential-source-near-process",
     "credential-global-state-key",
     "credential-global-state-storage",
     "credential-inputbox-prompt",
     "clipboard-read-near-secret-input",
+    "clipboard-near-credential-surface",
+    "credential-input-near-state",
+    "unrestricted-workspace-cli-path",
 }
 MALWARE_REMOVAL_TYPES = {"malware"}
 SUSPICIOUS_REMOVAL_TYPES = {"suspicious"}
@@ -237,6 +244,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     findings: list[Finding] = []
     capabilities: dict[str, dict[str, Any]] = {}
     scanned_files = 0
+    executable_sources: list[tuple[str, str]] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
     _add_dependency_source_findings(extension_id, version, manifest, findings)
@@ -272,6 +280,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         scanned_files += 1
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
+            executable_sources.append((rel, text))
             _add_code_findings(extension_id, version, rel, text, findings, capabilities, analyze_generated=is_entrypoint)
         if suffix in JS_AST_EXTS:
             generated_blob = _is_generated_code_blob(rel, text)
@@ -279,6 +288,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
+
+    _add_workspace_cli_path_findings(extension_id, version, manifest, executable_sources, findings)
 
     provider_findings, provider_statuses = run_static_providers(path, extension_id, version)
     findings.extend(provider_findings)
@@ -615,6 +626,67 @@ def _add_dependency_source_findings(
             ))
 
 
+_CONFIGURED_EXECFILE_RE = re.compile(
+    r"(?:const|let|var)\s+(?P<var>[A-Za-z_$][\w$]*)\s*=\s*"
+    r"(?:[A-Za-z_$][\w$]*\.)?workspace\.getConfiguration\(\s*['\"](?P<section>[^'\"]+)['\"]\s*\)"
+    r"\s*\.get\(\s*['\"](?P<key>[^'\"]+)['\"]"
+    r"[\s\S]{0,1500}?\bexecFile(?:Sync)?\s*\(\s*(?P=var)\b"
+)
+
+
+def _add_workspace_cli_path_findings(
+    extension_id: str,
+    version: str,
+    manifest: dict[str, Any],
+    sources: list[tuple[str, str]],
+    findings: list[Finding],
+) -> None:
+    """Detect workspace-configured executable paths lacking trust restrictions.
+
+    VS Code lets an extension declare configuration keys that are unavailable in
+    untrusted workspaces. If a workspace-controlled setting selects the binary
+    passed to execFile and is not restricted, opening a repository can redirect
+    execution to a workspace-provided program. This is a concrete manifest/code
+    boundary defect, not generic process capability.
+    """
+    capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
+    trust = capabilities.get("untrustedWorkspaces") if isinstance(capabilities.get("untrustedWorkspaces"), dict) else {}
+    if trust.get("supported") is False:
+        return
+    restricted = {
+        str(item)
+        for item in trust.get("restrictedConfigurations") or []
+        if isinstance(item, str)
+    }
+    contributes = manifest.get("contributes") if isinstance(manifest.get("contributes"), dict) else {}
+    declared_configurations = {
+        str(item.get("key"))
+        for item in _manifest_configuration_items(contributes)
+        if item.get("key")
+    }
+    for rel, text in sources:
+        for match in _CONFIGURED_EXECFILE_RE.finditer(text):
+            config_key = f"{match.group('section')}.{match.group('key')}"
+            if config_key not in declared_configurations:
+                continue
+            if config_key in restricted:
+                continue
+            findings.append(_finding(
+                extension_id,
+                version,
+                "unrestricted-workspace-cli-path",
+                "execution",
+                "HIGH",
+                0.84,
+                f"Workspace configuration {config_key} selects the executable passed to execFile without an untrusted-workspace restriction.",
+                [rel, "package.json"],
+                "Add the configuration key to capabilities.untrustedWorkspaces.restrictedConfigurations or disable the extension in untrusted workspaces.",
+                {
+                    "evidence_class": "exposure",
+                    "configuration_key": config_key,
+                    "sink": "execFile",
+                },
+            ))
 def _add_lifecycle_script_chain_findings(
     extension_id: str,
     version: str,
@@ -1134,9 +1206,8 @@ def _add_code_findings(
             [rel],
             "Treat as suspicious unless this is a clearly documented backup, cleanup, or migration tool.",
         ))
-    if has_obfuscation and _OBFUSCATION_EXEC_SINK_RE.search(text) and has_network and _features_nearby(text, [
-        _OBFUSCATION_RE,
-        _OBFUSCATION_EXEC_SINK_RE,
+    if has_obfuscation and _DECODED_EXECUTION_RE.search(text) and has_network and _features_nearby(text, [
+        _DECODED_EXECUTION_RE,
         NETWORK_SINK_RE,
     ]):
         findings.append(_finding(
@@ -1174,13 +1245,14 @@ def _add_code_findings(
         findings.append(_finding(
             extension_id,
             version,
-            "agent-data-exfil-chain",
+            "agent-sensitive-data-near-network",
             "agentic",
-            "HIGH",
-            0.84,
-            "Agent-facing code combines sensitive references with outbound network behavior.",
+            "MEDIUM",
+            0.68,
+            "Agent-facing code contains sensitive references near outbound network behavior.",
             [rel],
-            "Review agent tool data boundaries and approval prompts before trusting this extension.",
+            "Review agent tool data boundaries. Proximity alone does not establish that sensitive data reaches the network.",
+            {"evidence_class": "exposure", "correlation": "character-proximity"},
         ))
     if has_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
         DOWNLOAD_RE,
@@ -1227,6 +1299,16 @@ _OBFUSCATION_RE = re.compile(
     re.I,
 )
 
+# Verdict-driving native detection requires a direct decode-to-execution shape.
+# Merely finding base64 decoding, a process API, and networking near one another
+# is common in installers and bundled applications and does not prove execution
+# of the decoded bytes. Multi-statement flows are delegated to Semgrep taint.
+_DECODED_EXECUTION_RE = re.compile(
+    r"(?:\beval\s*\(|new Function\s*\()\s*(?:atob\s*\(|[Bb]uffer\.from\s*\()"
+    r"|(?:\beval\s*\(|new Function\s*\()[^)]{0,500}(?:\\x[0-9a-f]{2}){4,}",
+    re.I,
+)
+
 # Dynamic execution sinks for the obfuscation-execution-network chain: dynamic code
 # evaluation (eval / Function constructor / vm) OR real OS-process execution (child_process
 # family). Deliberately excludes bare exec(/spawn( standing alone and import() — the former
@@ -1251,12 +1333,6 @@ _DYNAMIC_EVAL_RE = re.compile(
     r"\beval\s*\(|new Function\s*\(|vm\.runIn|vm\.compileFunction\s*\("
     + "|" + _PROCESS_EXEC_RE.pattern
 )
-
-# The obfuscation chain has an independent strong signal (decode/obfuscation plus
-# network transfer). Keep bare exec/spawn as a sink only in this narrow context so
-# the synthetic and real decoded-payload patterns retain recall without turning
-# ordinary RegExp.exec() into a general execution capability.
-_OBFUSCATION_EXEC_SINK_RE = re.compile(_DYNAMIC_EVAL_RE.pattern + r"|\b(?:exec|spawn)\s*\(")
 
 # Explicit shell execution. Bare exec() is deliberately excluded because it is
 # overwhelmingly RegExp.prototype.exec() in bundled JavaScript. This pattern
@@ -1437,66 +1513,66 @@ def _add_cross_extension_code_findings(
         findings.append(_finding(
             extension_id,
             version,
-            "credential-command-control",
+            "credential-input-near-state",
             "cross-extension-exposure",
             "HIGH",
             0.82,
             "Credential-like user input appears near extension state storage.",
             [rel],
             "Manually verify whether credential input can be stored in cross-extension-accessible state or command-controlled flows.",
-            {"surfaces": ["InputBox", "GlobalState"], "evidence_class": "correlated"},
+            {"surfaces": ["InputBox", "GlobalState"], "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
     if has_clipboard_read and has_sensitive_source and _sink_near_credential_source(_CLIPBOARD_READ_RE):
         findings.append(_finding(
             extension_id,
             version,
-            "clipboard-read-near-secret-input",
+            "clipboard-near-credential-surface",
             "cross-extension-exposure",
             "HIGH",
             0.8,
             "Clipboard reads appear in the same file as credential-related input or storage surfaces.",
             [rel],
             "Avoid reading clipboard contents around secret capture flows unless the user explicitly requested the paste/import action.",
-            {"surfaces": ["clipboard", "credential"], "evidence_class": "correlated"},
+            {"surfaces": ["clipboard", "credential"], "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
     if has_sensitive_source and has_network and _sink_near_credential_source(NETWORK_SINK_RE):
         findings.append(_finding(
             extension_id,
             version,
-            "credential-dataflow-to-network",
+            "credential-source-near-network",
             "cross-extension-exposure",
-            "CRITICAL",
-            0.86,
-            "Credential-related source surfaces and network sinks appear in the same source file.",
+            "HIGH",
+            0.74,
+            "A credential-related source surface appears near a network sink.",
             [rel],
-            "Manually verify the data flow. If credential data reaches network sinks unexpectedly, block the extension.",
-            {"sink": "network", "evidence_class": "correlated"},
+            "Review the cited code. Character proximity does not establish that credential data reaches the sink.",
+            {"sink": "network", "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
     if has_sensitive_source and has_shell_or_dynamic_exec and _sink_near_credential_source(_EXEC_SINK_RE):
         findings.append(_finding(
             extension_id,
             version,
-            "credential-dataflow-to-process",
+            "credential-source-near-process",
             "cross-extension-exposure",
             "HIGH",
-            0.78,
-            "Credential-related source surfaces and process execution appear in the same source file.",
+            0.7,
+            "A credential-related source surface appears near process execution.",
             [rel],
             "Manually verify whether credentials can influence process execution or command arguments.",
-            {"sink": "process", "evidence_class": "correlated"},
+            {"sink": "process", "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
     if has_sensitive_source and has_file_write and _sink_near_credential_source(FILE_WRITE_RE):
         findings.append(_finding(
             extension_id,
             version,
-            "credential-dataflow-to-file",
+            "credential-source-near-file",
             "cross-extension-exposure",
             "HIGH",
-            0.76,
-            "Credential-related source surfaces and file writes appear in the same source file.",
+            0.68,
+            "A credential-related source surface appears near a file write.",
             [rel],
             "Review file persistence paths and ensure raw secrets are not written to workspace or extension files.",
-            {"sink": "file", "evidence_class": "correlated"},
+            {"sink": "file", "evidence_class": "exposure", "correlation": "character-proximity"},
         ))
 
 
@@ -2995,6 +3071,16 @@ def _exposure_score(findings: list[Finding]) -> int:
     for finding in findings:
         if finding.rule_id == "credential-dataflow-to-network":
             score = max(score, 92)
+        elif finding.rule_id == "credential-source-near-network":
+            score = max(score, 54)
+        elif finding.rule_id in {"credential-source-near-process", "credential-source-near-file"}:
+            score = max(score, 48)
+        elif finding.rule_id == "agent-sensitive-data-near-network":
+            score = max(score, 46)
+        elif finding.rule_id in {"credential-input-near-state", "clipboard-near-credential-surface"}:
+            score = max(score, 52)
+        elif finding.rule_id == "unrestricted-workspace-cli-path":
+            score = max(score, 72)
         elif finding.rule_id in {"credential-command-control", "clipboard-read-near-secret-input"}:
             score = max(score, 72)
         elif finding.rule_id in {"credential-dataflow-to-process", "credential-dataflow-to-file"}:
