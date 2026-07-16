@@ -838,6 +838,22 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.score_details["basis"], "none")
         self.assertIn("startup-activation", {finding.rule_id for finding in report.findings})
 
+    def test_activation_and_standard_ide_contributions_are_context_not_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"debugger","version":"1.0.0",'
+                '"activationEvents":["onDebug"],"contributes":{"debuggers":[]}}',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.risk_score, 0)
+        self.assertIn("sensitive-activation", {finding.rule_id for finding in report.findings})
+        self.assertIn("powerful-ide-contribution", {finding.rule_id for finding in report.findings})
+
     def test_dangerous_repository_workflow_is_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

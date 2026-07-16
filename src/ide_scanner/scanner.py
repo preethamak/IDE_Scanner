@@ -2790,7 +2790,13 @@ def _is_actionable_review_finding(finding: Finding) -> bool:
     if evidence_class == "exposure":
         return True
     if evidence_class == "capability":
-        return finding.rule_id not in {"startup-activation", "ast-dynamic-call-target"}
+        return finding.rule_id not in {
+            "ast-dynamic-call-target",
+            "broad-activation",
+            "powerful-ide-contribution",
+            "sensitive-activation",
+            "startup-activation",
+        }
     return False
 
 
