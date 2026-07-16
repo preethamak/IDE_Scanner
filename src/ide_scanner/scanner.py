@@ -2819,7 +2819,13 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
         return "clean", "No suspicious extension behavior was detected by local static analysis.", "none", "INFO", 0, 0, score_details
 
     severity = "INFO"
-    for finding in findings:
+    decision_relevant = [
+        finding for finding in findings
+        if _is_confirmed_malware_finding(finding)
+        or _is_actionable_review_finding(finding)
+        or _finding_evidence_class(finding) in {"correlated", "observed", "exposure"}
+    ]
+    for finding in decision_relevant:
         severity = rank_severity(severity, finding.severity)
     malware_score = int(score_details["malware_score"])
     risk_score = int(score_details["risk_score"])
@@ -3090,7 +3096,11 @@ def _correlated_score(findings: list[Finding]) -> int:
         score = max(score, 82)
     if "webview-message-to-process" in rule_ids:
         score = max(score, 84)
-    if "decoded-payload-execution" in rule_ids or "encoded-dynamic-execution" in rule_ids:
+    if any(
+        finding.rule_id in {"decoded-payload-execution", "encoded-dynamic-execution"}
+        and _finding_evidence_class(finding) == "correlated"
+        for finding in findings
+    ):
         score = max(score, 82)
     return score
 
