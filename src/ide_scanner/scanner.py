@@ -1020,9 +1020,9 @@ def _add_code_findings(
     has_destructive = bool(DESTRUCTIVE_RE.search(text))
     has_download = bool(DOWNLOAD_RE.search(text))
     has_obfuscation = bool(re.search(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", text, re.I))
-    has_dynamic_exec = bool(re.search(r"\b(eval\(|new Function\(|vm\.runIn|import\s*\(|exec\(|spawn\()", text))
-    has_exec_file = bool(re.search(r"\b(execFile|execFileSync)\b", text))
-    has_shell_exec = bool(re.search(r"\b(exec|execSync)\s*\(|shell\s*:\s*true", text))
+    has_dynamic_exec = bool(_DYNAMIC_EVAL_RE.search(text))
+    has_exec_file = bool(re.search(r"\b(?:execFile|execFileSync)\s*\(", text))
+    has_shell_exec = bool(_SHELL_EXEC_RE.search(text))
     has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
@@ -1072,18 +1072,10 @@ def _add_code_findings(
             [rel],
             "Review command construction and avoid shell execution for untrusted input.",
         ))
-    if (has_shell_exec or has_dynamic_exec) and has_editor_input:
-        findings.append(_finding(
-            extension_id,
-            version,
-            "untrusted-input-execution",
-            "execution",
-            "MEDIUM",
-            0.62,
-            "Code appears to combine IDE/workspace input with process execution.",
-            [rel],
-            "Ensure file paths, document content, and workspace values are passed as arguments without shell interpolation.",
-        ))
+    # Do not infer untrusted-input execution from file-wide token co-occurrence.
+    # Editor paths/selections and process APIs commonly share a file in legitimate
+    # extensions. The Semgrep taint rule emits untrusted-workspace-input-to-process
+    # only when it can establish a source-to-sink flow.
 
     for secret_id, label in secret_refs:
         findings.append(_finding(
@@ -1154,7 +1146,7 @@ def _add_code_findings(
     if has_persistence and has_file_write and (has_network or has_dynamic_exec) and _features_nearby(text, [
         re.compile(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", re.I),
         FILE_WRITE_RE,
-        NETWORK_SINK_RE if has_network else re.compile(r"\b(eval\(|new Function\(|vm\.runIn|import\s*\(|exec\(|spawn\()"),
+        NETWORK_SINK_RE if has_network else _DYNAMIC_EVAL_RE,
     ]):
         findings.append(_finding(
             extension_id,
@@ -1238,6 +1230,14 @@ _DYNAMIC_EVAL_RE = re.compile(
     r"\beval\s*\(|new Function\s*\(|vm\.runIn|vm\.compileFunction\s*\("
     r"|child_process|node:child_process|\bexecSync\s*\(|\bexecFile\s*\(|\bexecFileSync\s*\("
     r"|\bspawnSync\s*\(|\bspawn\s*\(|\bexec\s*\("
+)
+
+# Explicit shell execution. Bare exec() is deliberately excluded because it is
+# overwhelmingly RegExp.prototype.exec() in bundled JavaScript. This pattern
+# recognizes either the explicit shell option or a direct child_process.exec* call.
+_SHELL_EXEC_RE = re.compile(
+    r"\bshell\s*:\s*true"
+    r"|(?:\b(?:child_process|cp)\b|require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\))\s*\.\s*exec(?:Sync)?\s*\("
 )
 
 # Real OS-process execution: the child_process module or its unambiguous *Sync/*File
@@ -2690,7 +2690,7 @@ def _is_actionable_review_finding(finding: Finding) -> bool:
     if evidence_class == "exposure":
         return True
     if evidence_class == "capability":
-        return finding.rule_id != "startup-activation"
+        return finding.rule_id not in {"startup-activation", "ast-dynamic-call-target"}
     return False
 
 

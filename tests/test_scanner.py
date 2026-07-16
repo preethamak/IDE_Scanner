@@ -211,6 +211,49 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["verdict_label"], "Safe with notes")
         self.assertGreater(row["context_score"], 0)
 
+    def test_regex_exec_and_workspace_tokens_do_not_create_execution_review(self) -> None:
+        """RegExp.exec and ordinary editor metadata are not shell execution or a flow."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"regex","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const match = /token/.exec(vscode.window.activeTextEditor.document.fileName);\n"
+                "const selected = vscode.window.activeTextEditor.selection;\n",
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[root])
+
+        scanned = report["extensions"][0]
+        rule_ids = {finding["rule_id"] for finding in scanned["findings"]}
+        self.assertEqual(scanned["verdict"], "clean")
+        self.assertNotIn("process-execution", rule_ids)
+        self.assertNotIn("dynamic-shell-execution", rule_ids)
+        self.assertNotIn("untrusted-input-execution", rule_ids)
+
+    def test_explicit_child_process_exec_is_review_capability(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"shell","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "require('child_process').exec('tool --version');\n",
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[root])
+
+        scanned = report["extensions"][0]
+        rule_ids = {finding["rule_id"] for finding in scanned["findings"]}
+        self.assertEqual(scanned["verdict"], "review")
+        self.assertIn("process-execution", rule_ids)
+        self.assertIn("dynamic-shell-execution", rule_ids)
+
     def test_cross_extension_credential_exposure_findings(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

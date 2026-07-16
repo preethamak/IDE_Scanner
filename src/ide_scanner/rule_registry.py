@@ -183,11 +183,11 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
     "ast-dynamic-call-target": {
         "title": "AST: dynamic call target",
         "category": "execution",
-        "evidence_class": "capability",
+        "evidence_class": "weak",
         "default_severity": "MEDIUM",
-        "description": "The AST analyzer found a function call whose target is resolved through computed member access (e.g. obj[x](...)) rather than a literal property name -- a common way to invoke eval/exec-family sinks without the literal token appearing in a plain-text scan.",
-        "recommendation": "Inspect what the computed property resolves to at runtime and whether it can be influenced by untrusted input.",
-        "false_positive_notes": "Legitimate dynamic dispatch (plugin registries, event handler maps) also matches this pattern; severity escalates to HIGH only when the resolved value names a sensitive sink.",
+        "description": "The AST analyzer found a function call whose target is resolved through computed member access (e.g. obj[x](...)) rather than a literal property name.",
+        "recommendation": "Use this as supporting context only. Escalate only when a separate rule resolves the target to a sensitive sink or establishes attacker control.",
+        "false_positive_notes": "Legitimate dynamic dispatch (plugin registries, event handler maps, and minifier output) commonly matches this pattern.",
         "benchmark_tags": ["execution", "ast", "evasion"],
     },
     "ast-bracket-notation-sensitive-access": {
