@@ -60,7 +60,7 @@ EXEC_TEXT_EXTS = {".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ps1", ".py", 
 BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
 SKIP_DIRS = {".git", ".hg", ".svn"}
-MAX_TEXT_BYTES = 10 * 1024 * 1024
+MAX_TEXT_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 100
@@ -549,6 +549,23 @@ def _add_manifest_findings(
                 "Check whether this activation path matches the extension's purpose.",
                 {"activation_event": event},
             ))
+        if event.startswith("onCommand:") and re.search(
+            r"(?:^|[._-])(?:login|log-in|signin|sign-in|authenticate|authentication|credential|token|secret|password)(?:$|[._-])",
+            event.removeprefix("onCommand:"),
+            re.I,
+        ):
+            findings.append(_finding(
+                extension_id,
+                version,
+                "credential-command-registration",
+                "cross-extension-exposure",
+                "LOW",
+                0.68,
+                f"Manifest activates on a credential-related command: {event.removeprefix('onCommand:')}.",
+                ["package.json"],
+                "Review whether other extensions can invoke this command and whether credential access requires explicit user intent.",
+                {"command": event.removeprefix("onCommand:"), "surface": "ActivationEvent"},
+            ))
     if activation:
         capabilities["activation"] = {"id": "activation", "evidence": activation}
 
@@ -711,7 +728,10 @@ def _add_lifecycle_script_chain_findings(
 ) -> None:
     text = command.lower()
     evidence = {"script": script_name, "command": command}
-    has_download = bool(re.search(r"\b(curl|wget|invoke-webrequest|irm|fetch|https?://)\b", text))
+    has_download = bool(re.search(
+        r"\b(?:curl|wget|invoke-webrequest|irm)\b|\bfetch\s*(?:\(|\s+)\s*['\"]?https?://",
+        text,
+    ))
     has_execute = bool(re.search(r"\b(node|npm|npx|bash|sh|zsh|powershell|pwsh|python|chmod|exec)\b", text))
     if has_download and has_execute:
         findings.append(_finding(

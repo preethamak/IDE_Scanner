@@ -802,6 +802,41 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("install-secret-access", rule_ids)
         self.assertIn("install-shell-obfuscation", rule_ids)
 
+    def test_registry_url_environment_assignment_is_not_install_download(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"registry-auth","version":"1.0.0",'
+                '"scripts":{"preinstall":"npm_config_registry=https://registry.npmjs.org npm exec ado-npm-auth"}}',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.decision, "review")
+        self.assertNotIn("install-download-execute", rule_ids)
+
+    def test_credential_command_activation_is_reviewable_exposure(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"account","version":"1.0.0",'
+                '"activationEvents":["onCommand:example.login","onCommand:example.format"]}',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        credential_findings = [
+            finding for finding in report.findings if finding.rule_id == "credential-command-registration"
+        ]
+        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(len(credential_findings), 1)
+        self.assertEqual(credential_findings[0].evidence["command"], "example.login")
+
     def test_agent_tool_schema_metrics_are_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
