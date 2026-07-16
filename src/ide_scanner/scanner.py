@@ -61,6 +61,8 @@ BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
 SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
+GENERATED_BLOB_BYTES = 10 * 1024 * 1024
+MINIFIED_BLOB_BYTES = 1024 * 1024
 MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 100
@@ -296,7 +298,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
             executable_sources.append((rel, text))
-            _add_code_findings(extension_id, version, rel, text, findings, capabilities, analyze_generated=is_entrypoint)
+            _add_code_findings(extension_id, version, rel, text, findings, capabilities)
         if suffix in JS_AST_EXTS:
             generated_blob = _is_generated_code_blob(rel, text)
             if is_entrypoint or not generated_blob:
@@ -1116,8 +1118,6 @@ def _add_code_findings(
     text: str,
     findings: list[Finding],
     capabilities: dict[str, dict[str, Any]],
-    *,
-    analyze_generated: bool = False,
 ) -> None:
     aliased_process_re, aliased_process_methods = _aliased_process_execution(text)
     process_exec_re = re.compile(
@@ -1183,7 +1183,10 @@ def _add_code_findings(
         ))
         capabilities.setdefault("process_execution", {"id": "process_execution", "evidence": []})["evidence"].append(rel)
 
-    if _is_generated_code_blob(rel, text) and not analyze_generated:
+    # Generated entrypoints are still read, inventoried, AST-parsed, and scanned
+    # for direct capabilities. Native correlation below is deliberately skipped:
+    # character proximity inside a multi-module bundle is not source-to-sink flow.
+    if _is_generated_code_blob(rel, text):
         return
 
     if has_configured_cli and not has_shell_exec and not has_download:
@@ -2659,9 +2662,11 @@ def _is_generated_code_blob(rel: str, text: str) -> bool:
     if normalized.endswith((".min.js", ".min.mjs", ".bundle.js", ".bundle.mjs", ".chunk.js", ".chunk.mjs")):
         return True
     newline_count = text.count("\n")
-    if len(text) >= MAX_TEXT_BYTES and newline_count < 20:
+    if len(text) >= GENERATED_BLOB_BYTES:
         return True
-    if len(text) >= MAX_TEXT_BYTES and len(text) / max(1, newline_count + 1) > 4000:
+    if len(text) >= MINIFIED_BLOB_BYTES and newline_count < 20:
+        return True
+    if len(text) >= MINIFIED_BLOB_BYTES and len(text) / max(1, newline_count + 1) > 500:
         return True
     return False
 

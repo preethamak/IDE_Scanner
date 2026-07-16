@@ -16,7 +16,7 @@ from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
-from ide_scanner.scanner import scan_extension, scan_targets
+from ide_scanner.scanner import _is_generated_code_blob, scan_extension, scan_targets
 
 
 class ScannerTests(unittest.TestCase):
@@ -1087,6 +1087,14 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.verdict, "suspicious")
         self.assertIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
         self.assertEqual(report.analysis_coverage["coverage_percent"], 100)
+
+    def test_bundle_classification_is_independent_of_coverage_limit(self) -> None:
+        minified = "const x=1;" * 110_000
+        large_compiled = "const x=1;\n" * 1_000_000
+
+        self.assertTrue(_is_generated_code_blob("dist/web.js", minified))
+        self.assertTrue(_is_generated_code_blob("out/extension.js", large_compiled))
+        self.assertFalse(_is_generated_code_blob("src/extension.js", "const x=1;\n" * 100))
 
     def test_declared_dist_entrypoint_is_never_silently_skipped(self) -> None:
         with TemporaryDirectory() as tmp:
