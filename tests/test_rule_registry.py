@@ -1,4 +1,6 @@
+import ast
 import unittest
+from pathlib import Path
 
 from ide_scanner.rule_registry import rule_registry, rules_json
 
@@ -7,7 +9,7 @@ class RuleRegistryTests(unittest.TestCase):
     def test_all_rules_publish_engine_and_decision_semantics(self) -> None:
         rules = rule_registry()
 
-        self.assertEqual(len(rules), 47)
+        self.assertEqual(len(rules), 73)
         self.assertTrue(all(rule.engine for rule in rules))
         self.assertTrue(all(rule.decision_effect for rule in rules))
         self.assertTrue(all(rule.confidence_basis for rule in rules))
@@ -29,3 +31,19 @@ class RuleRegistryTests(unittest.TestCase):
         self.assertIn("engine", first)
         self.assertIn("decision_effect", first)
         self.assertIn("confidence_basis", first)
+
+    def test_literal_native_findings_are_present_in_rule_catalog(self) -> None:
+        scanner_path = Path(__file__).resolve().parents[1] / "src" / "ide_scanner" / "scanner.py"
+        tree = ast.parse(scanner_path.read_text(encoding="utf-8"))
+        emitted = {
+            node.args[2].value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_finding"
+            and len(node.args) > 2
+            and isinstance(node.args[2], ast.Constant)
+            and isinstance(node.args[2].value, str)
+        }
+        registered = {rule.rule_id for rule in rule_registry()}
+        self.assertFalse(emitted - registered, f"Missing rule metadata: {sorted(emitted - registered)}")

@@ -387,6 +387,39 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
 }
 
 
+# Native rules that are emitted outside CODE_RULES still need to appear in the
+# exported rules catalog. Keep this compact catalog close to the metadata builder;
+# tests compare it with literal _finding() emissions from scanner.py.
+_NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
+    "agent-prompt-injection-sink": ("agentic", "capability", "MEDIUM", "Agent contribution metadata combines untrusted-content surfaces with tool execution terms."),
+    "binary-without-origin": ("provenance", "provenance", "MEDIUM", "A packaged native binary has no companion checksum, signature, or documented origin."),
+    "broad-activation": ("activation", "capability", "LOW", "The extension declares wildcard activation."),
+    "credential-file-read": ("credential-access", "weak", "MEDIUM", "Credential references appear near local file-read capability."),
+    "dangerous-github-workflow": ("repository-posture", "posture", "MEDIUM", "A packaged GitHub Actions workflow has a dangerous trigger or write permission."),
+    "destructive-transfer-chain": ("destructive-activity", "correlated", "HIGH", "Forceful recursive deletion appears near encoding/archive and network behavior."),
+    "install-download-execute": ("install-time", "correlated", "HIGH", "A lifecycle script combines download and command execution."),
+    "install-network-telemetry": ("install-time", "weak", "MEDIUM", "A lifecycle script appears to send install-time telemetry."),
+    "install-secret-access": ("install-time", "correlated", "HIGH", "A lifecycle script references credential material."),
+    "install-shell-obfuscation": ("install-time", "correlated", "HIGH", "A lifecycle script contains decoded, evaluated, or piped shell execution."),
+    "license-missing": ("repository-posture", "reputation", "LOW", "The packaged artifact does not include a recognized license file."),
+    "mcp-server-command": ("agentic", "capability", "MEDIUM", "The extension contributes an MCP server command or definition."),
+    "mutable-dependency-source": ("dependency", "dependency", "MEDIUM", "A runtime dependency uses a mutable or non-registry source."),
+    "obfuscation-execution-network": ("execution", "correlated", "HIGH", "Direct decoded execution appears near network behavior."),
+    "packed-artifact": ("provenance", "provenance", "MEDIUM", "The extension contains one or more packed artifacts."),
+    "persistence-chain": ("persistence", "correlated", "HIGH", "Persistence-location modification appears near execution or network behavior."),
+    "powerful-ide-contribution": ("ide-capability", "capability", "LOW", "The extension contributes debugger, task, or terminal capability."),
+    "repo-binary-artifacts": ("repository-posture", "posture", "LOW", "The package contains a committed native binary artifact."),
+    "repo-url-missing": ("reputation", "reputation", "LOW", "The extension manifest does not declare a source repository."),
+    "security-policy-missing": ("repository-posture", "reputation", "LOW", "The packaged artifact does not include a recognized security policy."),
+    "sensitive-activation": ("activation", "capability", "LOW", "The extension activates on a security-sensitive IDE event."),
+    "startup-activation": ("activation", "capability", "LOW", "The extension activates automatically after IDE startup."),
+    "unpinned-dependency": ("dependency", "dependency", "LOW", "A runtime dependency uses an unpinned version specifier."),
+    "webview-csp-missing": ("webview", "capability", "MEDIUM", "A detected webview lacks a Content-Security-Policy meta tag."),
+    "webview-csp-unsafe-directive": ("webview", "capability", "MEDIUM", "A webview CSP contains an unsafe directive."),
+    "workflow-token-permissions-broad": ("repository-posture", "posture", "LOW", "A workflow grants broad token permissions or relies on implicit defaults."),
+}
+
+
 def rule_registry() -> list[RuleMetadata]:
     rules: dict[str, RuleMetadata] = {}
     for rule in CODE_RULES:
@@ -402,6 +435,21 @@ def rule_registry() -> list[RuleMetadata]:
             engine=_engine_for(rule.id, [rule.category]),
             decision_effect=_decision_effect("weak"),
             confidence_basis=_confidence_basis("weak"),
+        )
+
+    for rule_id, (category, evidence_class, severity, description) in _NATIVE_RULE_DEFAULTS.items():
+        rules[rule_id] = RuleMetadata(
+            rule_id=rule_id,
+            title=_title(rule_id),
+            category=category,
+            evidence_class=evidence_class,
+            default_severity=severity,  # type: ignore[arg-type]
+            description=description,
+            recommendation="Review the cited evidence and apply the rule-specific remediation in the finding.",
+            benchmark_tags=[category],
+            engine=_engine_for(rule_id, [category]),
+            decision_effect=_decision_effect(evidence_class),
+            confidence_basis=_confidence_basis(evidence_class),
         )
 
     for rule_id, override in _RULE_OVERRIDES.items():
