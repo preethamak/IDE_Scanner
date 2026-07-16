@@ -96,6 +96,9 @@ class ReportMetadata:
     total_extensions: int
     completed_extensions: int
     incomplete_extensions: int
+    # A ruleset name alone is not enough to reproduce a decision: scanner
+    # implementation changes can alter classification without adding a rule.
+    scanner_build: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

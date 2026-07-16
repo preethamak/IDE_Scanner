@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import zipfile
 from importlib.metadata import PackageNotFoundError, version
@@ -132,6 +133,7 @@ def _metadata(report: dict[str, Any], extensions: list[ExtensionReport], *, prof
         total_extensions=len(extensions),
         completed_extensions=len(extensions) - incomplete,
         incomplete_extensions=incomplete,
+        scanner_build=_scanner_build(),
     )
 
 
@@ -577,6 +579,15 @@ def _scanner_version() -> str:
         return version("ide-scanner")
     except PackageNotFoundError:
         return "0.1.0"
+
+
+def _scanner_build() -> str:
+    """Return the immutable CI revision when one is available.
+
+    Local reports deliberately say ``unknown`` rather than pretending to be a
+    production build. The website treats an unknown build as non-reusable.
+    """
+    return os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown"
 
 
 def _write_json(archive: zipfile.ZipFile, name: str, data: Any) -> None:
