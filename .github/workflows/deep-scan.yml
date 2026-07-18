@@ -20,7 +20,7 @@ jobs:
       - name: Claim queued scan
         id: claim
         env:
-          SCAN_CLAIM_URL: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim
+          SCAN_CLAIM_URLS: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim,https://ide-scanner-web.vercel.app/api/internal/scan-jobs/claim
           SCAN_RUNNER_ID: github-actions-${{ github.run_id }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
         run: python scripts/claim_scan.py

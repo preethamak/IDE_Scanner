@@ -7,8 +7,38 @@ import urllib.request
 
 
 def main() -> int:
+    for claim_url in claim_urls():
+        job = claim_job(claim_url)
+        if job is None:
+            continue
+        required = ("id", "extension_id", "version", "callback_url")
+        if not all(job.get(key) for key in required):
+            raise RuntimeError("Scan claim response is incomplete")
+        write_outputs({
+            "has_job": "true",
+            "job_id": str(job["id"]),
+            "extension_id": str(job["extension_id"]),
+            "version": str(job["version"]),
+            "callback_url": str(job["callback_url"]),
+        })
+        print(f"Claimed {job['extension_id']}@{job['version']} from {claim_url}")
+        return 0
+
+    write_outputs({"has_job": "false"})
+    return 0
+
+
+def claim_urls() -> list[str]:
+    configured = os.environ.get("SCAN_CLAIM_URLS") or os.environ.get("SCAN_CLAIM_URL", "")
+    urls = [url.strip() for url in configured.split(",") if url.strip()]
+    if not urls:
+        raise RuntimeError("SCAN_CLAIM_URLS or SCAN_CLAIM_URL is required")
+    return urls
+
+
+def claim_job(claim_url: str) -> dict[str, object] | None:
     request = urllib.request.Request(
-        os.environ["SCAN_CLAIM_URL"],
+        claim_url,
         data=json.dumps({"runner_id": os.environ.get("SCAN_RUNNER_ID", "github-actions")}).encode(),
         method="POST",
         headers={
@@ -18,28 +48,11 @@ def main() -> int:
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            if response.status == 204:
-                write_outputs({"has_job": "false"})
-                return 0
-            job = json.loads(response.read().decode())
+            return None if response.status == 204 else json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
         if error.code == 204:
-            write_outputs({"has_job": "false"})
-            return 0
-        raise RuntimeError(f"Scan claim returned HTTP {error.code}") from error
-
-    required = ("id", "extension_id", "version", "callback_url")
-    if not all(job.get(key) for key in required):
-        raise RuntimeError("Scan claim response is incomplete")
-    write_outputs({
-        "has_job": "true",
-        "job_id": str(job["id"]),
-        "extension_id": str(job["extension_id"]),
-        "version": str(job["version"]),
-        "callback_url": str(job["callback_url"]),
-    })
-    print(f"Claimed {job['extension_id']}@{job['version']}")
-    return 0
+            return None
+        raise RuntimeError(f"Scan claim returned HTTP {error.code} from {claim_url}") from error
 
 
 def write_outputs(values: dict[str, str]) -> None:

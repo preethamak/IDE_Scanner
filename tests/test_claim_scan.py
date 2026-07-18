@@ -59,6 +59,14 @@ class ClaimScanTests(unittest.TestCase):
         self.assertIn("extension_id=publisher.extension", output)
         self.assertIn("version=1.2.3", output)
 
+    def test_claim_checks_the_next_url_when_the_first_queue_is_empty(self):
+        environment = {**self.environment, "SCAN_CLAIM_URLS": "https://primary.example/claim,https://secondary.example/claim"}
+        payload = {"id": "job-2", "extension_id": "publisher.extension", "version": "2.0.0", "callback_url": "https://scanner.example/callback"}
+        with patch.dict("os.environ", environment, clear=True), patch.object(claim_scan.urllib.request, "urlopen", side_effect=[Response(204), Response(200, payload)]) as urlopen:
+            self.assertEqual(claim_scan.main(), 0)
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertIn("job_id=job-2", self.output.read_text())
+
     def test_incomplete_claim_is_rejected(self):
         with patch.dict("os.environ", self.environment, clear=True), patch.object(claim_scan.urllib.request, "urlopen", return_value=Response(200, {"id": "job-1"})):
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
