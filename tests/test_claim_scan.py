@@ -59,6 +59,16 @@ class ClaimScanTests(unittest.TestCase):
         self.assertIn("extension_id=publisher.extension", output)
         self.assertIn("version=1.2.3", output)
 
+    def test_claim_sends_exact_job_and_github_run_identity(self):
+        environment = {**self.environment, "SCAN_JOB_ID": "job-42", "SCAN_GITHUB_RUN_ID": "987654"}
+        payload = {"id": "job-42", "extension_id": "publisher.extension", "version": "1.2.3", "callback_url": "https://scanner.example/callback"}
+        with patch.dict("os.environ", environment, clear=True), patch.object(claim_scan.urllib.request, "urlopen", return_value=Response(200, payload)) as urlopen:
+            self.assertEqual(claim_scan.main(), 0)
+        request = urlopen.call_args.args[0]
+        body = json.loads(request.data.decode())
+        self.assertEqual(body["job_id"], "job-42")
+        self.assertEqual(body["github_run_id"], "987654")
+
     def test_claim_checks_the_next_url_when_the_first_queue_is_empty(self):
         environment = {**self.environment, "SCAN_CLAIM_URLS": "https://primary.example/claim,https://secondary.example/claim"}
         payload = {"id": "job-2", "extension_id": "publisher.extension", "version": "2.0.0", "callback_url": "https://scanner.example/callback"}
@@ -71,6 +81,19 @@ class ClaimScanTests(unittest.TestCase):
         with patch.dict("os.environ", self.environment, clear=True), patch.object(claim_scan.urllib.request, "urlopen", return_value=Response(200, {"id": "job-1"})):
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 claim_scan.main()
+
+    def test_redirect_handler_reissues_post_to_new_location(self):
+        # A 307/308 answer to the claim POST must be followed, not raised.
+        handler = claim_scan._PostPreservingRedirect()
+        original = claim_scan.urllib.request.Request(
+            "https://web.example/claim", data=b'{"runner_id":"r"}', method="POST",
+            headers={"Authorization": "Bearer test-secret", "Content-Type": "application/json"},
+        )
+        redirected = handler.redirect_request(original, None, 307, "Temporary Redirect", {}, "https://apex.example/claim")
+        self.assertEqual(redirected.full_url, "https://apex.example/claim")
+        self.assertEqual(redirected.get_method(), "POST")
+        self.assertEqual(redirected.data, b'{"runner_id":"r"}')
+        self.assertEqual(redirected.get_header("Authorization"), "Bearer test-secret")
 
 
 if __name__ == "__main__":

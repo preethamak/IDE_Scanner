@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      job_id:
+        description: Exact queued scan job to claim; empty means claim the next prioritized job
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -20,8 +25,12 @@ jobs:
       - name: Claim queued scan
         id: claim
         env:
-          SCAN_CLAIM_URLS: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim,https://ide-scanner-web.vercel.app/api/internal/scan-jobs/claim
+          # Only the canonical apex host. ide-scanner-web.vercel.app 307-redirects
+          # here, and urllib refuses to follow a 307 on POST, crashing the claim.
+          SCAN_CLAIM_URLS: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim
           SCAN_RUNNER_ID: github-actions-${{ github.run_id }}
+          SCAN_JOB_ID: ${{ inputs.job_id }}
+          SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
         run: python scripts/claim_scan.py
       - name: Install analyzers
