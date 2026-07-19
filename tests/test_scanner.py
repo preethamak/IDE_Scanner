@@ -100,7 +100,8 @@ class ScannerTests(unittest.TestCase):
         suspicious = by_id["unknown.shadow-helper"]
         self.assertEqual(suspicious["verdict"], "suspicious")
         self.assertEqual(suspicious["severity"], "HIGH")
-        self.assertGreater(suspicious["malware_score"], 0)
+        self.assertEqual(suspicious["malware_score"], 0)
+        self.assertGreater(suspicious["risk_score"], 0)
         self.assertIn("credential-exfiltration-chain", {finding["rule_id"] for finding in suspicious["findings"]})
 
         agent = by_id["example.agent-toolbox"]
@@ -1201,7 +1202,8 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.verdict, "suspicious")
         self.assertEqual(report.malware_authority, "non_authoritative")
         self.assertEqual(report.decision, "block")
-        self.assertGreater(report.malware_score, 0)
+        self.assertEqual(report.malware_score, 0)
+        self.assertEqual(report.public_outcome, "preventive_block")
         self.assertGreaterEqual(report.risk_score, report.malware_score)
         self.assertIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
 

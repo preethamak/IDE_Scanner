@@ -30,9 +30,9 @@ rules:
     severity: ERROR
     mode: taint
     metadata:
-      ide_scanner_evidence_class: correlated
+      ide_scanner_evidence_class: capability
       ide_scanner_category: execution
-      ide_scanner_severity: HIGH
+      ide_scanner_severity: MEDIUM
     pattern-sources:
       - pattern-either:
           - pattern: $VSCODE.window.activeTextEditor.document.getText(...)
@@ -42,8 +42,8 @@ rules:
       - pattern-either:
           - pattern: $CP.exec($DATA, ...)
           - pattern: $CP.execSync($DATA, ...)
-          - pattern: $CP.spawn($DATA, ...)
-          - pattern: $CP.spawnSync($DATA, ...)
+          - pattern: $CP.spawn($DATA, ..., { ..., shell: true, ... })
+          - pattern: $CP.spawnSync($DATA, ..., { ..., shell: true, ... })
 
   - id: webview-message-to-process
     message: Webview message data flows to process execution.

@@ -7,6 +7,7 @@ Severity = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 Verdict = Literal["clean", "review", "suspicious", "malicious"]
 VerdictState = Literal["safe", "safe_with_notes", "needs_review", "suspicious", "confirmed_malicious"]
 Decision = Literal["allow", "review", "block", "incomplete"]
+PublicOutcome = Literal["clear", "expected_capability", "investigate", "preventive_block", "confirmed_threat", "incomplete"]
 Status = Literal["success", "warning", "failure", "skipped"]
 
 
@@ -70,6 +71,12 @@ class ExtensionReport:
     dependencies: dict[str, str] = field(default_factory=dict)
     decision: Decision = "incomplete"
     decision_reason: str = "Analysis has not completed."
+    public_outcome: PublicOutcome = "incomplete"
+    decision_basis: str = "incomplete"
+    evidence_confidence: str = "none"
+    provenance: dict[str, Any] = field(default_factory=dict)
+    capability_assessment: dict[str, Any] = field(default_factory=dict)
+    score_schema_version: str = "2"
     artifact_identity: dict[str, Any] = field(default_factory=dict)
     analysis_coverage: dict[str, Any] = field(default_factory=dict)
     baseline_diff: dict[str, Any] = field(default_factory=dict)
@@ -130,6 +137,12 @@ class ExtensionSummary:
     skipped_reason: str = ""
     decision: Decision = "incomplete"
     decision_reason: str = "Analysis has not completed."
+    public_outcome: PublicOutcome = "incomplete"
+    decision_basis: str = "incomplete"
+    evidence_confidence: str = "none"
+    provenance: dict[str, Any] = field(default_factory=dict)
+    capability_assessment: dict[str, Any] = field(default_factory=dict)
+    score_schema_version: str = "2"
     artifact_sha256: str = ""
     coverage_percent: int = 0
     baseline_changed: bool = False
@@ -172,6 +185,12 @@ class ExtensionDetail:
     skipped_reason: str = ""
     decision: Decision = "incomplete"
     decision_reason: str = "Analysis has not completed."
+    public_outcome: PublicOutcome = "incomplete"
+    decision_basis: str = "incomplete"
+    evidence_confidence: str = "none"
+    provenance: dict[str, Any] = field(default_factory=dict)
+    capability_assessment: dict[str, Any] = field(default_factory=dict)
+    score_schema_version: str = "2"
     artifact_identity: dict[str, Any] = field(default_factory=dict)
     analysis_coverage: dict[str, Any] = field(default_factory=dict)
     baseline_diff: dict[str, Any] = field(default_factory=dict)

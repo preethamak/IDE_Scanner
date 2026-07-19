@@ -15,6 +15,7 @@ from .ast_analyzer import JS_AST_EXTS, analyze_js_source
 from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
+from .public_outcomes import apply_public_assessment
 from .posture import scan_posture, summarize_posture
 from .providers import run_static_providers
 from .registry import (
@@ -358,6 +359,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         analysis_coverage=analysis_coverage,
     )
     _apply_security_decision(report)
+    apply_public_assessment(report)
     return report
 
 
@@ -3000,9 +3002,10 @@ def _score_details(findings: list[Finding]) -> dict[str, Any]:
         "reputation": reputation_score,
         "weak_context": weak_score,
     }
-    malware_score = max(confirmed_score, correlated_score, observed_score)
-    if malware_score < 100 and (correlated_score or observed_score):
-        malware_score = min(89, malware_score + min(10, weak_score))
+    # Schema v2 reserves the malware index for authoritative intelligence and
+    # high-specificity runtime proof. Static correlations remain visible in the
+    # investigation-priority score, but no longer masquerade as malware proof.
+    malware_score = max(confirmed_score, _proven_observed_score(findings))
 
     risk_components = {
         name: score for name, score in components.items()
@@ -3186,6 +3189,19 @@ def _observed_score(findings: list[Finding]) -> int:
     if "observed-filesystem-write" in rule_ids:
         score = max(score, 22)
     return score
+
+
+def _proven_observed_score(findings: list[Finding]) -> int:
+    rule_ids = {finding.rule_id for finding in findings}
+    if "observed-secret-exfil" in rule_ids:
+        return 89
+    if "observed-destructive-behavior" in rule_ids:
+        return 88
+    if "observed-download-execute" in rule_ids:
+        return 84
+    if "observed-persistence" in rule_ids:
+        return 82
+    return 0
 
 
 def _posture_score(findings: list[Finding]) -> int:

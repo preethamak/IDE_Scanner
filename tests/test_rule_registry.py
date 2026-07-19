@@ -18,6 +18,8 @@ class RuleRegistryTests(unittest.TestCase):
         rules = {rule.rule_id: rule for rule in rule_registry()}
 
         self.assertEqual(rules["untrusted-workspace-input-to-process"].engine, "semgrep")
+        self.assertEqual(rules["untrusted-workspace-input-to-process"].evidence_class, "capability")
+        self.assertEqual(rules["untrusted-workspace-input-to-process"].default_severity, "MEDIUM")
         self.assertEqual(rules["unicode-evasion"].engine, "yara")
         self.assertEqual(rules["ast-dynamic-call-target"].engine, "javascript-ast")
         self.assertEqual(rules["encoded-dynamic-execution"].decision_effect, "review-context")

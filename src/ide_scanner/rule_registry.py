@@ -3,17 +3,18 @@ from __future__ import annotations
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.07.16"
+RULESET_VERSION = "2026.07.19"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
     "untrusted-workspace-input-to-process": {
         "title": "Workspace input reaches process execution",
         "category": "execution",
-        "evidence_class": "correlated",
-        "default_severity": "HIGH",
-        "description": "Semgrep taint analysis found workspace-controlled data reaching a process execution sink.",
-        "recommendation": "Require explicit user initiation and pass validated arguments without shell interpolation.",
+        "evidence_class": "capability",
+        "default_severity": "MEDIUM",
+        "description": "Workspace or user configuration reaches a process execution API. This is common in developer tooling and is not malware evidence by itself.",
+        "recommendation": "Confirm the command is user initiated, workspace trust is respected, and arguments avoid shell interpolation.",
+        "false_positive_notes": "Language servers, linters, formatters, and security tools commonly launch a configured local executable.",
         "benchmark_tags": ["semgrep", "workspace", "execution"],
     },
     "webview-message-to-process": {
