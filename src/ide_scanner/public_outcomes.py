@@ -14,7 +14,7 @@ EXPECTED_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
         "id": "vscode-eslint-v1",
         "publisher": "dbaeumer",
         "repository_owners": ["microsoft/vscode-eslint"],
-        "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "process_execution"],
+        "capabilities": ["activation", "dynamic_code", "filesystem", "ide_contributions", "lifecycle_scripts", "process_execution"],
     },
     "eamodio.gitlens": {
         "id": "gitlens-v1",

@@ -306,7 +306,7 @@ def _normalize_marketplace_search_row(raw: dict[str, Any]) -> dict[str, Any] | N
         "display_name": raw.get("displayName") or extension_name,
         "publisher": publisher_name,
         "publisher_display_name": publisher.get("displayName") or publisher_name,
-        "publisher_verified": bool(publisher.get("isDomainVerified") or "verified" in str(publisher.get("flags") or "")),
+        "publisher_verified": _marketplace_publisher_verified(publisher),
         "short_description": raw.get("shortDescription") or "",
         "version": latest_version.get("version") or "",
         "last_updated": latest_version.get("lastUpdated") or raw.get("lastUpdated") or "",
@@ -654,7 +654,7 @@ def _normalize_marketplace_extension(extension_id: str, raw: dict[str, Any]) -> 
         "found": True,
         "publisher": publisher.get("publisherName") or "",
         "publisher_display_name": publisher.get("displayName") or "",
-        "publisher_verified": bool(publisher.get("isVerified") or publisher.get("verified")),
+        "publisher_verified": _marketplace_publisher_verified(publisher),
         "display_name": raw.get("displayName") or "",
         "extension_name": raw.get("extensionName") or "",
         "version": latest_version.get("version") or "",
@@ -665,6 +665,16 @@ def _normalize_marketplace_extension(extension_id: str, raw: dict[str, Any]) -> 
         "registry": "vs-marketplace",
     }
     return metadata
+
+
+def _marketplace_publisher_verified(publisher: dict[str, Any]) -> bool:
+    flags = str(publisher.get("flags") or "").lower().split()
+    return bool(
+        publisher.get("isDomainVerified")
+        or publisher.get("isVerified")
+        or publisher.get("verified")
+        or "verified" in flags
+    )
 
 
 def _marketplace_stats(raw_stats: Any) -> dict[str, float]:

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ide_scanner.registry import MarketplaceDownloadError, _fetch_openvsx_metadata, download_marketplace_vsix, search_marketplace_extensions
+from ide_scanner.registry import MarketplaceDownloadError, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
 
 
 OPENVSX_EXTENSION = {
@@ -22,6 +22,22 @@ OPENVSX_EXTENSION = {
 
 
 class RegistryTests(unittest.TestCase):
+    def test_marketplace_domain_verified_publisher_is_preserved(self) -> None:
+        metadata = _normalize_marketplace_extension("dbaeumer.vscode-eslint", {
+            "displayName": "ESLint",
+            "extensionName": "vscode-eslint",
+            "publisher": {
+                "publisherName": "dbaeumer",
+                "displayName": "Microsoft",
+                "flags": "verified",
+                "isDomainVerified": True,
+            },
+            "versions": [{"version": "3.0.33"}],
+            "statistics": [],
+        })
+
+        self.assertTrue(metadata["publisher_verified"])
+
     @patch("ide_scanner.registry._http_get_text", return_value=json.dumps(OPENVSX_EXTENSION))
     def test_openvsx_metadata_provides_exact_download(self, _get) -> None:
         metadata, error = _fetch_openvsx_metadata("tintinweb.vscode-vyper")
