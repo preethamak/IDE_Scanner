@@ -582,7 +582,7 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(targets, [{"type": "vsix", "path": str(vsix.resolve())}])
 
-    def test_registry_finding_moves_clean_extension_to_review(self) -> None:
+    def test_exact_registry_finding_moves_clean_extension_to_review(self) -> None:
         registry = {
             "enabled": True,
             "findings": [{
@@ -591,8 +591,8 @@ class ScannerTests(unittest.TestCase):
                 "confidence": 0.58,
                 "category": "dependency",
                 "rule_id": "vulnerable-npm-dependency",
-                "evidence_summary": "example@1.0.0 has 1 OSV finding(s). Version match: range-derived.",
-                "evidence": {"package": "example", "version": "1.0.0", "exact": False, "osv_ids": ["GHSA-test"]},
+                "evidence_summary": "example@1.0.0 has 1 OSV finding(s). Version match: exact.",
+                "evidence": {"package": "example", "version": "1.0.0", "exact": True, "osv_ids": ["GHSA-test"]},
             }],
         }
         with patch("ide_scanner.scanner.enrich_registry", return_value=registry):
