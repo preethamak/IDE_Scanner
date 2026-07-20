@@ -26,6 +26,7 @@ MARKETPLACE_BATCH_SIZE = 25
 OSV_BATCH_SIZE = 100
 VSIX_ASSET_TYPE = "Microsoft.VisualStudio.Services.VSIXPackage"
 MAX_VSIX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+MAX_CONFIGURED_VSIX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 VSIX_DOWNLOAD_TIMEOUT = 30
 EXTENSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -136,8 +137,8 @@ def download_marketplace_vsix(
     extension_id: str,
     version: str | None = None,
     destination_dir: Path | str | None = None,
-    max_bytes: int = MAX_VSIX_DOWNLOAD_BYTES,
-    timeout: int = VSIX_DOWNLOAD_TIMEOUT,
+    max_bytes: int | None = None,
+    timeout: int | None = None,
     registry_out: dict[str, str] | None = None,
 ) -> Path:
     """Resolve `publisher.name` (optionally pinned to `version`) against the VS
@@ -145,6 +146,8 @@ def download_marketplace_vsix(
 
     Raises MarketplaceDownloadError for any resolution/network/size failure.
     Caller owns the returned path and is responsible for deleting it."""
+    max_bytes = _bounded_positive_env("IDE_SCANNER_MAX_VSIX_BYTES", MAX_VSIX_DOWNLOAD_BYTES, MAX_CONFIGURED_VSIX_DOWNLOAD_BYTES) if max_bytes is None else max_bytes
+    timeout = _bounded_positive_env("IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT", VSIX_DOWNLOAD_TIMEOUT, 600) if timeout is None else timeout
     resolved_id = parse_marketplace_reference(extension_id)
     metadata, error = _fetch_marketplace_metadata(resolved_id)
     if error or not metadata or not metadata.get("found"):
@@ -210,6 +213,19 @@ def download_marketplace_vsix(
 
     _degzip_if_needed(out_path)
     return out_path
+
+
+def _bounded_positive_env(name: str, default: int, upper_bound: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise MarketplaceDownloadError(f"{name} must be an integer") from exc
+    if value < 1 or value > upper_bound:
+        raise MarketplaceDownloadError(f"{name} must be between 1 and {upper_bound}")
+    return value
 
 
 MARKETPLACE_SEARCH_TEXT_FILTER = 10

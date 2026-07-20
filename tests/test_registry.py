@@ -88,3 +88,16 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(download.call_count, 1)
         self.assertNotIn("open-vsx.org", str(download.call_args.args[0]))
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata")
+    @patch("ide_scanner.registry._fetch_marketplace_metadata")
+    def test_cloud_worker_can_raise_bounded_download_limit(self, marketplace, openvsx) -> None:
+        marketplace.return_value = ({"found": True, "publisher": "publisher", "extension_name": "large", "version": "1.0.0", "registry": "vs-marketplace"}, None)
+        openvsx.return_value = ({"found": False}, None)
+        environment = {"IDE_SCANNER_MAX_VSIX_BYTES": "268435456", "IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT": "180"}
+        with tempfile.TemporaryDirectory() as temp, patch.dict("os.environ", environment, clear=False), patch("ide_scanner.registry._download_to_file") as download:
+            download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04large")
+            download_marketplace_vsix("publisher.large", destination_dir=Path(temp))
+
+        self.assertEqual(download.call_args.kwargs["max_bytes"], 268435456)
+        self.assertEqual(download.call_args.kwargs["timeout"], 180)

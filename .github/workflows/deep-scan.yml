@@ -66,6 +66,10 @@ jobs:
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+          # Large packages are handled only on the isolated cloud worker. The
+          # local CLI retains its conservative 50 MiB default.
+          IDE_SCANNER_MAX_VSIX_BYTES: 268435456
+          IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT: 180
         run: |
           semgrep --validate --config rules/semgrep/vscode-security.yml
           ide-scanner scan \

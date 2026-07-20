@@ -239,7 +239,16 @@ def scan_targets(
         if isinstance(item, dict) and str(item.get("source") or "").startswith("osv")
     ]
     for extension in extensions:
+        acquisition_failure = str(extension.artifact_inventory.get("skipped_reason") or "") if extension.source == "marketplace-error" else ""
         providers = extension.analysis_coverage.setdefault("providers", {})
+        if acquisition_failure:
+            providers["artifact_acquisition"] = {
+                "provider": "artifact_acquisition",
+                "status": "failed",
+                "error": acquisition_failure,
+                "error_count": 1,
+                "required": True,
+            }
         providers["dependency_intelligence"] = {
             "provider": "dependency_intelligence",
             "status": "completed" if online and not dependency_errors else "failed" if online else "unavailable",
@@ -249,7 +258,8 @@ def scan_targets(
         _finalize_analysis_coverage(extension.analysis_coverage)
         extension.artifact_inventory["analysis_coverage"] = extension.analysis_coverage
         extension.artifact_inventory["scan_incomplete"] = extension.analysis_coverage["status"] != "complete"
-        extension.artifact_inventory["skipped_reason"] = "; ".join(extension.analysis_coverage["limitations"])
+        coverage_limitations = "; ".join(extension.analysis_coverage["limitations"])
+        extension.artifact_inventory["skipped_reason"] = "; ".join(item for item in (acquisition_failure, coverage_limitations) if item)
         # Registry identity and dependency-provider coverage are attached after
         # the artifact scan. Recompute the decision and public explanation only
         # after that final evidence is present so CLI, worker, and website
@@ -2622,12 +2632,17 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
     required = candidates - set(oversized) - set(failures)
     if required - analyzed:
         limitations.append(f"Did not analyze {len(required - analyzed)} executable candidate(s)")
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
     required_providers = {
         item.strip().lower()
         for item in os.environ.get("IDE_SCANNER_REQUIRE_PROVIDERS", "").split(",")
         if item.strip()
     }
-    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    required_providers.update(
+        str(name).lower()
+        for name, provider in providers.items()
+        if isinstance(provider, dict) and provider.get("required") is True
+    )
     for name in sorted(required_providers):
         provider = providers.get(name) if isinstance(providers.get(name), dict) else {}
         provider["required"] = True
