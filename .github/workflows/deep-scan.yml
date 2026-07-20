@@ -9,6 +9,21 @@ on:
         description: Exact queued scan job to claim; empty means claim the next prioritized job
         required: false
         type: string
+      extension_id:
+        description: Exact extension to enqueue for a canonical maintenance scan
+        required: false
+        type: string
+      version:
+        description: Exact extension version to enqueue
+        required: false
+        type: string
+      scan_purpose:
+        description: Canonical publication purpose (benchmark or public_intelligence)
+        required: false
+        type: choice
+        options:
+          - public_intelligence
+          - benchmark
 
 permissions:
   contents: read
@@ -22,6 +37,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Enqueue canonical maintenance scan
+        id: enqueue
+        env:
+          SCAN_ENQUEUE_URL: https://ide-scanner.vercel.app/api/internal/scan-jobs/enqueue
+          SCAN_EXTENSION_ID: ${{ inputs.extension_id }}
+          SCAN_EXTENSION_VERSION: ${{ inputs.version }}
+          SCAN_PURPOSE: ${{ inputs.scan_purpose }}
+          SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
+        run: python scripts/enqueue_scan.py
       - name: Claim queued scan
         id: claim
         env:
@@ -29,7 +53,7 @@ jobs:
           # here, and urllib refuses to follow a 307 on POST, crashing the claim.
           SCAN_CLAIM_URLS: https://ide-scanner.vercel.app/api/internal/scan-jobs/claim
           SCAN_RUNNER_ID: github-actions-${{ github.run_id }}
-          SCAN_JOB_ID: ${{ inputs.job_id }}
+          SCAN_JOB_ID: ${{ inputs.job_id || steps.enqueue.outputs.job_id }}
           SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
         run: python scripts/claim_scan.py
