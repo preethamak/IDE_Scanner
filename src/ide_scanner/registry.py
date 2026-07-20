@@ -169,7 +169,11 @@ def download_marketplace_vsix(
     if metadata.get("registry") != "openvsx":
         openvsx_metadata, _ = _fetch_openvsx_metadata(resolved_id)
         openvsx_url = str((openvsx_metadata or {}).get("download_url") or "")
-        if openvsx_url and openvsx_url not in download_urls:
+        # Never satisfy an exact-version request with Open VSX's latest
+        # artifact. If the registries do not expose the same version, fail
+        # closed instead of silently scanning and relabelling another release.
+        openvsx_matches = not version or str((openvsx_metadata or {}).get("version") or "") == target_version
+        if openvsx_matches and openvsx_url and openvsx_url not in download_urls:
             download_urls.append(openvsx_url)
 
     destination_root = Path(destination_dir) if destination_dir else Path(tempfile.gettempdir())

@@ -433,6 +433,14 @@ def scan_marketplace_extension(
     finally:
         vsix_path.unlink(missing_ok=True)
 
+    if report.extension_id.lower() != resolved_id.lower() or (version and report.version != version):
+        actual = f"{report.extension_id}@{report.version}"
+        expected = f"{resolved_id}@{version or report.version}"
+        return _marketplace_error_extension(
+            resolved_id,
+            f"Registry returned {actual} while {expected} was requested; result rejected.",
+        )
+
     report.source = registry_source.get("registry", "marketplace")
     report.install_path = f"{report.source}:{resolved_id}"
     return report

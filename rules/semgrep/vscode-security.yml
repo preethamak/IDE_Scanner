@@ -42,8 +42,8 @@ rules:
       - pattern-either:
           - pattern: $CP.exec($DATA, ...)
           - pattern: $CP.execSync($DATA, ...)
-          - pattern: $CP.spawn($DATA, ..., { ..., shell: true, ... })
-          - pattern: $CP.spawnSync($DATA, ..., { ..., shell: true, ... })
+          - pattern: '$CP.spawn($DATA, ..., { ..., shell: true, ... })'
+          - pattern: '$CP.spawnSync($DATA, ..., { ..., shell: true, ... })'
 
   - id: webview-message-to-process
     message: Webview message data flows to process execution.

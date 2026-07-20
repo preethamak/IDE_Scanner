@@ -42,15 +42,16 @@ jobs:
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
-        run: >-
-          ide-scanner scan
-          --extension-id '${{ steps.claim.outputs.extension_id }}'
-          --version '${{ steps.claim.outputs.version }}'
-          --profile deep
-          --online
-          --format bundle.json
-          --include-raw-evidence
-          --output scan-bundle.json
+        run: |
+          semgrep --validate --config rules/semgrep/vscode-security.yml
+          ide-scanner scan \
+            --extension-id '${{ steps.claim.outputs.extension_id }}' \
+            --version '${{ steps.claim.outputs.version }}' \
+            --profile deep \
+            --online \
+            --format bundle.json \
+            --include-raw-evidence \
+            --output scan-bundle.json
       - name: Submit signed result
         if: steps.claim.outputs.has_job == 'true' && success()
         env:

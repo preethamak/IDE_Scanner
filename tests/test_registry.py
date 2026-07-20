@@ -75,3 +75,16 @@ class RegistryTests(unittest.TestCase):
 
             self.assertTrue(result.read_bytes().startswith(b"PK"))
             self.assertEqual(source["registry"], "openvsx")
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata")
+    @patch("ide_scanner.registry._fetch_marketplace_metadata")
+    def test_pinned_marketplace_download_never_falls_back_to_different_openvsx_version(self, marketplace, openvsx) -> None:
+        marketplace.return_value = ({"found": True, "publisher": "dbaeumer", "extension_name": "vscode-eslint", "version": "3.0.34", "registry": "vs-marketplace"}, None)
+        openvsx.return_value = ({"found": True, "version": "3.0.34", "download_url": "https://open-vsx.org/latest.vsix", "registry": "openvsx"}, None)
+
+        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file", side_effect=MarketplaceDownloadError("marketplace unavailable")) as download:
+            with self.assertRaises(MarketplaceDownloadError):
+                download_marketplace_vsix("dbaeumer.vscode-eslint", version="3.0.33", destination_dir=Path(temp))
+
+        self.assertEqual(download.call_count, 1)
+        self.assertNotIn("open-vsx.org", str(download.call_args.args[0]))
