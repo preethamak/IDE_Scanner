@@ -5,11 +5,11 @@ from ide_scanner.public_outcomes import apply_public_assessment
 
 
 class PublicOutcomeTests(unittest.TestCase):
-    def test_established_profile_turns_capability_only_review_into_allow(self) -> None:
+    def test_established_profile_explains_capability_without_overriding_review(self) -> None:
         report = _report()
         apply_public_assessment(report)
 
-        self.assertEqual(report.decision, "allow")
+        self.assertEqual(report.decision, "review")
         self.assertEqual(report.public_outcome, "expected_capability")
         self.assertEqual(report.provenance["tier"], "established")
         self.assertEqual(report.capability_assessment["unexpected"], [])

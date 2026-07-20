@@ -250,6 +250,12 @@ def scan_targets(
         extension.artifact_inventory["analysis_coverage"] = extension.analysis_coverage
         extension.artifact_inventory["scan_incomplete"] = extension.analysis_coverage["status"] != "complete"
         extension.artifact_inventory["skipped_reason"] = "; ".join(extension.analysis_coverage["limitations"])
+        # Registry identity and dependency-provider coverage are attached after
+        # the artifact scan. Recompute the decision and public explanation only
+        # after that final evidence is present so CLI, worker, and website
+        # ingestion all serialize the same canonical assessment.
+        _apply_security_decision(extension)
+        apply_public_assessment(extension)
     return _build_report(extensions, registry, _load_previous_report(previous_report_file), include_posture=include_posture)
 
 
@@ -396,6 +402,7 @@ def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = N
             }
         _apply_vsix_known_bad_match(report, known_bad_hashes or {})
         _apply_security_decision(report)
+        apply_public_assessment(report)
         return report
 
 
@@ -3071,7 +3078,14 @@ def _confirmed_score(findings: list[Finding]) -> int:
 
 
 def _correlated_score(findings: list[Finding]) -> int:
-    rule_ids = {finding.rule_id for finding in findings}
+    # A rule ID can be deliberately reclassified as a capability when product
+    # controls reduce it from an abuse-path finding. Only findings that remain
+    # correlated evidence may drive this score component.
+    rule_ids = {
+        finding.rule_id
+        for finding in findings
+        if _finding_evidence_class(finding) == "correlated"
+    }
     score = 0
     if "install-secret-access" in rule_ids:
         score = max(score, 86)
@@ -3133,7 +3147,7 @@ def _capability_score(findings: list[Finding]) -> int:
             score = max(score, 36)
         elif finding.rule_id == "dynamic-shell-execution":
             score = max(score, 40)
-        elif finding.rule_id == "untrusted-input-execution":
+        elif finding.rule_id in {"untrusted-input-execution", "untrusted-workspace-input-to-process"}:
             score = max(score, 38)
         elif finding.rule_id in {"broad-activation", "sensitive-activation", "powerful-ide-contribution"}:
             score = max(score, 30)

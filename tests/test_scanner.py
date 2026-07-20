@@ -16,10 +16,33 @@ from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
-from ide_scanner.scanner import _is_generated_code_blob, scan_extension, scan_targets
+from ide_scanner.models import Finding
+from ide_scanner.scanner import _is_generated_code_blob, _score_details, scan_extension, scan_targets
 
 
 class ScannerTests(unittest.TestCase):
+    def test_capability_reclassification_does_not_inflate_correlated_score(self) -> None:
+        finding = Finding(
+            finding_id="workspace-process",
+            extension_id="dbaeumer.vscode-eslint",
+            version="3.0.33",
+            rule_id="untrusted-workspace-input-to-process",
+            category="execution",
+            severity="MEDIUM",
+            confidence=0.8,
+            score=50,
+            evidence_type="static",
+            evidence_summary="Workspace configuration reaches process execution.",
+            evidence={"evidence_class": "capability"},
+        )
+
+        details = _score_details([finding])
+
+        self.assertEqual(details["components"]["correlated_behavior"], 0)
+        self.assertEqual(details["components"]["sensitive_capability"], 38)
+        self.assertEqual(details["malware_score"], 0)
+        self.assertEqual(details["risk_score"], 38)
+
     def test_posture_detects_risky_client_setup(self) -> None:
         with TemporaryDirectory() as tmp:
             home = Path(tmp)

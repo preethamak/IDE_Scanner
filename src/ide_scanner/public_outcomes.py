@@ -135,8 +135,10 @@ def apply_public_assessment(extension: ExtensionReport) -> None:
         and not unexplained_findings
         and evidence_classes <= _EXPLAINABLE_CLASSES
     ):
-        extension.decision = "allow"
-        extension.decision_reason = "Powerful behavior matches the extension's established publisher and expected-capability profile."
+        extension.decision_reason = (
+            "Review is capability-based: the observed powerful behavior matches "
+            "the extension's established publisher and expected-capability profile."
+        )
         extension.public_outcome = "expected_capability"
         extension.decision_basis = "established_expected_capability"
         extension.evidence_confidence = "contextual"
