@@ -17,10 +17,32 @@ from ide_scanner.registry import _marketplace_metadata_findings, _repository_met
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
 from ide_scanner.models import Finding
-from ide_scanner.scanner import _is_generated_code_blob, _marketplace_error_extension, _score_details, scan_extension, scan_targets
+from ide_scanner.scanner import _classify_findings, _is_generated_code_blob, _marketplace_error_extension, _score_details, scan_extension, scan_targets
 
 
 class ScannerTests(unittest.TestCase):
+    def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
+        finding = Finding(
+            finding_id="range-advisory",
+            extension_id="usernamehw.errorlens",
+            version="3.28.0",
+            rule_id="vulnerable-npm-dependency",
+            category="dependency",
+            severity="MEDIUM",
+            confidence=0.7,
+            score=50,
+            evidence_type="registry",
+            evidence_summary="A declared dependency range can include an affected version.",
+            evidence={"evidence_class": "dependency", "exact": False, "package": "lodash", "version": "4.17.21"},
+        )
+
+        verdict, _reason, _authority, severity, malware, risk, _details = _classify_findings([finding])
+
+        self.assertEqual(verdict, "clean")
+        self.assertEqual(severity, "INFO")
+        self.assertEqual(malware, 0)
+        self.assertEqual(risk, 0)
+
     def test_marketplace_acquisition_failure_survives_coverage_finalization(self) -> None:
         failed = _marketplace_error_extension("publisher.large", "VSIX download exceeded the byte cap; aborted.")
         with patch("ide_scanner.scanner.scan_marketplace_extension", return_value=failed):

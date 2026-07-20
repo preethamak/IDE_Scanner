@@ -2941,6 +2941,11 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
 
 def _is_actionable_review_finding(finding: Finding) -> bool:
     evidence_class = _finding_evidence_class(finding)
+    if finding.rule_id == "vulnerable-npm-dependency" and not bool((finding.evidence or {}).get("exact")):
+        # A manifest range is not proof that the vulnerable version is present
+        # in the exact packaged artifact. Preserve the advisory as context, but
+        # require a resolved/locked version before it can change the decision.
+        return False
     if evidence_class in {"correlated", "dependency", "observed", "posture", "provenance"}:
         return True
     if evidence_class == "exposure":
@@ -3198,7 +3203,8 @@ def _dependency_score(findings: list[Finding]) -> int:
             score = max(score, 98)
         elif finding.rule_id == "vulnerable-npm-dependency":
             exact = bool((finding.evidence or {}).get("exact"))
-            score = max(score, 65 if exact else 42)
+            if exact:
+                score = max(score, 65)
         elif finding.rule_id == "mutable-dependency-source":
             score = max(score, 46)
         elif finding.rule_id == "unpinned-dependency":

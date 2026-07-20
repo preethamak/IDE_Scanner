@@ -33,7 +33,7 @@ def validate_rows(expected: list[dict[str, Any]], actual: list[dict[str, Any]]) 
             continue
         checks = {
             "sha256": (str(row.get("sha256") or "").lower(), str(published.get("sha256") or "").lower()),
-            "decision": (str(row.get("frozen_expected_decision") or row.get("artifact_aware_expected_decision") or ""), str(scan.get("decision") or "")),
+            "decision": (str(row.get("artifact_aware_expected_decision") or row.get("frozen_expected_decision") or ""), str(scan.get("decision") or "")),
             "coverage": ("100", str(scan.get("coverage_percent") or 0)),
             "score_schema": ("2", str(scan.get("score_schema_version") or "")),
         }
