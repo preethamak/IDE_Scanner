@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from .ast_analyzer import JS_AST_EXTS, analyze_js_source
+from .ast_analyzer import JS_AST_EXTS, analyze_js_source_status, node_available
 from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
@@ -62,6 +62,8 @@ BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
 SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
+MAX_SOURCE_PREVIEW_BYTES = 200 * 1024
+MAX_SOURCE_PREVIEWS = 40
 GENERATED_BLOB_BYTES = 10 * 1024 * 1024
 MINIFIED_BLOB_BYTES = 1024 * 1024
 MAX_ARCHIVE_FILES = 100_000
@@ -270,7 +272,7 @@ def scan_targets(
 
 
 def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
-    manifest = _read_manifest(path / "package.json")
+    manifest, manifest_status = _read_manifest_status(path / "package.json")
     name = str(manifest.get("name") or path.name)
     publisher = str(manifest.get("publisher") or "unknown")
     version = str(manifest.get("version") or "0.0.0")
@@ -279,6 +281,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     capabilities: dict[str, dict[str, Any]] = {}
     scanned_files = 0
     executable_sources: list[tuple[str, str]] = []
+    source_previews: list[dict[str, Any]] = []
+    js_ast_statuses: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
     _add_dependency_source_findings(extension_id, version, manifest, findings)
@@ -311,6 +315,13 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         if file.stat().st_size > MAX_TEXT_BYTES:
             analysis_coverage["oversized_files"].append(rel)
             continue
+        if len(source_previews) < MAX_SOURCE_PREVIEWS and len(text.encode("utf-8")) <= MAX_SOURCE_PREVIEW_BYTES:
+            source_previews.append({
+                "path": rel,
+                "content": text,
+                "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "truncated": False,
+            })
         scanned_files += 1
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
@@ -319,7 +330,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         if suffix in JS_AST_EXTS:
             generated_blob = _is_generated_code_blob(rel, text)
             if is_entrypoint or not generated_blob:
-                _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
+                status = _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
+                js_ast_statuses.append(status)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
@@ -330,9 +342,16 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     findings = _dedupe_findings(findings)
     analysis_coverage["providers"] = {
         "native_static": {"provider": "native_static", "status": "completed", "required": True},
-        "javascript_ast": {"provider": "javascript_ast", "status": "completed", "required": True},
+        "javascript_ast": _javascript_ast_provider_status(js_ast_statuses),
         **provider_statuses,
     }
+    analysis_coverage["manifest_validation"] = {
+        "status": manifest_status,
+        "valid": manifest_status == "valid",
+    }
+    if manifest_status != "valid":
+        analysis_coverage.setdefault("read_failures", [])
+        analysis_coverage["manifest_error"] = manifest_status
     verdict, verdict_reason, malware_authority, severity, malware_score, risk_score, score_details = _classify_findings(findings)
 
     _finalize_analysis_coverage(analysis_coverage)
@@ -342,6 +361,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     artifact_hash = str(artifact_inventory.get("package_hash") or "")
     dependencies = _dependencies(manifest, path)
     artifact_inventory["dependency_inventory"] = _dependency_inventory(manifest, dependencies)
+    artifact_inventory["source_previews"] = source_previews
     report = ExtensionReport(
         instance_id=_stable_id(str(path)),
         extension_id=extension_id,
@@ -393,7 +413,7 @@ def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = N
         vsix_hash, vsix_size = _hash_file(vsix_path)
         with tempfile.TemporaryDirectory(prefix="ide-scanner-vsix-") as tmp:
             tmp_root = Path(tmp)
-            _safe_extract_vsix(vsix_path, tmp_root)
+            archive_anomalies = _safe_extract_vsix(vsix_path, tmp_root)
             extension_root = _find_extracted_extension_root(tmp_root)
             report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
             report.install_path = str(original_path)
@@ -403,6 +423,7 @@ def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = N
             report.artifact_inventory["vsix_size_bytes"] = vsix_size
             report.artifact_inventory["source_artifact"] = original_path.name
             report.artifact_inventory["vsix_signature"] = _vsix_signature_status(tmp_root)
+            _record_archive_anomalies(report, archive_anomalies)
             report.artifact_identity = {
                 "extension_id": report.extension_id,
                 "version": report.version,
@@ -417,10 +438,59 @@ def scan_vsix(path: Path, known_bad_hashes: dict[str, dict[str, Any]] | None = N
 
 
 def _scan_discovered_target(target: dict[str, str], known_bad_hashes: dict[str, dict[str, Any]]) -> ExtensionReport:
+    """Scan one discovered local target, isolating failures.
+
+    A single malformed or hostile artifact (bad zip, extraction-limit abort,
+    unreadable tree) must never abort an entire inventory scan. On failure we
+    emit an ``incomplete`` placeholder for that artifact and let the rest of the
+    inventory complete."""
     path = Path(target["path"])
-    if target.get("type") == "vsix":
-        return scan_vsix(path, known_bad_hashes=known_bad_hashes)
-    return scan_extension(path, source=target.get("type", "vscode"), known_bad_hashes=known_bad_hashes)
+    try:
+        if target.get("type") == "vsix":
+            return scan_vsix(path, known_bad_hashes=known_bad_hashes)
+        return scan_extension(path, source=target.get("type", "vscode"), known_bad_hashes=known_bad_hashes)
+    except Exception as exc:  # noqa: BLE001 - isolate any per-artifact failure
+        return _local_error_extension(path, target.get("type", "vscode"), f"{type(exc).__name__}: {exc}")
+
+
+def _local_error_extension(path: Path, source: str, message: str) -> ExtensionReport:
+    reason = f"Scan aborted for this artifact and was isolated: {message}"
+    artifact_inventory = _empty_artifact_inventory()
+    artifact_inventory["scan_incomplete"] = True
+    artifact_inventory["skipped_reason"] = reason
+    artifact_inventory["analysis_coverage"] = {
+        "status": "incomplete",
+        "coverage_percent": 0,
+        "limitations": [reason],
+        "manifest_validation": {"valid": False, "status": "scan-aborted"},
+        "providers": {},
+    }
+    name = path.name or "unknown"
+    return ExtensionReport(
+        instance_id=_stable_id(str(path)),
+        extension_id=f"unknown.{name}",
+        name=name,
+        publisher="unknown",
+        version="unknown",
+        description="",
+        repository="",
+        install_path=str(path),
+        source=source,
+        artifact_hash="",
+        severity="INFO",
+        verdict="clean",
+        malware_authority="none",
+        verdict_reason=reason,
+        malware_score=0,
+        risk_score=0,
+        score_details=_empty_score_details(),
+        capabilities=[],
+        artifact_inventory=artifact_inventory,
+        findings=[],
+        scanned_files=0,
+        dependencies={},
+        analysis_coverage=artifact_inventory["analysis_coverage"],
+    )
 
 
 def scan_marketplace_extension(
@@ -2298,7 +2368,7 @@ def _empty_artifact_inventory() -> dict[str, Any]:
         "total_bytes_hashed": 0,
         "risky_artifacts": [],
         "known_bad_matches": [],
-        "vsix_signature": {"present": False, "verified": False, "reason": "not-vsix"},
+        "vsix_signature": {"present": False, "verified": False, "verification_supported": False, "reason": "not-vsix"},
         "_all_file_hashes": [],
     }
 
@@ -2315,7 +2385,12 @@ def _vsix_signature_status(root: Path) -> dict[str, Any]:
     return {
         "present": bool(signature_files),
         "verified": False,
-        "reason": "signature-file-found-verification-not-implemented" if signature_files else "signature-file-not-found",
+        "verification_supported": False,
+        "reason": (
+            "signature-file-present-but-not-cryptographically-verified"
+            if signature_files
+            else "no-signature-file-found"
+        ),
         "files": signature_files[:10],
     }
 
@@ -2482,7 +2557,15 @@ def _hash_metadata(metadata: Any, source_path: str) -> dict[str, Any]:
     return out
 
 
-def _safe_extract_vsix(vsix_path: Path, destination: Path) -> None:
+def _safe_extract_vsix(vsix_path: Path, destination: Path) -> dict[str, Any]:
+    """Extract a VSIX with resource + traversal limits, returning anomalies.
+
+    Members that would escape the destination (path traversal) or that carry a
+    symlink mode are refused and recorded rather than silently dropped, so a
+    crafted archive cannot make files disappear from the analyzed set while the
+    scan still claims complete coverage. The returned dict is attached to the
+    report so these anomalies surface as coverage limitations."""
+    anomalies: dict[str, list[str]] = {"traversal_members": [], "symlink_members": [], "special_members": []}
     with zipfile.ZipFile(vsix_path) as archive:
         members = archive.infolist()
         files = [member for member in members if member.filename and not member.is_dir()]
@@ -2494,12 +2577,24 @@ def _safe_extract_vsix(vsix_path: Path, destination: Path) -> None:
             raise ValueError("VSIX uncompressed size exceeds the extraction limit")
         if total_size / max(1, compressed_size) > MAX_ARCHIVE_COMPRESSION_RATIO:
             raise ValueError("VSIX compression ratio exceeds the extraction limit")
+        extracted_bytes = 0
         for member in members:
             name = member.filename.replace("\\", "/")
             if not name or name.endswith("/"):
                 continue
+            # Reject symlinks and other special (non-regular) members: a symlink
+            # inside the archive could be dereferenced by later analysis to read
+            # outside the extraction root.
+            mode = (member.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                anomalies["symlink_members"].append(name)
+                continue
+            if mode and mode not in (0o100000, 0o040000):
+                anomalies["special_members"].append(name)
+                continue
             target = (destination / name).resolve()
             if destination.resolve() not in target.parents and target != destination.resolve():
+                anomalies["traversal_members"].append(name)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member) as source, target.open("wb") as handle:
@@ -2507,7 +2602,47 @@ def _safe_extract_vsix(vsix_path: Path, destination: Path) -> None:
                     chunk = source.read(1024 * 1024)
                     if not chunk:
                         break
+                    extracted_bytes += len(chunk)
+                    if extracted_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        # The central-directory sizes are attacker-supplied; enforce
+                        # the real byte cap during the write loop as well.
+                        raise ValueError("VSIX extracted bytes exceeded the extraction limit")
                     handle.write(chunk)
+    return {key: value for key, value in anomalies.items() if value}
+
+
+def _record_archive_anomalies(report: "ExtensionReport", anomalies: dict[str, list[str]]) -> None:
+    """Surface refused archive members as coverage limitations.
+
+    A crafted VSIX can carry path-traversal, symlink, or special-file members
+    that ``_safe_extract_vsix`` refuses to write to disk. Those members are real
+    content that was NOT analyzed, so the scan must not keep claiming complete
+    coverage. We record them on the inventory and downgrade coverage to
+    ``incomplete`` so the fail-loud story reaches the report and UI."""
+    if not anomalies:
+        return
+    report.artifact_inventory["archive_anomalies"] = {
+        key: value[:50] for key, value in anomalies.items()
+    }
+    coverage = report.analysis_coverage
+    limitations = list(coverage.get("limitations") or [])
+    labels = {
+        "traversal_members": "path-traversal",
+        "symlink_members": "symlink",
+        "special_members": "special-file",
+    }
+    for key, members in anomalies.items():
+        if not members:
+            continue
+        label = labels.get(key, key)
+        limitations.append(
+            f"Refused {len(members)} {label} archive member(s) not analyzed: "
+            + ", ".join(members[:3])
+        )
+    coverage["limitations"] = limitations
+    coverage["status"] = "incomplete"
+    report.artifact_inventory["scan_incomplete"] = True
+    report.artifact_inventory["skipped_reason"] = "; ".join(limitations)
 
 
 def _find_extracted_extension_root(root: Path) -> Path:
@@ -2600,6 +2735,16 @@ def _new_analysis_coverage(files: list[Path], entrypoints: set[str], path: Path)
         rel for rel in all_paths
         if Path(rel).suffix.lower() in EXEC_TEXT_EXTS and (rel in entrypoints or not _is_ignored_static_asset(rel))
     )
+    # Executable-language files that exist in the artifact but were deliberately
+    # excluded from the analyzed denominator because they are generated/vendored
+    # bundles or minified blobs. They are reachable code, so they must be
+    # reported as "skipped", never silently dropped from the coverage story.
+    excluded_generated = sorted(
+        rel for rel in all_paths
+        if Path(rel).suffix.lower() in EXEC_TEXT_EXTS
+        and rel not in entrypoints
+        and _is_ignored_static_asset(rel)
+    )
     return {
         "status": "pending",
         "coverage_percent": 0,
@@ -2608,6 +2753,7 @@ def _new_analysis_coverage(files: list[Path], entrypoints: set[str], path: Path)
         "resolved_entrypoints": sorted(entrypoints & all_paths),
         "missing_entrypoints": sorted(entrypoints - all_paths),
         "executable_candidates": candidates,
+        "excluded_generated_files": excluded_generated,
         "analyzed_executable_files": [],
         "read_failures": [],
         "oversized_files": [],
@@ -2623,6 +2769,11 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
     failures = list(coverage.get("read_failures") or [])
     oversized = list(coverage.get("oversized_files") or [])
     limitations: list[str] = []
+    manifest_validation = coverage.get("manifest_validation")
+    if isinstance(manifest_validation, dict) and not manifest_validation.get("valid"):
+        limitations.append(
+            f"Manifest (package.json) is not trustworthy: {manifest_validation.get('status') or 'invalid'}"
+        )
     if missing:
         limitations.append(f"Missing declared entrypoint(s): {', '.join(missing[:3])}")
     if failures:
@@ -2649,8 +2800,22 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
         providers[name] = provider
         if provider.get("status") != "completed":
             limitations.append(f"Required provider {name} did not complete")
+    excluded_generated = list(coverage.get("excluded_generated_files") or [])
+    coverage["skipped_generated_count"] = len(excluded_generated)
     denominator = len(candidates) + len(missing)
-    coverage["coverage_percent"] = round(100 * len(analyzed & candidates) / denominator) if denominator else 100
+    if denominator:
+        coverage["coverage_percent"] = round(100 * len(analyzed & candidates) / denominator)
+    elif excluded_generated:
+        # No analyzable entrypoint or hand-written executable file was reachable,
+        # yet the artifact ships generated/minified runtime code. Reporting 100%
+        # here would claim full analysis of code that was never inspected.
+        coverage["coverage_percent"] = 0
+        limitations.append(
+            f"No analyzable entrypoint was reachable; {len(excluded_generated)} generated/minified "
+            "runtime file(s) were present but not analyzed"
+        )
+    else:
+        coverage["coverage_percent"] = 100
     coverage["limitations"] = limitations
     coverage["status"] = "complete" if not limitations else "incomplete"
 
@@ -2703,17 +2868,108 @@ def _is_generated_code_blob(rel: str, text: str) -> bool:
     return False
 
 
-def _read_manifest(path: Path) -> dict[str, Any]:
+def _read_manifest_status(path: Path) -> tuple[dict[str, Any], str]:
+    """Read a package.json manifest and report validity.
+
+    Returns ``(manifest, status)`` where status is ``valid`` (parsed object
+    carrying trustworthy identity), ``missing`` (no file), ``unreadable``
+    (OS/permission error), ``invalid-json`` (present but not parseable),
+    ``not-object`` (parsed to a non-object), or ``missing-identity`` (parsed
+    object without the non-empty string ``publisher``/``name``/``version``
+    fields every real VS Code extension declares). A non-``valid`` status must
+    fail the scan closed: an artifact whose identity manifest cannot be trusted
+    may not be reported ``allow`` or ``complete``. Fabricating an identity from
+    the folder name (``unknown.<dir>@0.0.0``) and then reporting ``allow`` would
+    let an artifact with no verifiable identity pass silently."""
     try:
-        parsed = loads_jsonc(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}, "missing"
+    except OSError:
+        return {}, "unreadable"
+    try:
+        parsed = loads_jsonc(raw)
     except Exception:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        return {}, "invalid-json"
+    if not isinstance(parsed, dict):
+        return {}, "not-object"
+    if not _has_manifest_identity(parsed):
+        return parsed, "missing-identity"
+    return parsed, "valid"
+
+
+def _has_manifest_identity(manifest: dict[str, Any]) -> bool:
+    """True only when the manifest declares the identity fields a genuine VS
+    Code extension always carries: non-empty string ``publisher``, ``name``,
+    and ``version``. An empty or partial object cannot establish a trustworthy
+    artifact identity and must not be treated as a valid manifest."""
+    for field in ("publisher", "name", "version"):
+        value = manifest.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return False
+    return True
+
+
+def _read_manifest(path: Path) -> dict[str, Any]:
+    manifest, _status = _read_manifest_status(path)
+    return manifest
+
+
+def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
+    """Summarize per-file JS/TS AST walker statuses into a provider record.
+
+    ``completed`` only when every analyzed file's walker ran successfully. A
+    missing Node runtime, timeout, spawn error, or malformed walker output on
+    any file marks the provider ``failed`` (required), so coverage finalization
+    records a limitation and the scan cannot report ``complete``/``allow`` on
+    the strength of AST analysis that never actually ran.
+
+    ``unparsed`` files (TypeScript/JSX or syntactically invalid source that the
+    plain-JS vendored parser cannot read) are a disclosed tool limitation, not
+    an analyzer failure: the raw-text rule layer still scans them, so they are
+    counted and reported but do not flip the provider to ``failed``. Reporting
+    them as a silent ``completed`` would falsely claim AST coverage the scanner
+    never had."""
+    record: dict[str, Any] = {"provider": "javascript_ast", "required": True}
+    if not statuses:
+        # No JS/TS files were reachable; nothing for this provider to do.
+        record["status"] = "completed"
+        record["analyzed_files"] = 0
+        return record
+    hard_failures = [s for s in statuses if s not in ("ok", "unparsed")]
+    unparsed = [s for s in statuses if s == "unparsed"]
+    record["analyzed_files"] = len(statuses)
+    record["failed_files"] = len(hard_failures)
+    if unparsed:
+        record["unparsed_files"] = len(unparsed)
+    if hard_failures:
+        reasons = sorted(set(hard_failures))
+        record["status"] = "failed"
+        record["error"] = f"AST analysis did not complete for {len(hard_failures)} file(s): {', '.join(reasons)}"
+        if "node-missing" in reasons:
+            record["error"] = "Node runtime unavailable; JavaScript AST analysis did not run."
+    elif unparsed:
+        record["status"] = "completed"
+        record["note"] = (
+            f"AST analysis skipped {len(unparsed)} file(s) the plain-JS parser "
+            "could not read (TypeScript/JSX or invalid syntax); raw-text rules "
+            "still applied."
+        )
+    else:
+        record["status"] = "completed"
+    return record
 
 
 def _read_text(path: Path) -> str | None:
+    """Read up to MAX_TEXT_BYTES from a file without loading the whole file.
+
+    A hostile artifact can ship a multi-gigabyte "source" file; reading it
+    fully into memory before slicing would let a single file exhaust RAM. We
+    read a bounded prefix in one bounded call so peak memory is capped at the
+    limit regardless of the file's real size."""
     try:
-        data = path.read_bytes()[:MAX_TEXT_BYTES]
+        with open(path, "rb") as handle:
+            data = handle.read(MAX_TEXT_BYTES)
         return data.decode("utf-8", errors="replace")
     except OSError:
         return None
@@ -2746,8 +3002,15 @@ def _add_ast_findings(
     text: str,
     findings: list[Finding],
     generated: bool = False,
-) -> None:
-    for item in analyze_js_source(rel, text):
+) -> str:
+    """Append AST findings and return the walker status for this file.
+
+    Status is one of ``ok``/``node-missing``/``timeout``/``error``/``malformed``
+    (see ``analyze_js_source_status``). The caller aggregates these into a
+    truthful ``javascript_ast`` provider record so a missing Node runtime or a
+    parse failure on a real entrypoint is never silently reported as complete."""
+    items, status = analyze_js_source_status(rel, text)
+    for item in items:
         rule_id = str(item.get("rule") or "")
         if not rule_id:
             continue
@@ -2778,6 +3041,7 @@ def _add_ast_findings(
             "Confirm whether the dynamically constructed target/argument is attacker-influenceable; this evades plain-text regex detection by design.",
             evidence={"line": line} if isinstance(line, int) else None,
         ))
+    return status
 
 
 _SEVERITY_TO_CONFIDENCE = {"HIGH": 0.8, "MEDIUM": 0.65, "LOW": 0.5}
