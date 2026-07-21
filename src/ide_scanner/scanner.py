@@ -136,7 +136,7 @@ CAPABILITY_RULES = {
 }
 DEPENDENCY_RULES = {"mutable-dependency-source", "unpinned-dependency", "vulnerable-npm-dependency"}
 PROVENANCE_RULES = {"marketplace-removed-package", "packed-artifact", "source-vsix-diff-unexplained", "binary-without-origin"}
-POSTURE_RULES = {"dangerous-github-workflow", "repo-binary-artifacts", "workflow-token-permissions-broad"}
+POSTURE_RULES = {"dangerous-github-workflow", "repo-binary-artifacts", "workflow-token-permissions-broad", "entrypoint-ast-unparsed"}
 REPUTATION_RULES = {
     "marketplace-extension-not-found",
     "marketplace-low-install-count",
@@ -283,6 +283,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     executable_sources: list[tuple[str, str]] = []
     source_previews: list[dict[str, Any]] = []
     js_ast_statuses: list[str] = []
+    ast_unparsed_entrypoints: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
     _add_dependency_source_findings(extension_id, version, manifest, findings)
@@ -332,10 +333,37 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
             if is_entrypoint or not generated_blob:
                 status = _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
                 js_ast_statuses.append(status)
+                if is_entrypoint and status == "unparsed":
+                    ast_unparsed_entrypoints.append(rel)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
     _add_workspace_cli_path_findings(extension_id, version, manifest, executable_sources, findings)
+
+    if ast_unparsed_entrypoints:
+        # A declared activation entrypoint whose source the AST layer cannot
+        # parse (TypeScript/JSX shipped un-transpiled, or genuinely malformed
+        # JS) loses structural evasion detection for that file. The raw-text
+        # rule layer still covers it, so the provider stays "completed" -- but
+        # a silent pass here would let the primary code path skate on
+        # regex-only coverage. Surface it as a posture-class review nudge so
+        # the extension cannot reach "allow" without a human confirming the
+        # entrypoint is benign.
+        listed = ", ".join(sorted(ast_unparsed_entrypoints)[:5])
+        findings.append(_finding(
+            extension_id,
+            version,
+            "entrypoint-ast-unparsed",
+            "code",
+            "LOW",
+            _SEVERITY_TO_CONFIDENCE["LOW"],
+            f"Declared entrypoint(s) could not be parsed by the AST layer (plain-JS only): {listed}. "
+            "Structural obfuscation detection did not run on this file; only raw-text rules applied.",
+            sorted(ast_unparsed_entrypoints)[:5],
+            "Confirm the entrypoint is benign; AST-level evasion checks did not cover it because acorn parses plain JavaScript only.",
+            evidence={"unparsed_entrypoints": sorted(ast_unparsed_entrypoints)},
+        ))
+
 
     provider_findings, provider_statuses = run_static_providers(path, extension_id, version)
     findings.extend(provider_findings)
@@ -2929,7 +2957,16 @@ def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
     an analyzer failure: the raw-text rule layer still scans them, so they are
     counted and reported but do not flip the provider to ``failed``. Reporting
     them as a silent ``completed`` would falsely claim AST coverage the scanner
-    never had."""
+    never had.
+
+    Fail-closed invariant, honest scope: an unparsed *non-entrypoint* file does
+    not by itself block ``allow`` -- raw-text coverage is deemed sufficient for
+    incidental files. An unparsed *declared entrypoint* is different: the
+    primary activation code path lost structural evasion detection, so
+    ``scan_extension`` emits an ``entrypoint-ast-unparsed`` posture finding that
+    forces the decision to at least ``review``. This provider record stays
+    ``completed`` in both cases; the review gate lives in the finding, not
+    here."""
     record: dict[str, Any] = {"provider": "javascript_ast", "required": True}
     if not statuses:
         # No JS/TS files were reachable; nothing for this provider to do.
@@ -3005,10 +3042,11 @@ def _add_ast_findings(
 ) -> str:
     """Append AST findings and return the walker status for this file.
 
-    Status is one of ``ok``/``node-missing``/``timeout``/``error``/``malformed``
-    (see ``analyze_js_source_status``). The caller aggregates these into a
-    truthful ``javascript_ast`` provider record so a missing Node runtime or a
-    parse failure on a real entrypoint is never silently reported as complete."""
+    Status is one of ``ok``/``unparsed``/``node-missing``/``timeout``/``error``/
+    ``malformed`` (see ``analyze_js_source_status``). The caller aggregates these
+    into a truthful ``javascript_ast`` provider record so a missing Node runtime
+    or a parse failure on a real entrypoint is never silently reported as
+    complete."""
     items, status = analyze_js_source_status(rel, text)
     for item in items:
         rule_id = str(item.get("rule") or "")

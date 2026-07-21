@@ -398,6 +398,7 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "credential-file-read": ("credential-access", "weak", "MEDIUM", "Credential references appear near local file-read capability."),
     "dangerous-github-workflow": ("repository-posture", "posture", "MEDIUM", "A packaged GitHub Actions workflow has a dangerous trigger or write permission."),
     "destructive-transfer-chain": ("destructive-activity", "correlated", "HIGH", "Forceful recursive deletion appears near encoding/archive and network behavior."),
+    "entrypoint-ast-unparsed": ("coverage", "posture", "LOW", "A declared entrypoint could not be parsed by the AST layer, so structural evasion detection did not run on the primary code path."),
     "install-download-execute": ("install-time", "correlated", "HIGH", "A lifecycle script combines download and command execution."),
     "install-network-telemetry": ("install-time", "weak", "MEDIUM", "A lifecycle script appears to send install-time telemetry."),
     "install-secret-access": ("install-time", "correlated", "HIGH", "A lifecycle script references credential material."),

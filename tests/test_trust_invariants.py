@@ -164,6 +164,55 @@ class ProviderStatusTests(unittest.TestCase):
         _findings, status = analyze_js_source_status("a.ts", "const x: number = 1;\n")
         self.assertEqual(status, "unparsed")
 
+    def test_unparsed_declared_entrypoint_forces_review(self) -> None:
+        # An entrypoint the AST layer cannot parse loses structural evasion
+        # detection on the primary code path. It must surface as a review nudge
+        # so the scan cannot reach "allow" on raw-text coverage alone.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "n", "version": "1.0.0", "main": "extension.js"},
+                main="extension.js",
+                source="const x = 1;\n",
+            )
+            with patch(
+                "ide_scanner.scanner.analyze_js_source_status",
+                return_value=([], "unparsed"),
+            ):
+                report = scan_extension(root)
+        rule_ids = {f.rule_id for f in report.findings}
+        self.assertIn("entrypoint-ast-unparsed", rule_ids)
+        self.assertIn(report.decision, {"review", "block"})
+        self.assertNotEqual(report.decision, "allow")
+        # The provider itself stays completed -- the gate is the finding.
+        self.assertEqual(
+            report.analysis_coverage["providers"]["javascript_ast"]["status"],
+            "completed",
+        )
+
+    def test_unparsed_non_entrypoint_does_not_nudge_review(self) -> None:
+        # A non-entrypoint unparsed file is covered by raw-text rules and must
+        # NOT emit the entrypoint nudge -- only declared entrypoints do.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "n", "version": "1.0.0", "main": "extension.js"}),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("const x = 1;\n", encoding="utf-8")
+            (root / "helper.ts").write_text("const y: number = 2;\n", encoding="utf-8")
+
+            def fake_status(rel, text):
+                if rel.endswith(".ts"):
+                    return [], "unparsed"
+                return [], "ok"
+
+            with patch("ide_scanner.scanner.analyze_js_source_status", side_effect=fake_status):
+                report = scan_extension(root)
+        rule_ids = {f.rule_id for f in report.findings}
+        self.assertNotIn("entrypoint-ast-unparsed", rule_ids)
+
 
 class CoverageHonestyTests(unittest.TestCase):
     def test_generated_only_extension_not_reported_complete(self) -> None:
