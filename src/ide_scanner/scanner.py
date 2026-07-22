@@ -1968,14 +1968,13 @@ def _features_nearby(text: str, patterns: list[re.Pattern[str]], window_lines: i
     # budget stays behaviorally equivalent to the old line window on non-minified files
     # while remaining tight on minified bundles.
     window_chars = max(window_lines * 72, 240)
-    char_hits: list[list[int]] = []
-    for pattern in patterns:
-        hits = [match.start() for match in pattern.finditer(text)]
-        if not hits:
-            return False
-        char_hits.append(hits)
-    for anchor in char_hits[0]:
-        if all(any(abs(hit - anchor) <= window_chars for hit in hits) for hits in char_hits[1:]):
+    anchors = [match.start() for match in patterns[0].finditer(text)]
+    if not anchors:
+        return False
+    for anchor in anchors:
+        start = max(0, anchor - window_chars)
+        end = min(len(text), anchor + window_chars)
+        if all((match := pattern.search(text, start)) is not None and match.start() <= end for pattern in patterns[1:]):
             return True
     return False
 
