@@ -40,6 +40,12 @@ class ClassificationPolicyV3Tests(unittest.TestCase):
         self.assertEqual(finding_actionability(finding), "review")
         self.assertEqual((verdict, severity), ("review", "LOW"))
 
+    def test_packed_artifact_presence_is_contextual(self) -> None:
+        finding = self.finding("packed-artifact", "provenance")
+        verdict, _, _, severity, _, risk, _ = _classify_findings([finding])
+        self.assertEqual(finding_actionability(finding), "contextual")
+        self.assertEqual((verdict, severity, risk), ("clean", "INFO", 0))
+
     def test_unresolved_dependency_range_is_contextual(self) -> None:
         finding = self.finding("vulnerable-npm-dependency", "dependency", "HIGH", {"exact": False})
         verdict, _, _, severity, _, risk, _ = _classify_findings([finding])

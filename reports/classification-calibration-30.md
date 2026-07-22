@@ -38,6 +38,7 @@ than forced.
 | 1-replay | local | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 9 A/I, 16 A/L, 5 R/L | Deterministic replay of the 30 complete baseline finding sets. No advisory snapshot applied. |
 | 1-clean | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 8 A/I, 11 A/L, 1 R/L, 10 incomplete | Fresh isolated scan. Ten large artifacts exceeded the JavaScript AST provider's fixed eight-second per-file timeout; this is a coverage defect, not a classification result. |
 | 2-selected | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 1 A/I, 6 A/L, 4 R/L, 1 B/H | Reran the ten prior AST failures plus Code Runner with the corrected AST resource boundary. All 11 completed; Code Runner matched the exact hash-pinned advisory snapshot with malware score zero. |
+| 2-full | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 8 A/I, 16 A/L, 5 R/L, 1 B/H | All 30 completed. Review/Low is entirely the general unattributed-binary provenance gate. No Review/Medium result was supported. |
 
 Coverage follow-up: the largest failing entrypoint (`Continue.continue`, about
 56 MiB) was measured independently. It exhausted Node's default heap, but

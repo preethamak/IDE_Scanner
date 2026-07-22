@@ -365,7 +365,9 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 js_ast_statuses.append(status)
                 if is_entrypoint and status == "unparsed":
                     ast_unparsed_entrypoints.append(rel)
-        if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
+        if (suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}) and not (
+            suffix in JS_AST_EXTS and _is_generated_code_blob(rel, text)
+        ):
             _add_webview_csp_findings(extension_id, version, rel, text, findings)
 
     _add_workspace_cli_path_findings(extension_id, version, manifest, executable_sources, findings)
@@ -1338,12 +1340,6 @@ def _add_code_findings(
         ))
         capabilities.setdefault("process_execution", {"id": "process_execution", "evidence": []})["evidence"].append(rel)
 
-    # Generated entrypoints are still read, inventoried, AST-parsed, and scanned
-    # for direct capabilities. Native correlation below is deliberately skipped:
-    # character proximity inside a multi-module bundle is not source-to-sink flow.
-    if _is_generated_code_blob(rel, text):
-        return
-
     if has_configured_cli and not has_shell_exec and not has_download:
         findings.append(_finding(
             extension_id,
@@ -1823,7 +1819,7 @@ def _add_cross_extension_code_findings(
 def _find_sensitive_api_text(text: str, pattern: str, surface: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for match in re.finditer(pattern, text, re.I | re.S):
-        snippet = match.group("args") if "args" in match.groupdict() else match.group(0)
+        snippet = _balanced_call_arguments(text, match.start("args")) if "args" in match.groupdict() else match.group(0)
         if not _looks_sensitive_text(snippet):
             continue
         out.append({
@@ -1834,6 +1830,38 @@ def _find_sensitive_api_text(text: str, pattern: str, surface: str) -> list[dict
             "pos": match.start(),
         })
     return out[:10]
+
+
+def _balanced_call_arguments(text: str, start: int) -> str:
+    """Return only the matched call's arguments, including minified source.
+
+    Regex ranges that stop at a semicolon or newline can cross several comma-
+    chained expressions in generated bundles. This small lexical boundary
+    keeps credential terms in a neighboring call from contaminating the
+    surface being classified.
+    """
+    depth = 1
+    quote = ""
+    escaped = False
+    for index in range(start, min(len(text), start + 4000)):
+        char = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start:index]
+    return text[start:min(len(text), start + 500)]
 
 
 def _manifest_configuration_items(contributes: dict[str, Any]) -> list[dict[str, Any]]:

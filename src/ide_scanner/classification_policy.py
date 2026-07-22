@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from .models import Finding
 
-POLICY_VERSION = "3.0.0-calibration.2"
+POLICY_VERSION = "3.0.0-calibration.3"
 
 FindingActionability = Literal["contextual", "low", "review", "block"]
 
@@ -38,8 +38,14 @@ _LOW_DEPENDENCY_RULES = {
 }
 
 _LOW_PROVENANCE_RULES = {
-    "packed-artifact",
     "repo-binary-artifacts",
+}
+
+_CONTEXTUAL_PROVENANCE_RULES = {
+    # Presence of an archive/JAR/ASAR describes packaging. An origin mismatch,
+    # unexplained source diff, or unattributed executable is handled by a
+    # separate provenance rule and may still require review.
+    "packed-artifact",
 }
 
 _REVIEW_POSTURE_RULES = {
@@ -64,6 +70,8 @@ def finding_actionability(finding: Any) -> FindingActionability:
             return "low"
         return "review"
     if evidence_class == "provenance":
+        if rule_id in _CONTEXTUAL_PROVENANCE_RULES:
+            return "contextual"
         if rule_id in _LOW_PROVENANCE_RULES:
             return "low"
         # An executable binary without attributable origin requires a human,
