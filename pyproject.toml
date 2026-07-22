@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "guardlens-core"
 version = "0.1.1"
-description = "Canonical extension analysis engine for Guardrails Local Scan."
+description = "Proprietary scanner runtime for Guardrails CLI."
 requires-python = ">=3.11"
-readme = "README.md"
-license = "MIT"
+readme = "PYPI_README.md"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
 authors = [{ name = "Preetham AK" }]
 maintainers = [{ name = "Preetham AK" }]
 classifiers = [
@@ -26,9 +27,7 @@ yara = ["yara-python>=4.5,<5"]
 analysis = ["semgrep>=1.100,<2", "yara-python>=4.5,<5"]
 
 [project.urls]
-Homepage = "https://github.com/preethamak/IDE_Scanner"
-Repository = "https://github.com/preethamak/IDE_Scanner"
-Issues = "https://github.com/preethamak/IDE_Scanner/issues"
+Website = "https://ide-scanner.vercel.app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
