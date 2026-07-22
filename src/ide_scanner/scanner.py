@@ -11,7 +11,19 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from .ast_analyzer import JS_AST_EXTS, analyze_js_source_status, node_available
+from .ast_analyzer import (
+    JS_AST_EXTS,
+    JS_AST_MAX_OLD_SPACE_MB,
+    JS_AST_TIMEOUT_SECONDS,
+    analyze_js_source_status,
+    node_available,
+)
+from .classification_policy import (
+    effective_finding_severity,
+    finding_actionability,
+    is_decision_relevant,
+    is_review_relevant,
+)
 from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
@@ -65,7 +77,10 @@ MAX_TEXT_BYTES = 64 * 1024 * 1024
 MAX_SOURCE_PREVIEW_BYTES = 200 * 1024
 MAX_SOURCE_PREVIEWS = 40
 GENERATED_BLOB_BYTES = 10 * 1024 * 1024
-MINIFIED_BLOB_BYTES = 1024 * 1024
+# Generated webpack/esbuild output can be substantially smaller than 1 MiB.
+# Treat a long, nearly line-free JavaScript artifact as generated once it is
+# large enough that character proximity no longer represents source locality.
+MINIFIED_BLOB_BYTES = 256 * 1024
 MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 100
@@ -204,6 +219,7 @@ def scan_targets(
     online: bool = False,
     known_bad_hashes_file: Path | str | None = None,
     threat_feed_file: Path | str | None = None,
+    extension_advisories_file: Path | str | None = None,
     sandbox_observations_file: Path | str | None = None,
     previous_report_file: Path | str | None = None,
     include_posture: bool = True,
@@ -233,6 +249,8 @@ def scan_targets(
         for identifier in marketplace_scan_ids or []
     )
     _apply_threat_feed(extensions, _load_threat_feed(threat_feed_file))
+    advisory_bundle = _load_extension_advisories(extension_advisories_file)
+    _apply_extension_advisories(extensions, advisory_bundle)
     _apply_sandbox_observations(extensions, _load_sandbox_observations(sandbox_observations_file))
     registry = enrich_registry(extensions, online=online)
     _apply_registry_findings(extensions, registry["findings"])
@@ -268,7 +286,19 @@ def scan_targets(
         # ingestion all serialize the same canonical assessment.
         _apply_security_decision(extension)
         apply_public_assessment(extension)
-    return _build_report(extensions, registry, _load_previous_report(previous_report_file), include_posture=include_posture)
+    intelligence = {
+        "extension_advisories": {
+            "snapshot_version": str(advisory_bundle.get("snapshot_version") or "none"),
+            "sha256": str(advisory_bundle.get("sha256") or ""),
+        }
+    }
+    return _build_report(
+        extensions,
+        registry,
+        _load_previous_report(previous_report_file),
+        include_posture=include_posture,
+        intelligence=intelligence,
+    )
 
 
 def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
@@ -2065,6 +2095,66 @@ def _load_threat_feed(path: Path | str | None = None) -> dict[str, dict[str, Any
     return out
 
 
+def _load_extension_advisories(path: Path | str | None = None) -> dict[str, Any]:
+    default_path = Path(__file__).parent / "intelligence" / "extension-advisories.json"
+    raw_path = Path(path or os.environ.get("IDE_SCANNER_EXTENSION_ADVISORIES_FILE") or default_path)
+    try:
+        raw = raw_path.read_bytes()
+        parsed = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return {"snapshot_version": "unavailable", "sha256": "", "entries": []}
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("entries"), list):
+        return {"snapshot_version": "invalid", "sha256": hashlib.sha256(raw).hexdigest(), "entries": []}
+    return {
+        "snapshot_version": str(parsed.get("snapshot_version") or "unknown"),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "entries": [entry for entry in parsed["entries"] if isinstance(entry, dict)],
+    }
+
+
+def _apply_extension_advisories(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:
+    for extension in extensions:
+        for entry in bundle.get("entries") or []:
+            if str(entry.get("extension_id") or "").lower() != extension.extension_id.lower():
+                continue
+            if str(entry.get("version") or "") != extension.version:
+                continue
+            expected_hash = str(entry.get("artifact_sha256") or "").lower()
+            if len(expected_hash) != 64 or expected_hash != extension.artifact_hash.lower():
+                continue
+            severity = str(entry.get("severity") or "HIGH").upper()
+            if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+                severity = "HIGH"
+            evidence = dict(entry)
+            evidence.update({
+                "evidence_class": "vulnerability",
+                "snapshot_version": str(bundle.get("snapshot_version") or "unknown"),
+                "snapshot_sha256": str(bundle.get("sha256") or ""),
+                "exact": True,
+            })
+            extension.findings.append(_finding(
+                extension.extension_id,
+                extension.version,
+                "known-vulnerable-extension",
+                "vulnerability",
+                severity,
+                0.98,
+                str(entry.get("summary") or "Exact extension artifact matched a vulnerability advisory."),
+                [],
+                "Follow the linked advisory and reject the exact artifact when policy_action is block.",
+                evidence,
+            ))
+        (
+            extension.verdict,
+            extension.verdict_reason,
+            extension.malware_authority,
+            extension.severity,
+            extension.malware_score,
+            extension.risk_score,
+            extension.score_details,
+        ) = _classify_findings(extension.findings)
+
+
 def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any]) -> Finding | None:
     kind = str(item.get("kind") or item.get("type") or item.get("rule_id") or "").strip()
     mapping = {
@@ -2121,6 +2211,7 @@ def _build_report(
     registry: dict[str, Any],
     previous_report: dict[str, Any] | None = None,
     include_posture: bool = True,
+    intelligence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     version_deltas = _version_deltas(extensions, previous_report)
     deltas_by_id = {str(item.get("extension_id")): item for item in version_deltas}
@@ -2166,6 +2257,7 @@ def _build_report(
         "created_at": now.isoformat().replace("+00:00", "Z"),
         "privacy_mode": "local-metadata-and-static-features",
         "registry_checks": registry,
+        "intelligence": dict(intelligence or {}),
         "summary": summary,
         "human_summary": _human_summary(summary, extensions, registry, version_deltas, posture_summary if include_posture else None),
         "version_deltas": version_deltas,
@@ -2329,6 +2421,7 @@ def _version_deltas(extensions: list[ExtensionReport], previous_report: dict[str
 def _apply_security_decision(extension: ExtensionReport) -> None:
     coverage = extension.analysis_coverage or extension.artifact_inventory.get("analysis_coverage") or {}
     incomplete = bool(extension.artifact_inventory.get("scan_incomplete")) or coverage.get("status") == "incomplete"
+    extension.analysis_status = _analysis_status(extension, coverage, incomplete)
     if extension.verdict == "malicious":
         extension.decision = "block"
         extension.decision_reason = "Confirmed malicious intelligence or an exact known-bad artifact matched."
@@ -2338,6 +2431,17 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         extension.decision_reason = str(extension.artifact_inventory.get("skipped_reason") or "Executable analysis did not complete.")
         return
     blocking_rule_ids = _preventive_blocking_rule_ids(extension.findings)
+    vulnerability_blocks = {
+        finding.rule_id for finding in extension.findings
+        if finding_actionability(finding) == "block" and _finding_evidence_class(finding) == "vulnerability"
+    }
+    if vulnerability_blocks:
+        extension.decision = "block"
+        extension.decision_reason = (
+            "Reject this exact artifact: authoritative vulnerability intelligence matched "
+            f"({', '.join(sorted(vulnerability_blocks))}). This is a vulnerability policy decision, not a malware label."
+        )
+        return
     if blocking_rule_ids:
         extension.decision = "block"
         extension.decision_reason = (
@@ -2357,6 +2461,21 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         return
     extension.decision = "allow"
     extension.decision_reason = "Analysis completed without actionable evidence or unapproved baseline changes."
+
+
+def _analysis_status(extension: ExtensionReport, coverage: dict[str, Any], incomplete: bool) -> str:
+    if not incomplete and coverage.get("status") == "complete":
+        return "complete"
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    acquisition = providers.get("artifact_acquisition") if isinstance(providers, dict) else None
+    manifest = coverage.get("manifest_validation") if isinstance(coverage.get("manifest_validation"), dict) else {}
+    if (
+        extension.source == "marketplace-error"
+        or (isinstance(acquisition, dict) and acquisition.get("status") == "failed")
+        or manifest.get("status") == "scan-aborted"
+    ):
+        return "failed"
+    return "incomplete"
 
 
 def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
@@ -2967,7 +3086,12 @@ def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
     forces the decision to at least ``review``. This provider record stays
     ``completed`` in both cases; the review gate lives in the finding, not
     here."""
-    record: dict[str, Any] = {"provider": "javascript_ast", "required": True}
+    record: dict[str, Any] = {
+        "provider": "javascript_ast",
+        "required": True,
+        "timeout_seconds_per_file": JS_AST_TIMEOUT_SECONDS,
+        "max_old_space_mb": JS_AST_MAX_OLD_SPACE_MB,
+    }
     if not statuses:
         # No JS/TS files were reachable; nothing for this provider to do.
         record["status"] = "completed"
@@ -3153,14 +3277,9 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
         return "clean", "No suspicious extension behavior was detected by local static analysis.", "none", "INFO", 0, 0, score_details
 
     severity = "INFO"
-    decision_relevant = [
-        finding for finding in findings
-        if _is_confirmed_malware_finding(finding)
-        or _is_actionable_review_finding(finding)
-        or _finding_evidence_class(finding) in {"correlated", "observed", "exposure"}
-    ]
+    decision_relevant = [finding for finding in findings if is_decision_relevant(finding)]
     for finding in decision_relevant:
-        severity = rank_severity(severity, finding.severity)
+        severity = rank_severity(severity, effective_finding_severity(finding))
     malware_score = int(score_details["malware_score"])
     risk_score = int(score_details["risk_score"])
 
@@ -3218,7 +3337,7 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
             score_details,
         )
 
-    has_actionable_review = any(_is_actionable_review_finding(finding) for finding in findings)
+    has_actionable_review = any(is_review_relevant(finding) for finding in findings)
     if has_actionable_review:
         return (
             "review",
@@ -3228,6 +3347,18 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
             malware_score,
             risk_score,
             score_details,
+        )
+
+    if decision_relevant:
+        low_details = _low_note_score_details(score_details)
+        return (
+            "clean",
+            "Analysis found low-severity hardening notes but no evidence requiring approval review.",
+            "none",
+            severity,
+            0,
+            int(low_details["risk_score"]),
+            low_details,
         )
 
     return (
@@ -3242,25 +3373,18 @@ def _classify_findings(findings: list[Finding]) -> tuple[str, str, str, str, int
 
 
 def _is_actionable_review_finding(finding: Finding) -> bool:
-    evidence_class = _finding_evidence_class(finding)
-    if finding.rule_id == "vulnerable-npm-dependency" and not bool((finding.evidence or {}).get("exact")):
-        # A manifest range is not proof that the vulnerable version is present
-        # in the exact packaged artifact. Preserve the advisory as context, but
-        # require a resolved/locked version before it can change the decision.
-        return False
-    if evidence_class in {"correlated", "dependency", "observed", "posture", "provenance"}:
-        return True
-    if evidence_class == "exposure":
-        return True
-    if evidence_class == "capability":
-        return finding.rule_id not in {
-            "ast-dynamic-call-target",
-            "broad-activation",
-            "powerful-ide-contribution",
-            "sensitive-activation",
-            "startup-activation",
-        }
-    return False
+    return is_review_relevant(finding)
+
+
+def _low_note_score_details(score_details: dict[str, Any]) -> dict[str, Any]:
+    details = dict(score_details)
+    risk_score = min(32, max(1, int(details.get("risk_score") or 0)))
+    details["score"] = risk_score
+    details["malware_score"] = 0
+    details["risk_score"] = risk_score
+    details["basis"] = "low_hardening"
+    details["confidence"] = "medium"
+    return details
 
 
 def _non_actionable_score_details(score_details: dict[str, Any]) -> dict[str, Any]:
@@ -3287,6 +3411,7 @@ def _empty_score_details() -> dict[str, Any]:
             "sensitive_capability": 0,
             "provenance": 0,
             "dependency": 0,
+            "vulnerability": 0,
             "posture": 0,
             "cross_extension_exposure": 0,
             "reputation": 0,
@@ -3300,6 +3425,7 @@ def _empty_score_details() -> dict[str, Any]:
             "capability": 0,
             "provenance": 0,
             "dependency": 0,
+            "vulnerability": 0,
             "posture": 0,
             "exposure": 0,
             "reputation": 0,
@@ -3320,11 +3446,21 @@ def _score_details(findings: list[Finding]) -> dict[str, Any]:
     capability_score = _capability_score(findings)
     provenance_score = _provenance_score(findings)
     dependency_score = _dependency_score(findings)
+    vulnerability_score = _vulnerability_score(findings)
     observed_score = _observed_score(findings)
     posture_score = _posture_score(findings)
     exposure_score = _exposure_score(findings)
     reputation_score = _reputation_score(findings)
-    has_actionable_context = correlated_score > 0 or capability_score > 0 or provenance_score > 0 or dependency_score > 0 or observed_score > 0 or posture_score > 0 or exposure_score > 0
+    has_actionable_context = (
+        correlated_score > 0
+        or capability_score > 0
+        or provenance_score > 0
+        or dependency_score > 0
+        or vulnerability_score > 0
+        or observed_score > 0
+        or posture_score > 0
+        or exposure_score > 0
+    )
     weak_score = _weak_score(findings, has_actionable_context)
 
     components = {
@@ -3334,6 +3470,7 @@ def _score_details(findings: list[Finding]) -> dict[str, Any]:
         "sensitive_capability": capability_score,
         "provenance": provenance_score,
         "dependency": dependency_score,
+        "vulnerability": vulnerability_score,
         "posture": posture_score,
         "cross_extension_exposure": exposure_score,
         "reputation": reputation_score,
@@ -3370,6 +3507,7 @@ def _score_basis(components: dict[str, int]) -> tuple[str, str]:
         "confirmed_intelligence",
         "observed_behavior",
         "correlated_behavior",
+        "vulnerability",
         "dependency",
         "provenance",
         "sensitive_capability",
@@ -3511,6 +3649,14 @@ def _dependency_score(findings: list[Finding]) -> int:
             score = max(score, 46)
         elif finding.rule_id == "unpinned-dependency":
             score = max(score, 28)
+    return score
+
+
+def _vulnerability_score(findings: list[Finding]) -> int:
+    score = 0
+    for finding in findings:
+        if _finding_evidence_class(finding) == "vulnerability":
+            score = max(score, finding.score)
     return score
 
 

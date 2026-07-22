@@ -51,6 +51,7 @@ class ScannerTests(unittest.TestCase):
         skipped = report["extensions"][0]["artifact_inventory"]["skipped_reason"]
         self.assertIn("VSIX download exceeded the byte cap", skipped)
         self.assertEqual(report["extensions"][0]["decision"], "incomplete")
+        self.assertEqual(report["extensions"][0]["analysis_status"], "failed")
 
     def test_capability_reclassification_does_not_inflate_correlated_score(self) -> None:
         finding = Finding(
@@ -148,7 +149,8 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_id["trusted.startup-theme"]["verdict"], "clean")
         self.assertEqual(by_id["knownbad.feed-hit"]["verdict"], "clean")
         self.assertEqual(by_id["unknown.dropper"]["verdict"], "suspicious")
-        self.assertEqual(by_id["example.mutable-dependency"]["verdict"], "review")
+        self.assertEqual(by_id["example.mutable-dependency"]["verdict"], "clean")
+        self.assertEqual(by_id["example.mutable-dependency"]["severity"], "LOW")
         self.assertEqual(by_id["example.native-artifact"]["verdict"], "review")
 
         suspicious = by_id["unknown.shadow-helper"]
@@ -159,9 +161,9 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("credential-exfiltration-chain", {finding["rule_id"] for finding in suspicious["findings"]})
 
         agent = by_id["example.agent-toolbox"]
-        self.assertEqual(agent["verdict"], "review")
+        self.assertEqual(agent["verdict"], "clean")
         self.assertEqual(agent["malware_score"], 0)
-        self.assertGreater(agent["risk_score"], 0)
+        self.assertEqual(agent["risk_score"], 0)
         self.assertIn("agentic-tooling", {finding["rule_id"] for finding in agent["findings"]})
 
     def test_posture_can_be_disabled_for_hosted_package_scans(self) -> None:
@@ -179,6 +181,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.2")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.2")
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
         self.assertEqual(bundle["summary"]["summary"]["suspicious"], 2)
         self.assertIn("rules", bundle["rules"])
@@ -331,7 +334,7 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("dynamic-shell-execution", rule_ids)
         self.assertNotIn("untrusted-input-execution", rule_ids)
 
-    def test_explicit_child_process_exec_is_review_capability(self) -> None:
+    def test_explicit_child_process_exec_is_contextual_capability(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -347,7 +350,8 @@ class ScannerTests(unittest.TestCase):
 
         scanned = report["extensions"][0]
         rule_ids = {finding["rule_id"] for finding in scanned["findings"]}
-        self.assertEqual(scanned["verdict"], "review")
+        self.assertEqual(scanned["verdict"], "clean")
+        self.assertEqual(scanned["severity"], "INFO")
         self.assertIn("process-execution", rule_ids)
         self.assertIn("dynamic-shell-execution", rule_ids)
 
@@ -716,7 +720,7 @@ class ScannerTests(unittest.TestCase):
             report = scan_targets(include_fixtures=True, online=True)
 
         agent = {extension["extension_id"]: extension for extension in report["extensions"]}["example.agent-toolbox"]
-        self.assertEqual(agent["verdict"], "review")
+        self.assertEqual(agent["verdict"], "clean")
         self.assertEqual(agent["malware_score"], 0)
         self.assertIn("verified-publisher", {item["id"] for item in agent["score_details"]["suppressors"]})
 
@@ -822,7 +826,7 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(report.dependencies["@scope/pkg"], "2.1.5")
 
-    def test_mutable_and_unpinned_dependency_sources_are_review_not_malware(self) -> None:
+    def test_mutable_and_unpinned_dependency_sources_are_low_hardening_notes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -833,7 +837,8 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.severity, "LOW")
         self.assertEqual(report.malware_score, 0)
         self.assertGreater(report.risk_score, 0)
         self.assertIn("unpinned-dependency", {finding.rule_id for finding in report.findings})
@@ -869,11 +874,11 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         rule_ids = {finding.rule_id for finding in report.findings}
-        self.assertEqual(report.verdict, "review")
-        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.decision, "allow")
         self.assertNotIn("install-download-execute", rule_ids)
 
-    def test_credential_command_activation_is_reviewable_exposure(self) -> None:
+    def test_credential_command_activation_is_contextual_surface(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -887,12 +892,12 @@ class ScannerTests(unittest.TestCase):
         credential_findings = [
             finding for finding in report.findings if finding.rule_id == "credential-command-registration"
         ]
-        self.assertEqual(report.verdict, "review")
-        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.decision, "allow")
         self.assertEqual(len(credential_findings), 1)
         self.assertEqual(credential_findings[0].evidence["command"], "example.login")
 
-    def test_agent_tool_schema_metrics_are_review(self) -> None:
+    def test_agent_tool_schema_metrics_are_contextual_capabilities(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -903,7 +908,7 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
         self.assertEqual(report.malware_score, 0)
         rule_ids = {finding.rule_id for finding in report.findings}
         self.assertIn("agent-shell-tool", rule_ids)
@@ -944,7 +949,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("sensitive-activation", {finding.rule_id for finding in report.findings})
         self.assertIn("powerful-ide-contribution", {finding.rule_id for finding in report.findings})
 
-    def test_dangerous_repository_workflow_is_review(self) -> None:
+    def test_dangerous_repository_workflow_is_low_hardening_evidence(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             workflows = root / ".github" / "workflows"
@@ -960,7 +965,8 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.severity, "LOW")
         self.assertIn("dangerous-github-workflow", {finding.rule_id for finding in report.findings})
 
     def test_sandbox_observations_are_imported_as_suspicious(self) -> None:
@@ -1054,6 +1060,40 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["malware_score"], 100)
         self.assertIn("trusted-threat-feed-hit", {finding["rule_id"] for finding in scanned["findings"]})
 
+    def test_exact_extension_advisory_blocks_without_calling_artifact_malware(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"vulnerable","version":"1.2.3","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+            artifact_hash = scan_extension(root).artifact_hash
+            feed = Path(tmp) / "advisories.json"
+            feed.write_text(json.dumps({
+                "snapshot_version": "unit-test.1",
+                "entries": [{
+                    "extension_id": "example.vulnerable",
+                    "version": "1.2.3",
+                    "artifact_sha256": artifact_hash,
+                    "advisory_id": "CVE-TEST-1",
+                    "severity": "HIGH",
+                    "policy_action": "block",
+                    "source": "https://example.invalid/CVE-TEST-1",
+                }],
+            }), encoding="utf-8")
+
+            report = scan_targets(paths=[root], extension_advisories_file=feed)
+
+        scanned = report["extensions"][0]
+        self.assertEqual(scanned["decision"], "block")
+        self.assertEqual(scanned["severity"], "HIGH")
+        self.assertEqual(scanned["verdict"], "review")
+        self.assertEqual(scanned["malware_score"], 0)
+        self.assertIn("known-vulnerable-extension", {finding["rule_id"] for finding in scanned["findings"]})
+        self.assertEqual(report["intelligence"]["extension_advisories"]["snapshot_version"], "unit-test.1")
+
     def test_vsix_is_scanned_in_quarantine_and_keeps_source_artifact_hash(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1139,15 +1179,17 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "suspicious")
-        self.assertIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
+        self.assertEqual(report.verdict, "clean")
+        self.assertNotIn("obfuscation-execution-network", {finding.rule_id for finding in report.findings})
         self.assertEqual(report.analysis_coverage["coverage_percent"], 100)
 
     def test_bundle_classification_is_independent_of_coverage_limit(self) -> None:
         minified = "const x=1;" * 110_000
+        medium_minified = "const x=1;" * 60_000
         large_compiled = "const x=1;\n" * 1_000_000
 
         self.assertTrue(_is_generated_code_blob("dist/web.js", minified))
+        self.assertTrue(_is_generated_code_blob("out/extension.js", medium_minified))
         self.assertTrue(_is_generated_code_blob("out/extension.js", large_compiled))
         self.assertFalse(_is_generated_code_blob("src/extension.js", "const x=1;\n" * 100))
 
@@ -1514,7 +1556,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("workflow-token-permissions-broad", rule_ids)
         self.assertNotIn("dangerous-github-workflow", rule_ids)
 
-    def test_webview_without_csp_meta_tag_is_review_capability(self) -> None:
+    def test_webview_without_csp_meta_tag_is_low_hardening_evidence(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -1535,7 +1577,8 @@ class ScannerTests(unittest.TestCase):
         rule_ids = {finding.rule_id for finding in report.findings}
         self.assertIn("webview-csp-missing", rule_ids)
         self.assertEqual(report.malware_score, 0)
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.severity, "LOW")
 
     def test_webview_with_unsafe_csp_directive_is_flagged(self) -> None:
         with TemporaryDirectory() as tmp:

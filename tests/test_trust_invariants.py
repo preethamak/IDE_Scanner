@@ -39,6 +39,7 @@ class ManifestFailClosedTests(unittest.TestCase):
         self.assertFalse(report.analysis_coverage["manifest_validation"]["valid"])
         self.assertEqual(report.analysis_coverage["status"], "incomplete")
         self.assertEqual(report.decision, "incomplete")
+        self.assertEqual(report.analysis_status, "incomplete")
 
     def test_missing_manifest_fails_closed(self) -> None:
         with TemporaryDirectory() as tmp:

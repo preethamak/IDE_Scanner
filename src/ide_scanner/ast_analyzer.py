@@ -9,7 +9,12 @@ from typing import Any
 
 JS_AST_EXTS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
 _WALKER_PATH = Path(__file__).parent / "js_ast" / "walker.js"
-_TIMEOUT_SECONDS = 8
+# Deep analysis reads generated entrypoints up to the scanner's 64 MiB text
+# boundary. Acorn can require roughly 1.5 GiB and about a minute for a bundle
+# near that limit on a single CPU. Keep both limits fixed and report them in
+# provider metadata so the coverage boundary is reproducible.
+JS_AST_TIMEOUT_SECONDS = 90
+JS_AST_MAX_OLD_SPACE_MB = 2048
 
 _node_available: bool | None = None
 
@@ -43,10 +48,10 @@ def analyze_js_source_status(rel: str, text: str) -> tuple[list[dict[str, Any]],
             source_path = handle.name
         try:
             proc = subprocess.run(
-                ["node", str(_WALKER_PATH), source_path],
+                ["node", f"--max-old-space-size={JS_AST_MAX_OLD_SPACE_MB}", str(_WALKER_PATH), source_path],
                 capture_output=True,
                 text=True,
-                timeout=_TIMEOUT_SECONDS,
+                timeout=JS_AST_TIMEOUT_SECONDS,
             )
         finally:
             Path(source_path).unlink(missing_ok=True)

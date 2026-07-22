@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from .models import Finding
 
-POLICY_VERSION = "3.0.0-calibration.1"
+POLICY_VERSION = "3.0.0-calibration.2"
 
 FindingActionability = Literal["contextual", "low", "review", "block"]
 

@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from .classification_policy import POLICY_VERSION, effective_finding_severity, finding_actionability, finding_evidence_class
 from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
 from .rule_registry import RULESET_VERSION, rules_json
@@ -134,6 +135,8 @@ def _metadata(report: dict[str, Any], extensions: list[ExtensionReport], *, prof
         completed_extensions=len(extensions) - incomplete,
         incomplete_extensions=incomplete,
         scanner_build=_scanner_build(),
+        policy_version=POLICY_VERSION,
+        intelligence_snapshot=dict(report.get("intelligence") or {}),
     )
 
 
@@ -215,6 +218,7 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         score_schema_version=extension.score_schema_version,
         artifact_sha256=str(extension.artifact_identity.get("sha256") or extension.artifact_hash),
         coverage_percent=int(extension.analysis_coverage.get("coverage_percent") or 0),
+        analysis_status=extension.analysis_status,
         baseline_changed=bool(extension.baseline_diff.get("baseline_changed")),
     )
 
@@ -229,6 +233,7 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         finding_data["evidence_refs"] = [evidence_id]
         finding_data["evidence_class"] = _finding_evidence_class(finding)
         finding_data["actionability"] = _finding_actionability(finding)
+        finding_data["effective_severity"] = effective_finding_severity(finding)
         if not include_raw_evidence:
             finding_data.pop("evidence", None)
         finding_data["file_refs"] = list(finding_data.get("file_refs") or [])[:5]
@@ -275,6 +280,7 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         score_schema_version=extension.score_schema_version,
         artifact_identity=dict(extension.artifact_identity),
         analysis_coverage=dict(extension.analysis_coverage),
+        analysis_status=extension.analysis_status,
         baseline_diff=dict(extension.baseline_diff),
     )
 
@@ -374,7 +380,7 @@ def _verdict_state(extension: ExtensionReport) -> str:
 
 
 def _context_score(extension: ExtensionReport) -> int:
-    contextual = [finding for finding in extension.findings if _finding_actionability(finding) == "contextual"]
+    contextual = [finding for finding in extension.findings if _finding_actionability(finding) in {"contextual", "low"}]
     if not contextual:
         return 0
     components = extension.score_details.get("components") if isinstance(extension.score_details, dict) else {}
@@ -385,25 +391,14 @@ def _context_score(extension: ExtensionReport) -> int:
 
 
 def _finding_actionability(finding: Any) -> str:
-    evidence_class = _finding_evidence_class(finding)
-    rule_id = str(getattr(finding, "rule_id", ""))
-    severity = str(getattr(finding, "severity", ""))
-    if evidence_class == "confirmed":
-        return "block"
-    if evidence_class in {"correlated", "observed"} and severity in {"HIGH", "CRITICAL"}:
+    actionability = finding_actionability(finding)
+    if actionability == "review" and _finding_evidence_class(finding) in {"correlated", "observed"}:
         return "investigate"
-    if evidence_class in {"dependency", "provenance", "capability", "posture", "exposure"}:
-        if rule_id in {"startup-activation", "repo-url-missing", "security-policy-missing", "license-missing", "repo-maintained"}:
-            return "contextual"
-        return "review"
-    return "contextual"
+    return actionability
 
 
 def _finding_evidence_class(finding: Any) -> str:
-    evidence = getattr(finding, "evidence", None)
-    if isinstance(evidence, dict):
-        return str(evidence.get("evidence_class") or "weak")
-    return "weak"
+    return finding_evidence_class(finding)
 
 
 def _score_explanation(extension: ExtensionReport) -> list[str]:
@@ -571,6 +566,7 @@ def _extension_from_dict(data: dict[str, Any]) -> ExtensionReport:
         score_schema_version=str(data.get("score_schema_version") or "1"),
         artifact_identity=data.get("artifact_identity") if isinstance(data.get("artifact_identity"), dict) else {},
         analysis_coverage=data.get("analysis_coverage") if isinstance(data.get("analysis_coverage"), dict) else {},
+        analysis_status=str(data.get("analysis_status") or "incomplete"),  # type: ignore[arg-type]
         baseline_diff=data.get("baseline_diff") if isinstance(data.get("baseline_diff"), dict) else {},
     )
 
