@@ -1,0 +1,15 @@
+{
+  "snapshot_version": "2026-07-22.1",
+  "entries": [
+    {
+      "extension_id": "formulahendry.code-runner",
+      "version": "0.12.2",
+      "artifact_sha256": "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144",
+      "advisory_id": "CVE-2025-65715",
+      "severity": "HIGH",
+      "policy_action": "block",
+      "source": "https://nvd.nist.gov/vuln/detail/CVE-2025-65715",
+      "summary": "The configurable executor command reaches shell-enabled process execution, allowing arbitrary command execution when configuration is attacker-controlled."
+    }
+  ]
+}
