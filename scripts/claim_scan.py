@@ -42,6 +42,7 @@ def claim_job(claim_url: str) -> dict[str, object] | None:
         "runner_id": os.environ.get("SCAN_RUNNER_ID", "github-actions"),
         "job_id": os.environ.get("SCAN_JOB_ID") or None,
         "github_run_id": os.environ.get("SCAN_GITHUB_RUN_ID") or None,
+        "github_sha": os.environ.get("SCAN_GITHUB_SHA") or None,
     }
     request = urllib.request.Request(
         claim_url,

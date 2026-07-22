@@ -38,6 +38,7 @@ class EnqueueScanTests(unittest.TestCase):
                 "SCAN_EXTENSION_ID": "dbaeumer.vscode-eslint",
                 "SCAN_EXTENSION_VERSION": "3.0.33",
                 "SCAN_PURPOSE": "public_intelligence",
+                "SCAN_GITHUB_SHA": "a" * 40,
                 "SCAN_RUNNER_SECRET": "secret",
             }
             with patch.dict(os.environ, environment, clear=True), patch("urllib.request.urlopen", return_value=_Response()) as urlopen:
@@ -45,6 +46,7 @@ class EnqueueScanTests(unittest.TestCase):
             request = urlopen.call_args.args[0]
             self.assertEqual(request.get_header("Authorization"), "Bearer secret")
             self.assertIn(b'"version": "3.0.33"', request.data)
+            self.assertIn(b'"scanner_build": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"', request.data)
             self.assertEqual(output.read_text(encoding="utf-8"), "has_job=true\njob_id=job-1\n")
 
 

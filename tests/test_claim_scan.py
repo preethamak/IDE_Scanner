@@ -38,6 +38,7 @@ class ClaimScanTests(unittest.TestCase):
             "SCAN_CLAIM_URL": "https://scanner.example/claim",
             "SCAN_RUNNER_ID": "github-actions-123",
             "SCAN_RUNNER_SECRET": "test-secret",
+            "SCAN_GITHUB_SHA": "a" * 40,
             "GITHUB_OUTPUT": str(self.output),
         }
 
@@ -68,6 +69,7 @@ class ClaimScanTests(unittest.TestCase):
         body = json.loads(request.data.decode())
         self.assertEqual(body["job_id"], "job-42")
         self.assertEqual(body["github_run_id"], "987654")
+        self.assertEqual(body["github_sha"], "a" * 40)
 
     def test_claim_checks_the_next_url_when_the_first_queue_is_empty(self):
         environment = {**self.environment, "SCAN_CLAIM_URLS": "https://primary.example/claim,https://secondary.example/claim"}

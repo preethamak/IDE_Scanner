@@ -20,6 +20,7 @@ def main() -> int:
             "version": version,
             "scan_purpose": purpose,
             "registry": os.environ.get("SCAN_REGISTRY", "vs-marketplace"),
+            "scanner_build": os.environ.get("SCAN_GITHUB_SHA", ""),
         }]
     }).encode()
     request = urllib.request.Request(
