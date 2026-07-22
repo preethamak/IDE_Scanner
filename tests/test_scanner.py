@@ -229,6 +229,29 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("evidence_refs", detail["findings"][0])
         self.assertNotIn("evidence", detail["findings"][0])
 
+    def test_legacy_report_keeps_legacy_policy_and_infers_completed_status(self) -> None:
+        report = {
+            "scan_id": "legacy-scan",
+            "extensions": [{
+                "extension_id": "example.legacy",
+                "name": "legacy",
+                "publisher": "example",
+                "version": "1.0.0",
+                "decision": "allow",
+                "analysis_coverage": {"status": "complete", "coverage_percent": 100},
+                "findings": [],
+            }],
+        }
+
+        bundle = build_report_bundle(report)
+        detail = next(iter(bundle["extensions"].values()))
+
+        self.assertEqual(bundle["metadata"]["policy_version"], "legacy")
+        self.assertEqual(bundle["metadata"]["ruleset_version"], "legacy")
+        self.assertEqual(bundle["metadata"]["completed_extensions"], 1)
+        self.assertEqual(bundle["metadata"]["incomplete_extensions"], 0)
+        self.assertEqual(detail["analysis_status"], "complete")
+
     def test_contextual_findings_get_context_score_and_clean_with_notes_label(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1105,6 +1128,23 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("known-vulnerable-extension", {finding["rule_id"] for finding in scanned["findings"]})
         self.assertEqual(report["intelligence"]["extension_advisories"]["snapshot_version"], "unit-test.1")
 
+    def test_missing_required_extension_advisory_snapshot_fails_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"clean","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+
+            report = scan_targets(paths=[root], extension_advisories_file=Path(tmp) / "missing.json")
+
+        scanned = report["extensions"][0]
+        self.assertEqual(report["intelligence"]["extension_advisories"]["status"], "unavailable")
+        self.assertEqual(scanned["analysis_status"], "incomplete")
+        self.assertEqual(scanned["decision"], "incomplete")
+
     def test_vsix_is_scanned_in_quarantine_and_keeps_source_artifact_hash(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1219,6 +1259,24 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         self.assertNotIn("webview-csp-missing", {finding.rule_id for finding in report.findings})
+
+    def test_generated_bundle_preserves_explicit_unsafe_csp_finding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"webview-csp","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "createWebviewPanel();"
+                "const html=`<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'unsafe-eval'\">`;"
+                + "const filler=1;" * 20_000,
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertIn("webview-csp-unsafe-directive", {finding.rule_id for finding in report.findings})
 
     def test_generated_bundle_preserves_real_credential_network_flow_detection(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1556,7 +1614,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.malware_score, 0)
         self.assertEqual(report.verdict, "review")
 
-    def test_binary_with_checksum_companion_does_not_flag_missing_origin(self) -> None:
+    def test_artifact_controlled_checksum_does_not_prove_binary_origin(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -1570,9 +1628,9 @@ class ScannerTests(unittest.TestCase):
 
         rule_ids = {finding.rule_id for finding in report.findings}
         self.assertIn("repo-binary-artifacts", rule_ids)
-        self.assertNotIn("binary-without-origin", rule_ids)
+        self.assertIn("binary-without-origin", rule_ids)
 
-    def test_declared_node_package_binary_has_attributable_origin(self) -> None:
+    def test_artifact_controlled_node_manifest_does_not_prove_binary_origin(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -1590,7 +1648,7 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertNotIn("binary-without-origin", {finding.rule_id for finding in report.findings})
+        self.assertIn("binary-without-origin", {finding.rule_id for finding in report.findings})
 
     def test_license_missing_is_posture_context_not_review(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -10,10 +10,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from .classification_policy import POLICY_VERSION, effective_finding_severity, finding_actionability, finding_evidence_class
+from .classification_policy import effective_finding_severity, finding_actionability, finding_evidence_class
 from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
-from .rule_registry import RULESET_VERSION, rules_json
+from .rule_registry import rules_json
 
 SCHEMA_VERSION = "2.2"
 
@@ -28,7 +28,14 @@ def build_report_bundle(
     extensions = [_extension_from_dict(item) for item in report.get("extensions") or [] if isinstance(item, dict)]
     metadata = _metadata(report, extensions, profile=profile, source=source)
     summaries = [_to_summary(extension) for extension in extensions]
-    details = [_to_detail(extension, include_raw_evidence=include_raw_evidence) for extension in extensions]
+    details = [
+        _to_detail(
+            extension,
+            include_raw_evidence=include_raw_evidence,
+            policy_version=metadata.policy_version,
+        )
+        for extension in extensions
+    ]
     return {
         "metadata": metadata.to_dict(),
         "summary": _summary(report, extensions, summaries),
@@ -128,15 +135,15 @@ def _metadata(report: dict[str, Any], extensions: list[ExtensionReport], *, prof
         scan_id=scan_id,
         created_at=created_at,
         scanner_version=_scanner_version(),
-        ruleset_version=str(report.get("ruleset_version") or RULESET_VERSION),
+        ruleset_version=str(report.get("ruleset_version") or "legacy"),
         profile=profile,
         source=source,
         total_extensions=len(extensions),
         completed_extensions=len(extensions) - incomplete,
         incomplete_extensions=incomplete,
         scanner_build=str(report.get("scanner_build") or _scanner_build()),
-        policy_version=str(report.get("policy_version") or POLICY_VERSION),
-        intelligence_snapshot=dict(report.get("intelligence") or {}),
+        policy_version=str(report.get("policy_version") or "legacy"),
+        intelligence_snapshot=dict(report.get("intelligence")) if isinstance(report.get("intelligence"), dict) else {},
     )
 
 
@@ -223,7 +230,12 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
     )
 
 
-def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> ExtensionDetail:
+def _to_detail(
+    extension: ExtensionReport,
+    *,
+    include_raw_evidence: bool,
+    policy_version: str,
+) -> ExtensionDetail:
     evidence_store: dict[str, Any] = {}
     findings: list[dict[str, Any]] = []
     for finding in _rank_findings(extension.findings):
@@ -232,8 +244,12 @@ def _to_detail(extension: ExtensionReport, *, include_raw_evidence: bool) -> Ext
         evidence_store[evidence_id] = _evidence_record(finding_data, include_raw_evidence=include_raw_evidence)
         finding_data["evidence_refs"] = [evidence_id]
         finding_data["evidence_class"] = _finding_evidence_class(finding)
-        finding_data["actionability"] = _finding_actionability(finding)
-        finding_data["effective_severity"] = effective_finding_severity(finding)
+        if policy_version == "legacy":
+            finding_data["actionability"] = _legacy_finding_actionability(finding)
+            finding_data["effective_severity"] = str(getattr(finding, "severity", "INFO"))
+        else:
+            finding_data["actionability"] = _finding_actionability(finding)
+            finding_data["effective_severity"] = effective_finding_severity(finding)
         if not include_raw_evidence:
             finding_data.pop("evidence", None)
         finding_data["file_refs"] = list(finding_data.get("file_refs") or [])[:5]
@@ -392,6 +408,21 @@ def _context_score(extension: ExtensionReport) -> int:
 
 def _finding_actionability(finding: Any) -> str:
     return finding_actionability(finding)
+
+
+def _legacy_finding_actionability(finding: Any) -> str:
+    evidence_class = _finding_evidence_class(finding)
+    rule_id = str(getattr(finding, "rule_id", ""))
+    severity = str(getattr(finding, "severity", ""))
+    if evidence_class == "confirmed":
+        return "block"
+    if evidence_class in {"correlated", "observed"} and severity in {"HIGH", "CRITICAL"}:
+        return "investigate"
+    if evidence_class in {"dependency", "provenance", "capability", "posture", "exposure"}:
+        if rule_id in {"startup-activation", "repo-url-missing", "security-policy-missing", "license-missing", "repo-maintained"}:
+            return "contextual"
+        return "review"
+    return "contextual"
 
 
 def _finding_evidence_class(finding: Any) -> str:
@@ -563,13 +594,39 @@ def _extension_from_dict(data: dict[str, Any]) -> ExtensionReport:
         score_schema_version=str(data.get("score_schema_version") or "1"),
         artifact_identity=data.get("artifact_identity") if isinstance(data.get("artifact_identity"), dict) else {},
         analysis_coverage=data.get("analysis_coverage") if isinstance(data.get("analysis_coverage"), dict) else {},
-        analysis_status=str(data.get("analysis_status") or "incomplete"),  # type: ignore[arg-type]
+        analysis_status=_analysis_status_from_dict(data),  # type: ignore[arg-type]
         baseline_diff=data.get("baseline_diff") if isinstance(data.get("baseline_diff"), dict) else {},
     )
 
 
+def _analysis_status_from_dict(data: dict[str, Any]) -> str:
+    explicit = str(data.get("analysis_status") or "")
+    if explicit in {"complete", "incomplete", "failed"}:
+        return explicit
+    coverage = data.get("analysis_coverage") if isinstance(data.get("analysis_coverage"), dict) else {}
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    acquisition = providers.get("artifact_acquisition") if isinstance(providers, dict) else None
+    manifest = coverage.get("manifest_validation") if isinstance(coverage.get("manifest_validation"), dict) else {}
+    if (
+        data.get("source") == "marketplace-error"
+        or (isinstance(acquisition, dict) and acquisition.get("status") == "failed")
+        or manifest.get("status") == "scan-aborted"
+    ):
+        return "failed"
+    inventory = data.get("artifact_inventory") if isinstance(data.get("artifact_inventory"), dict) else {}
+    if inventory.get("scan_incomplete") or coverage.get("status") == "incomplete" or data.get("decision") == "incomplete":
+        return "incomplete"
+    if coverage.get("status") == "complete" or data.get("decision") in {"allow", "review", "block"}:
+        return "complete"
+    return "incomplete"
+
+
 def _scan_incomplete(extension: ExtensionReport) -> bool:
-    return bool(getattr(extension, "scan_incomplete", False) or extension.artifact_inventory.get("scan_incomplete"))
+    return bool(
+        extension.analysis_status != "complete"
+        or getattr(extension, "scan_incomplete", False)
+        or extension.artifact_inventory.get("scan_incomplete")
+    )
 
 
 def _skipped_reason(extension: ExtensionReport) -> str:

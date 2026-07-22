@@ -277,6 +277,14 @@ def scan_targets(
             "error_count": len(dependency_errors),
             "required": False,
         }
+        providers["extension_advisories"] = {
+            "provider": "extension_advisories",
+            "status": str(advisory_bundle.get("status") or "unavailable"),
+            "snapshot_version": str(advisory_bundle.get("snapshot_version") or "unavailable"),
+            "sha256": str(advisory_bundle.get("sha256") or ""),
+            "error_count": 0 if advisory_bundle.get("status") == "completed" else 1,
+            "required": True,
+        }
         _finalize_analysis_coverage(extension.analysis_coverage)
         extension.artifact_inventory["analysis_coverage"] = extension.analysis_coverage
         extension.artifact_inventory["scan_incomplete"] = extension.analysis_coverage["status"] != "complete"
@@ -290,6 +298,7 @@ def scan_targets(
         apply_public_assessment(extension)
     intelligence = {
         "extension_advisories": {
+            "status": str(advisory_bundle.get("status") or "unavailable"),
             "snapshot_version": str(advisory_bundle.get("snapshot_version") or "none"),
             "sha256": str(advisory_bundle.get("sha256") or ""),
         }
@@ -367,10 +376,15 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 js_ast_statuses.append(status)
                 if is_entrypoint and status == "unparsed":
                     ast_unparsed_entrypoints.append(rel)
-        if (suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}) and not (
-            suffix in JS_AST_EXTS and _is_generated_code_blob(rel, text)
-        ):
-            _add_webview_csp_findings(extension_id, version, rel, text, findings)
+        if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
+            _add_webview_csp_findings(
+                extension_id,
+                version,
+                rel,
+                text,
+                findings,
+                report_missing=not (suffix in JS_AST_EXTS and _is_generated_code_blob(rel, text)),
+            )
 
     _add_workspace_cli_path_findings(extension_id, version, manifest, executable_sources, findings)
 
@@ -1257,45 +1271,13 @@ def _add_artifact_inventory_findings(
 
 
 def _has_origin_evidence(path: Path | None, rel: str, all_paths: set[str]) -> bool:
-    companions = {f"{rel}.sha256", f"{rel}.sig", f"{rel}.asc", f"{rel}.p7s"}
-    if companions & all_paths:
-        return True
-    if path is None:
-        return False
-    if _has_node_package_origin(path, rel, all_paths):
-        return True
-    stem = rel.rsplit("/", 1)[-1]
-    for doc_name in ("SECURITY.md", "README.md", "docs/SECURITY.md"):
-        text = _read_text(path / doc_name)
-        if text and stem in text:
-            return True
+    # All neighboring manifests, checksums, signatures, and documentation are
+    # controlled by the extension artifact itself. They are attribution claims,
+    # not independent origin verification. Keep review required until an
+    # external registry/signature provider verifies the binary against a trust
+    # root.
+    del path, rel, all_paths
     return False
-
-
-def _has_node_package_origin(root: Path, rel: str, all_paths: set[str]) -> bool:
-    marker = "node_modules/"
-    marker_index = rel.find(marker)
-    if marker_index < 0:
-        return False
-    package_name = _package_name_from_node_modules_path(rel[marker_index:])
-    if not package_name:
-        return False
-    package_root = f"{rel[:marker_index]}{marker}{package_name}"
-    manifest_rel = f"{package_root}/package.json"
-    if manifest_rel not in all_paths:
-        return False
-    manifest = _read_manifest(root / manifest_rel)
-    if manifest.get("name") != package_name or not isinstance(manifest.get("version"), str):
-        return False
-    repository = manifest.get("repository")
-    repository_url = repository.get("url") if isinstance(repository, dict) else repository
-    if not isinstance(repository_url, str) or not repository_url.strip():
-        return False
-    declared_files = manifest.get("files")
-    if not isinstance(declared_files, list):
-        return False
-    package_file = rel.removeprefix(f"{package_root}/")
-    return package_file in {str(item).removeprefix("./") for item in declared_files if isinstance(item, str)}
 
 
 def _add_code_findings(
@@ -2035,11 +2017,19 @@ CSP_META_RE = re.compile(r"<meta[^>]+http-equiv\s*=\s*[\"']Content-Security-Poli
 CSP_UNSAFE_DIRECTIVE_RE = re.compile(r"unsafe-inline|unsafe-eval|script-src[^;\"']*\*", re.I)
 
 
-def _add_webview_csp_findings(extension_id: str, version: str, rel: str, text: str, findings: list[Finding]) -> None:
+def _add_webview_csp_findings(
+    extension_id: str,
+    version: str,
+    rel: str,
+    text: str,
+    findings: list[Finding],
+    *,
+    report_missing: bool = True,
+) -> None:
     if not WEBVIEW_SURFACE_RE.search(text):
         return
     csp_match = CSP_META_RE.search(text)
-    if not csp_match:
+    if not csp_match and report_missing:
         findings.append(_finding(
             extension_id,
             version,
@@ -2051,6 +2041,8 @@ def _add_webview_csp_findings(extension_id: str, version: str, rel: str, text: s
             [rel],
             "Add a strict Content-Security-Policy meta tag to every webview HTML document, scoping script-src/style-src to the webview's own origin and the webview.cspSource.",
         ))
+        return
+    if not csp_match:
         return
     if CSP_UNSAFE_DIRECTIVE_RE.search(csp_match.group(0)):
         findings.append(_finding(
@@ -2208,10 +2200,11 @@ def _load_extension_advisories(path: Path | str | None = None) -> dict[str, Any]
         raw = raw_path.read_bytes()
         parsed = json.loads(raw)
     except (OSError, json.JSONDecodeError):
-        return {"snapshot_version": "unavailable", "sha256": "", "entries": []}
+        return {"status": "unavailable", "snapshot_version": "unavailable", "sha256": "", "entries": []}
     if not isinstance(parsed, dict) or not isinstance(parsed.get("entries"), list):
-        return {"snapshot_version": "invalid", "sha256": hashlib.sha256(raw).hexdigest(), "entries": []}
+        return {"status": "invalid", "snapshot_version": "invalid", "sha256": hashlib.sha256(raw).hexdigest(), "entries": []}
     return {
+        "status": "completed",
         "snapshot_version": str(parsed.get("snapshot_version") or "unknown"),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "entries": [entry for entry in parsed["entries"] if isinstance(entry, dict)],
