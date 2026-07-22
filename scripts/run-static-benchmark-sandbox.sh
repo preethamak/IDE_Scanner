@@ -41,7 +41,7 @@ exec docker run --rm \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --pids-limit 128 \
-  --memory 768m \
+  --memory 3g \
   --cpus 1.0 \
   --user 65534:65534 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m \
@@ -52,7 +52,7 @@ exec docker run --rm \
   "$IMAGE" \
   -ec '
     find /input -type f -name "*.vsix" -print > /tmp/vsix-files
-    set -- ide-scanner scan --format json --output /output/static-scan.json
+    set -- python -m ide_scanner scan --format json --output /output/static-scan.json
     while IFS= read -r artifact; do
       set -- "$@" --path "$artifact"
     done < /tmp/vsix-files
