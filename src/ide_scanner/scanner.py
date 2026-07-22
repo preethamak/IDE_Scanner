@@ -1368,6 +1368,53 @@ def _add_code_findings(
         ))
         capabilities.setdefault("process_execution", {"id": "process_execution", "evidence": []})["evidence"].append(rel)
 
+    for secret_id, label in secret_refs:
+        findings.append(_finding(
+            extension_id,
+            version,
+            f"secret-reference:{secret_id}",
+            "credential-access",
+            "LOW",
+            0.56,
+            f"Code references {label}.",
+            [rel],
+            "Confirm that the extension only reads secrets with explicit user intent and does not transmit them.",
+        ))
+
+    # Generated bundles collapse many unrelated modules into one file. Keep
+    # high-specificity local flow checks, but do not promote general token
+    # proximity across the bundle into correlated evidence.
+    if _is_generated_code_blob(rel, text):
+        if secret_refs and has_file_read and has_network and _has_direct_credential_network_flow(text, secret_regex):
+            findings.append(_finding(
+                extension_id,
+                version,
+                "credential-exfiltration-chain",
+                "credential-access",
+                "HIGH",
+                0.92,
+                "A variable assigned from a sensitive local file is used directly as outbound request data.",
+                [rel],
+                "Remove or block this extension until the direct credential transfer is manually verified.",
+                {"evidence_class": "correlated", "correlation": "same-variable-local-flow"},
+            ))
+        if has_obfuscation and _DECODED_EXECUTION_RE.search(text) and has_network and _features_nearby(text, [
+            _DECODED_EXECUTION_RE,
+            NETWORK_SINK_RE,
+        ]):
+            findings.append(_finding(
+                extension_id,
+                version,
+                "obfuscation-execution-network",
+                "execution",
+                "HIGH",
+                0.82,
+                "Code combines locally adjacent decoded execution and network behavior.",
+                [rel],
+                "Treat as suspicious unless the generated dynamic code path is documented and reproducible.",
+            ))
+        return
+
     if has_configured_cli and not has_shell_exec and not has_download:
         findings.append(_finding(
             extension_id,
@@ -1396,19 +1443,6 @@ def _add_code_findings(
     # Editor paths/selections and process APIs commonly share a file in legitimate
     # extensions. The Semgrep taint rule emits untrusted-workspace-input-to-process
     # only when it can establish a source-to-sink flow.
-
-    for secret_id, label in secret_refs:
-        findings.append(_finding(
-            extension_id,
-            version,
-            f"secret-reference:{secret_id}",
-            "credential-access",
-            "LOW",
-            0.56,
-            f"Code references {label}.",
-            [rel],
-            "Confirm that the extension only reads secrets with explicit user intent and does not transmit them.",
-        ))
 
     if secret_refs and has_file_read and _features_nearby(text, [secret_regex, FILE_READ_RE]):
         labels = ", ".join(label for _, label in secret_refs)
@@ -1890,6 +1924,21 @@ def _balanced_call_arguments(text: str, start: int) -> str:
             if depth == 0:
                 return text[start:index]
     return text[start:min(len(text), start + 500)]
+
+
+def _has_direct_credential_network_flow(text: str, secret_pattern: re.Pattern[str]) -> bool:
+    assignment = re.compile(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]{1,1200})")
+    for match in assignment.finditer(text):
+        expression = match.group(2)
+        if not FILE_READ_RE.search(expression) or not secret_pattern.search(expression):
+            continue
+        variable = re.escape(match.group(1))
+        tail = text[match.end():min(len(text), match.end() + 3000)]
+        if not NETWORK_SINK_RE.search(tail):
+            continue
+        if re.search(rf"(?:body\s*:\s*{variable}\b|(?:write|send|post)\s*\(\s*{variable}\b)", tail):
+            return True
+    return False
 
 
 def _manifest_configuration_items(contributes: dict[str, Any]) -> list[dict[str, Any]]:
