@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--path", "--folder", "--vsix", dest="path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
-    scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Scan profile. smart is the default.")
+    scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles; only 'deep' additionally enables online registry checks (same as --online).")
     scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -34,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
-    scan.add_argument("--jobs", type=int, default=1, help="Worker count for future parallel scans. Currently accepted for CLI compatibility.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
     scan.add_argument("--ui", action="store_true", help="Reserved for local dashboard mode.")
 
@@ -73,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
     agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
+    agent.add_argument(
+        "--include-source",
+        action="store_true",
+        help="Include raw source-file previews in the uploaded report. Off by default: source code stays local.",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "scan":
@@ -182,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             all_local=args.all,
             online=args.online,
             previous_report_file=args.previous_report,
+            include_source=args.include_source,
         )
         if args.out:
             _emit(payload, args.out)

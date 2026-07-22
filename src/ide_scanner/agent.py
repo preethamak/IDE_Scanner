@@ -12,12 +12,45 @@ from urllib.request import Request, urlopen
 from .core import ScanRequest, run_scan, summarize_report
 
 
+def _redact_source_previews(report: dict[str, Any]) -> int:
+    """Strip full source-file contents from every extension in the report.
+
+    The scanner captures source previews locally for evidence, but the agent
+    upload is a network boundary: the product's privacy claim is that source
+    code stays on the machine. We remove the raw preview ``content`` so source
+    and secrets captured there cannot leave the host by accident. Path + hash
+    metadata is retained so the server can still reason about which files
+    existed without receiving their preview bytes."""
+    redacted = 0
+    extensions = report.get("extensions")
+    if not isinstance(extensions, list):
+        return 0
+    for extension in extensions:
+        inventory = extension.get("artifact_inventory") if isinstance(extension, dict) else None
+        if not isinstance(inventory, dict):
+            continue
+        previews = inventory.get("source_previews")
+        if isinstance(previews, list) and previews:
+            inventory["source_previews"] = [
+                {
+                    "path": item.get("path"),
+                    "content_sha256": item.get("content_sha256"),
+                    "redacted": True,
+                }
+                for item in previews
+                if isinstance(item, dict)
+            ]
+            redacted += len(previews)
+    return redacted
+
+
 def build_agent_report(
     *,
     paths: list[Path],
     all_local: bool,
     online: bool,
     previous_report_file: str | None = None,
+    include_source: bool = False,
 ) -> dict[str, Any]:
     report = run_scan(
         ScanRequest(
@@ -27,6 +60,9 @@ def build_agent_report(
             previous_report_file=previous_report_file,
         )
     )
+    source_redacted = 0
+    if not include_source:
+        source_redacted = _redact_source_previews(report)
     return {
         "agent": {
             "schema_version": "0.1.0",
@@ -36,6 +72,8 @@ def build_agent_report(
             "platform_release": platform.release(),
             "machine": platform.machine(),
             "python": platform.python_version(),
+            "source_included": bool(include_source),
+            "source_previews_redacted": source_redacted,
         },
         "summary": summarize_report(report, top_limit=50),
         "report": report,

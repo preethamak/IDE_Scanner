@@ -191,26 +191,43 @@ function parseWithFallback(source) {
   }
 }
 
+// Emit a JSON result and exit only after stdout has fully drained. Calling
+// process.exit() immediately after process.stdout.write() truncates the output
+// at the pipe buffer (~64KB on Linux) when the parent reads from a pipe, so a
+// large findings payload arrives as invalid JSON. Setting exitCode and letting
+// the event loop drain the write avoids that data loss.
+function emit(payload, code) {
+  process.exitCode = code;
+  const text = JSON.stringify(payload);
+  process.stdout.write(text, () => {
+    process.exit(code);
+  });
+}
+
 function main() {
   const filePath = process.argv[2];
   if (!filePath) {
-    process.stdout.write(JSON.stringify({ error: "usage: walker.js <file>" }));
-    process.exit(2);
+    emit({ error: "usage: walker.js <file>" }, 2);
+    return;
   }
   let source;
   try {
     source = fs.readFileSync(filePath, "utf-8");
   } catch (err) {
-    process.stdout.write(JSON.stringify({ error: `read failed: ${err.message}` }));
-    process.exit(1);
+    emit({ error: `read failed: ${err.message}` }, 1);
+    return;
   }
 
   let ast;
   try {
     ast = parseWithFallback(source);
   } catch (err) {
-    process.stdout.write(JSON.stringify({ error: `parse failed: ${err.message}`, findings: [] }));
-    process.exit(0);
+    // acorn could not parse the source. Expected for TypeScript/JSX (this
+    // parser is plain-JS only) and for genuinely malformed input. Tagged
+    // "unparsed" so the caller treats it as a disclosed tool limitation, not
+    // an analyzer crash.
+    emit({ error: `parse failed: ${err.message}`, kind: "unparsed", findings: [] }, 0);
+    return;
   }
 
   CONST_TABLE = new Map();
@@ -219,12 +236,13 @@ function main() {
     collectConstants(ast);
     walk(ast, null, findings, source);
   } catch (err) {
-    process.stdout.write(JSON.stringify({ error: `walk failed: ${err.message}`, findings: [] }));
-    process.exit(0);
+    // Parsing succeeded but traversal threw: a real analyzer failure, not a
+    // parser limitation. Tagged "walk-error" so the caller fails closed.
+    emit({ error: `walk failed: ${err.message}`, kind: "walk-error", findings: [] }, 0);
+    return;
   }
 
-  process.stdout.write(JSON.stringify({ findings }));
-  process.exit(0);
+  emit({ findings }, 0);
 }
 
 main();
