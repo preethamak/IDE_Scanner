@@ -15,6 +15,7 @@ _WALKER_PATH = Path(__file__).parent / "js_ast" / "walker.js"
 # provider metadata so the coverage boundary is reproducible.
 JS_AST_TIMEOUT_SECONDS = 90
 JS_AST_MAX_OLD_SPACE_MB = 2048
+JS_AST_TIMEOUT_ATTEMPTS = 2
 
 _node_available: bool | None = None
 
@@ -47,16 +48,21 @@ def analyze_js_source_status(rel: str, text: str) -> tuple[list[dict[str, Any]],
             handle.write(text)
             source_path = handle.name
         try:
-            proc = subprocess.run(
-                ["node", f"--max-old-space-size={JS_AST_MAX_OLD_SPACE_MB}", str(_WALKER_PATH), source_path],
-                capture_output=True,
-                text=True,
-                timeout=JS_AST_TIMEOUT_SECONDS,
-            )
+            command = ["node", f"--max-old-space-size={JS_AST_MAX_OLD_SPACE_MB}", str(_WALKER_PATH), source_path]
+            for attempt in range(JS_AST_TIMEOUT_ATTEMPTS):
+                try:
+                    proc = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=JS_AST_TIMEOUT_SECONDS,
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    if attempt + 1 == JS_AST_TIMEOUT_ATTEMPTS:
+                        return [], "timeout"
         finally:
             Path(source_path).unlink(missing_ok=True)
-    except subprocess.TimeoutExpired:
-        return [], "timeout"
     except (OSError, subprocess.SubprocessError):
         return [], "error"
 

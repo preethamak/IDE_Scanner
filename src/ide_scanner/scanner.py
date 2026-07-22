@@ -14,6 +14,7 @@ from typing import Any
 from .ast_analyzer import (
     JS_AST_EXTS,
     JS_AST_MAX_OLD_SPACE_MB,
+    JS_AST_TIMEOUT_ATTEMPTS,
     JS_AST_TIMEOUT_SECONDS,
     analyze_js_source_status,
     node_available,
@@ -324,6 +325,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     executable_sources: list[tuple[str, str]] = []
     source_previews: list[dict[str, Any]] = []
     js_ast_statuses: list[str] = []
+    js_ast_failed_paths: list[str] = []
     ast_unparsed_entrypoints: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
@@ -374,6 +376,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
             if is_entrypoint or not generated_blob:
                 status = _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
                 js_ast_statuses.append(status)
+                if status not in ("ok", "unparsed"):
+                    js_ast_failed_paths.append(rel)
                 if is_entrypoint and status == "unparsed":
                     ast_unparsed_entrypoints.append(rel)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
@@ -418,7 +422,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     findings = _dedupe_findings(findings)
     analysis_coverage["providers"] = {
         "native_static": {"provider": "native_static", "status": "completed", "required": True},
-        "javascript_ast": _javascript_ast_provider_status(js_ast_statuses),
+        "javascript_ast": _javascript_ast_provider_status(js_ast_statuses, js_ast_failed_paths),
         **provider_statuses,
     }
     analysis_coverage["manifest_validation"] = {
@@ -3164,7 +3168,7 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     return manifest
 
 
-def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
+def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str] | None = None) -> dict[str, Any]:
     """Summarize per-file JS/TS AST walker statuses into a provider record.
 
     ``completed`` only when every analyzed file's walker ran successfully. A
@@ -3192,6 +3196,7 @@ def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
         "provider": "javascript_ast",
         "required": True,
         "timeout_seconds_per_file": JS_AST_TIMEOUT_SECONDS,
+        "max_timeout_attempts": JS_AST_TIMEOUT_ATTEMPTS,
         "max_old_space_mb": JS_AST_MAX_OLD_SPACE_MB,
     }
     if not statuses:
@@ -3209,6 +3214,8 @@ def _javascript_ast_provider_status(statuses: list[str]) -> dict[str, Any]:
         reasons = sorted(set(hard_failures))
         record["status"] = "failed"
         record["error"] = f"AST analysis did not complete for {len(hard_failures)} file(s): {', '.join(reasons)}"
+        if failed_paths:
+            record["failed_paths"] = sorted(set(failed_paths))
         if "node-missing" in reasons:
             record["error"] = "Node runtime unavailable; JavaScript AST analysis did not run."
     elif unparsed:

@@ -114,10 +114,11 @@ class ManifestFailClosedTests(unittest.TestCase):
 
 class ProviderStatusTests(unittest.TestCase):
     def test_missing_node_marks_js_ast_failed(self) -> None:
-        record = _javascript_ast_provider_status(["node-missing"])
+        record = _javascript_ast_provider_status(["node-missing"], ["extension.js"])
         self.assertEqual(record["status"], "failed")
         self.assertTrue(record["required"])
         self.assertIn("Node runtime unavailable", record["error"])
+        self.assertEqual(record["failed_paths"], ["extension.js"])
 
     def test_all_ok_completes(self) -> None:
         record = _javascript_ast_provider_status(["ok", "ok"])

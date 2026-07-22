@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,23 @@ from ide_scanner.ast_analyzer import analyze_js_source_status, node_available
 
 
 class WalkerLargeOutputTests(unittest.TestCase):
+    def test_timeout_is_retried_once_before_failing_closed(self) -> None:
+        completed = MagicMock(returncode=0, stdout=json.dumps({"findings": []}))
+        timeout = subprocess.TimeoutExpired(["node"], ast_analyzer.JS_AST_TIMEOUT_SECONDS)
+        with patch.object(ast_analyzer.subprocess, "run", side_effect=[timeout, completed]) as run, \
+             patch.object(ast_analyzer, "node_available", return_value=True):
+            _findings, status = analyze_js_source_status("a.js", "x")
+        self.assertEqual(status, "ok")
+        self.assertEqual(run.call_count, 2)
+
+    def test_repeated_timeout_still_fails_closed(self) -> None:
+        timeout = subprocess.TimeoutExpired(["node"], ast_analyzer.JS_AST_TIMEOUT_SECONDS)
+        with patch.object(ast_analyzer.subprocess, "run", side_effect=timeout) as run, \
+             patch.object(ast_analyzer, "node_available", return_value=True):
+            _findings, status = analyze_js_source_status("a.js", "x")
+        self.assertEqual(status, "timeout")
+        self.assertEqual(run.call_count, ast_analyzer.JS_AST_TIMEOUT_ATTEMPTS)
+
     @unittest.skipUnless(node_available(), "node runtime required")
     def test_large_findings_payload_is_not_truncated(self) -> None:
         # Regression: walker.js used to call process.exit() immediately after
