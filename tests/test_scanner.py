@@ -1570,6 +1570,26 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("repo-binary-artifacts", rule_ids)
         self.assertNotIn("binary-without-origin", rule_ids)
 
+    def test_declared_node_package_binary_has_attributable_origin(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"native-package","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            package = root / "node_modules" / "native-addon"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"name":"native-addon","version":"2.0.0","repository":"https://example.invalid/native-addon",'
+                '"files":["addon.node"]}',
+                encoding="utf-8",
+            )
+            (package / "addon.node").write_bytes(b"native-binary-payload")
+
+            report = scan_extension(root)
+
+        self.assertNotIn("binary-without-origin", {finding.rule_id for finding in report.findings})
+
     def test_license_missing_is_posture_context_not_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

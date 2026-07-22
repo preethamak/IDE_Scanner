@@ -1260,12 +1260,40 @@ def _has_origin_evidence(path: Path | None, rel: str, all_paths: set[str]) -> bo
         return True
     if path is None:
         return False
+    if _has_node_package_origin(path, rel, all_paths):
+        return True
     stem = rel.rsplit("/", 1)[-1]
     for doc_name in ("SECURITY.md", "README.md", "docs/SECURITY.md"):
         text = _read_text(path / doc_name)
         if text and stem in text:
             return True
     return False
+
+
+def _has_node_package_origin(root: Path, rel: str, all_paths: set[str]) -> bool:
+    marker = "node_modules/"
+    marker_index = rel.find(marker)
+    if marker_index < 0:
+        return False
+    package_name = _package_name_from_node_modules_path(rel[marker_index:])
+    if not package_name:
+        return False
+    package_root = f"{rel[:marker_index]}{marker}{package_name}"
+    manifest_rel = f"{package_root}/package.json"
+    if manifest_rel not in all_paths:
+        return False
+    manifest = _read_manifest(root / manifest_rel)
+    if manifest.get("name") != package_name or not isinstance(manifest.get("version"), str):
+        return False
+    repository = manifest.get("repository")
+    repository_url = repository.get("url") if isinstance(repository, dict) else repository
+    if not isinstance(repository_url, str) or not repository_url.strip():
+        return False
+    declared_files = manifest.get("files")
+    if not isinstance(declared_files, list):
+        return False
+    package_file = rel.removeprefix(f"{package_root}/")
+    return package_file in {str(item).removeprefix("./") for item in declared_files if isinstance(item, str)}
 
 
 def _add_code_findings(
