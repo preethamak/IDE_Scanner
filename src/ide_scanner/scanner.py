@@ -367,10 +367,10 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 "truncated": False,
             })
         scanned_files += 1
-        if suffix in EXEC_TEXT_EXTS:
-            analysis_coverage["analyzed_executable_files"].append(rel)
-            executable_sources.append((rel, text))
-            _add_code_findings(extension_id, version, rel, text, findings, capabilities)
+        # Run the bounded AST subprocess before expanding raw-text matches into
+        # Python Finding objects. Large bundled entrypoints can otherwise push
+        # the parent close to the container memory limit and starve Node's GC,
+        # turning identical source into a resource-dependent timeout.
         if suffix in JS_AST_EXTS:
             generated_blob = _is_generated_code_blob(rel, text)
             if is_entrypoint or not generated_blob:
@@ -380,6 +380,10 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                     js_ast_failed_paths.append(rel)
                 if is_entrypoint and status == "unparsed":
                     ast_unparsed_entrypoints.append(rel)
+        if suffix in EXEC_TEXT_EXTS:
+            analysis_coverage["analyzed_executable_files"].append(rel)
+            executable_sources.append((rel, text))
+            _add_code_findings(extension_id, version, rel, text, findings, capabilities)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(
                 extension_id,
