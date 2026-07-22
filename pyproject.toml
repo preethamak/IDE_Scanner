@@ -1,20 +1,37 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "ide-scanner"
+name = "guardlens-core"
 version = "0.1.0"
-description = "Evidence-first VS Code extension security scanner."
+description = "Canonical extension analysis engine for Guardrails Local Scan."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "preethamak" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+]
 
 [project.optional-dependencies]
 semgrep = ["semgrep>=1.100,<2"]
 yara = ["yara-python>=4.5,<5"]
 analysis = ["semgrep>=1.100,<2", "yara-python>=4.5,<5"]
 
-[project.scripts]
-ide-scanner = "ide_scanner.cli:main"
-ide-scanner-service = "ide_scanner.service:main"
-scan = "extension_scanner_cli.main:main"
+[project.urls]
+Homepage = "https://github.com/preethamak/IDE_Scanner"
+Repository = "https://github.com/preethamak/IDE_Scanner"
+Issues = "https://github.com/preethamak/IDE_Scanner/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ide_scanner*"]
 
 [tool.setuptools.package-data]
 ide_scanner = ["js_ast/*.js", "js_ast/*LICENSE*"]
