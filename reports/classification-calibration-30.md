@@ -39,6 +39,20 @@ than forced.
 | 1-clean | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 8 A/I, 11 A/L, 1 R/L, 10 incomplete | Fresh isolated scan. Ten large artifacts exceeded the JavaScript AST provider's fixed eight-second per-file timeout; this is a coverage defect, not a classification result. |
 | 2-selected | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 1 A/I, 6 A/L, 4 R/L, 1 B/H | Reran the ten prior AST failures plus Code Runner with the corrected AST resource boundary. All 11 completed; Code Runner matched the exact hash-pinned advisory snapshot with malware score zero. |
 | 2-full | local container | `2026.07.22-policy-v3-calibration.1` | `3.0.0-calibration.1` | 8 A/I, 16 A/L, 5 R/L, 1 B/H | All 30 completed. Review/Low is entirely the general unattributed-binary provenance gate. No Review/Medium result was supported. |
+| 3-full-rejected | local container | `2026.07.22-policy-v3-calibration.3` | `3.0.0-calibration.3` | 14 A/I, 9 A/L, 3 R/L, 4 B/H | Rejected. File-local proximity inside generated bundles falsely blocked Continue, Copilot, and Copilot Chat. Paired benign/malicious controls replaced this with same-variable/high-specificity generated-flow handling. |
+| 4-classification | image `7e8d058cdb4a…` | `2026.07.22-policy-v3-calibration.5` | `3.0.0-calibration.3` | 15 A/I, 10 A/L, 4 R/L, 1 B/H | Accepted classification semantics. All 30 completed. The three generated-bundle false blocks disappeared while the direct malicious-flow control and exact Code Runner advisory still fired. Superseded for publication only because raw JSON did not yet embed the image identity. |
+| 5-final | image `2356416992f9…` | `2026.07.22-policy-v3-calibration.5` | `3.0.0-calibration.3` | 15 A/I, 10 A/L, 4 R/L, 1 B/H | Accepted. Two independent, network-disabled runs completed all 30 artifacts and produced the same normalized security-field digest. Raw reports embed the immutable image identity and advisory snapshot `2026-07-22.2`. |
+
+Final reproducibility digest:
+`aada621572d2502063cb7a5973f9cfe3c5de701eb3192cc322e67124b241d248`.
+The normalization includes artifact identity, coverage, capabilities, findings,
+scores, status, severity, decision, scanner build, ruleset, policy, and
+intelligence snapshot; it excludes only scan IDs and timestamps.
+
+The final distribution deliberately differs from the provisional hypothesis.
+No `Review/Medium` label survived source-level adjudication, and one native
+artifact set had sufficient package origin. Forcing the requested counts would
+have introduced unsupported review decisions.
 
 Coverage follow-up: the largest failing entrypoint (`Continue.continue`, about
 56 MiB) was measured independently. It exhausted Node's default heap, but
@@ -63,41 +77,41 @@ to a general minified-bundle threshold regression, not an artifact exception.
 
 ## Artifact adjudication ledger
 
-`Candidate` is a hypothesis pending source-level evidence review. It must not be
-used as a scanner fixture or extension-specific exception.
+`Final` records the evidence-supported calibration result. It is documentation,
+not a scanner fixture or extension-specific exception.
 
-| Exact artifact | Baseline | Candidate | Primary question |
+| Exact artifact | Baseline | Final | Adjudication basis |
 |---|---|---|---|
-| `PKief.material-icon-theme@5.36.1` | Allow/Info | Allow/Info | Context-only theme package? |
-| `esbenp.prettier-vscode@12.4.0` | Allow/Info | Allow/Info | No decision-relevant path? |
-| `usernamehw.errorlens@3.28.0` | Allow/Info | Allow/Info | No decision-relevant path? |
-| `dbaeumer.vscode-eslint@3.0.33` | Review/Medium | Allow/Info | Process and lifecycle behavior only? |
-| `ms-python.python@2026.5.2026070801` | Review/Medium | Allow/Info | Agent and process observations only? |
-| `golang.go@0.56.0` | Review/Medium | Allow/Info | Configured tool execution only? |
-| `redhat.java@1.56.2026071508` | Review/Medium | Allow/Info | Shell/process observations lack untrusted flow? |
-| `rust-lang.rust-analyzer@0.4.2976` | Review/Medium | Allow/Info | Configured tool execution only? |
-| `ms-vscode-remote.remote-ssh@0.125.2026062315` | Review/Medium | Allow/Info | SSH and lifecycle behavior expected, with no abuse path? |
-| `ms-azuretools.vscode-docker@2.0.0` | Allow/Info | Allow/Info | Declarative extension pack remains clear? |
-| `ms-vscode.azure-account@0.13.0` | Review/Medium | Allow/Info | Authentication command surface only? |
-| `SonarSource.sonarlint-vscode@5.5.0` | Review/Medium | Allow/Info | Packed tooling and agent surfaces only? |
-| `eamodio.gitlens@2026.7.160544` | Review/Medium | Allow/Low | Concrete low hardening concern? |
-| `ritwickdey.LiveServer@5.7.10` | Review/Medium | Allow/Low | Exact version fixed; remaining provenance note low? |
-| `humao.rest-client@0.25.1` | Review/Medium | Allow/Low | Credential UI and network are expected; CSP note low? |
-| `ms-vscode-remote.remote-containers@0.467.0` | Review/Medium | Allow/Low | Lifecycle and credential surfaces lack unsafe flow? |
-| `ms-kubernetes-tools.vscode-kubernetes-tools@1.4.0` | Review/Medium | Allow/Low | Repository workflow/CSP notes are low? |
-| `amazonwebservices.aws-toolkit-vscode@4.10.0` | Review/Medium | Allow/Low | Credential use expected; CSP/dependency notes low? |
-| `GitHub.vscode-pull-request-github@0.159.2026071604` | Review/Medium | Allow/Low | Agent surfaces expected; CSP note low? |
-| `ms-vscode.cpptools@1.33.4` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review? |
-| `GitHub.copilot@1.388.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review? |
-| `Continue.continue@2.1.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review? |
-| `Semgrep.semgrep@1.17.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review? |
-| `snyk-security.snyk-vulnerability-scanner@2.31.0` | Review/Medium | Review/Low | Lifecycle/credential evidence exceeds a low note? |
-| `mhutchie.git-graph@1.30.0` | Review/Medium | Review/Medium | Is config/credential input connected to shell execution? |
-| `GitHub.copilot-chat@0.48.1` | Review/Medium | Review/Medium | Is there an untrusted prompt/tool boundary, not just agent power? |
-| `saoudrizwan.claude-dev@4.0.8` | Review/Medium | Review/Medium | Is credential/file input connected to a sensitive sink? |
-| `RooVeterinaryInc.roo-cline@3.54.0` | Review/Medium | Review/Medium | Is sensitive file access connected to a sink? |
-| `AquaSecurityOfficial.trivy-vulnerability-scanner@1.8.11` | Review/High | Review/Medium | Is credential configuration mutation expected and bounded? |
-| `formulahendry.code-runner@0.12.2` | Review/Medium | Block/High | Exact affected artifact and authoritative CVE match? |
+| `PKief.material-icon-theme@5.36.1` | Allow/Info | Allow/Info | Theme capabilities are contextual; no actionable evidence. |
+| `esbenp.prettier-vscode@12.4.0` | Allow/Info | Allow/Info | No actionable evidence. |
+| `usernamehw.errorlens@3.28.0` | Allow/Info | Allow/Info | No actionable evidence. |
+| `dbaeumer.vscode-eslint@3.0.33` | Review/Medium | Allow/Info | Process and lifecycle behavior is expected capability context. |
+| `ms-python.python@2026.5.2026070801` | Review/Medium | Allow/Info | Agent and process observations are capability context. |
+| `golang.go@0.56.0` | Review/Medium | Allow/Low | Mutable dependency source remains a concrete low supply-chain note. |
+| `redhat.java@1.56.2026071508` | Review/Medium | Allow/Info | Shell/process observations lack an untrusted source-to-sink flow. |
+| `rust-lang.rust-analyzer@0.4.2976` | Review/Medium | Allow/Info | Configured tool execution is capability context. |
+| `ms-vscode-remote.remote-ssh@0.125.2026062315` | Review/Medium | Allow/Info | SSH and lifecycle behavior is expected; no abuse path was established. |
+| `ms-azuretools.vscode-docker@2.0.0` | Allow/Info | Allow/Info | Declarative extension-pack metadata has no actionable evidence. |
+| `ms-vscode.azure-account@0.13.0` | Review/Medium | Allow/Info | Authentication command surfaces are capability context. |
+| `SonarSource.sonarlint-vscode@5.5.0` | Review/Medium | Allow/Info | Packed tooling presence is capability context without an origin discrepancy. |
+| `eamodio.gitlens@2026.7.160544` | Review/Medium | Allow/Low | Mutable dependency sources remain a concrete low supply-chain note. |
+| `ritwickdey.LiveServer@5.7.10` | Review/Medium | Allow/Low | Package-attributable native code is contextual; mutable dependency and repository-binary posture remain low. |
+| `humao.rest-client@0.25.1` | Review/Medium | Allow/Low | Credential UI and network use is expected; an unsafe webview CSP directive remains low. |
+| `ms-vscode-remote.remote-containers@0.467.0` | Review/Medium | Allow/Low | Mutable dependency sources remain low; lifecycle and credential surfaces lack an unsafe flow. |
+| `ms-kubernetes-tools.vscode-kubernetes-tools@1.4.0` | Review/Medium | Allow/Low | Dangerous workflow triggers and broad token permissions are low repository hardening notes. |
+| `amazonwebservices.aws-toolkit-vscode@4.10.0` | Review/Medium | Allow/Low | Credential use is expected; mutable dependency sources remain low. |
+| `GitHub.vscode-pull-request-github@0.159.2026071604` | Review/Medium | Allow/Info | Agent surfaces are expected and generated-bundle CSP text has no actionable path. |
+| `ms-vscode.cpptools@1.33.4` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
+| `GitHub.copilot@1.388.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
+| `Continue.continue@2.1.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
+| `Semgrep.semgrep@1.17.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
+| `snyk-security.snyk-vulnerability-scanner@2.31.0` | Review/Medium | Allow/Low | Missing webview CSP remains a low hardening note; credential command surfaces are contextual. |
+| `mhutchie.git-graph@1.30.0` | Review/Medium | Allow/Low | Git askpass is bounded and expected; the unsafe CSP directive remains a low hardening note. |
+| `GitHub.copilot-chat@0.48.1` | Review/Medium | Allow/Info | Manifest-declared agent tooling is capability context; no unsafe prompt-to-tool flow was established. |
+| `saoudrizwan.claude-dev@4.0.8` | Review/Medium | Allow/Info | The credential-file hit was `.vscodeignore`; no sensitive source-to-sink flow was established. |
+| `RooVeterinaryInc.roo-cline@3.54.0` | Review/Medium | Allow/Low | SSH-key text was weak context; mutable dependency sources remain a low note. |
+| `AquaSecurityOfficial.trivy-vulnerability-scanner@1.8.11` | Review/High | Allow/Info | The credential update crossed neighboring minified calls; balanced-call parsing removed it. |
+| `formulahendry.code-runner@0.12.2` | Review/Medium | Block/High | Exact affected version and artifact hash match the versioned authoritative advisory snapshot. |
 
 ## Required gates
 
