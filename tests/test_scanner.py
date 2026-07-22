@@ -197,6 +197,15 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("credential-exfiltration-chain", suspicious["top_findings"])
 
         detail = bundle["extensions"][suspicious["detail_ref"]]
+        raw = next(item for item in report["extensions"] if item["extension_id"] == "unknown.shadow-helper")
+        for field in ("analysis_status", "decision", "severity", "risk_score", "malware_score"):
+            self.assertEqual(detail[field], raw[field], msg=f"canonical field diverged: {field}")
+        self.assertEqual(detail["artifact_identity"]["sha256"], raw["artifact_identity"]["sha256"])
+        raw_findings = {item["finding_id"]: item for item in raw["findings"]}
+        detail_findings = {item["finding_id"]: item for item in detail["findings"]}
+        for finding_id in raw_findings.keys() & detail_findings.keys():
+            for field in ("evidence_class", "actionability", "effective_severity"):
+                self.assertEqual(detail_findings[finding_id][field], raw_findings[finding_id][field])
         self.assertEqual(detail["extension_id"], "unknown.shadow-helper")
         self.assertIn("score_explanation", detail)
         self.assertIn("recommendations", detail)

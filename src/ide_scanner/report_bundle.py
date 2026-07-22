@@ -391,10 +391,7 @@ def _context_score(extension: ExtensionReport) -> int:
 
 
 def _finding_actionability(finding: Any) -> str:
-    actionability = finding_actionability(finding)
-    if actionability == "review" and _finding_evidence_class(finding) in {"correlated", "observed"}:
-        return "investigate"
-    return actionability
+    return finding_actionability(finding)
 
 
 def _finding_evidence_class(finding: Any) -> str:
