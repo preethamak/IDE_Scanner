@@ -182,6 +182,8 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
         self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.3")
+        self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
+        self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
         self.assertEqual(bundle["summary"]["summary"]["suspicious"], 2)
         self.assertIn("rules", bundle["rules"])

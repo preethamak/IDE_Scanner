@@ -128,14 +128,14 @@ def _metadata(report: dict[str, Any], extensions: list[ExtensionReport], *, prof
         scan_id=scan_id,
         created_at=created_at,
         scanner_version=_scanner_version(),
-        ruleset_version=RULESET_VERSION,
+        ruleset_version=str(report.get("ruleset_version") or RULESET_VERSION),
         profile=profile,
         source=source,
         total_extensions=len(extensions),
         completed_extensions=len(extensions) - incomplete,
         incomplete_extensions=incomplete,
-        scanner_build=_scanner_build(),
-        policy_version=POLICY_VERSION,
+        scanner_build=str(report.get("scanner_build") or _scanner_build()),
+        policy_version=str(report.get("policy_version") or POLICY_VERSION),
         intelligence_snapshot=dict(report.get("intelligence") or {}),
     )
 

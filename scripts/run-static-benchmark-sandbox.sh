@@ -29,6 +29,7 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Build it first with scripts/build-static-benchmark-image.sh" >&2
   exit 69
 fi
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
 
 mkdir -p "$RESULTS"
 # The unprivileged container user needs to write a report. Artifacts remain
@@ -43,6 +44,7 @@ exec docker run --rm \
   --pids-limit 128 \
   --memory 3g \
   --cpus 1.0 \
+  --env "IDE_SCANNER_BUILD_SHA=$IMAGE_ID" \
   --user 65534:65534 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m \
   --mount "type=bind,src=$ARTIFACTS,dst=/input,readonly" \

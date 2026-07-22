@@ -19,6 +19,7 @@ from .ast_analyzer import (
     node_available,
 )
 from .classification_policy import (
+    POLICY_VERSION,
     effective_finding_severity,
     finding_actionability,
     is_decision_relevant,
@@ -28,6 +29,7 @@ from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
 from .public_outcomes import apply_public_assessment
+from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
 from .providers import run_static_providers
 from .registry import (
@@ -2359,6 +2361,9 @@ def _build_report(
         "schema_version": "0.1.0",
         "scan_id": f"scan_{now.strftime('%Y%m%d%H%M%S')}",
         "created_at": now.isoformat().replace("+00:00", "Z"),
+        "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
+        "ruleset_version": RULESET_VERSION,
+        "policy_version": POLICY_VERSION,
         "privacy_mode": "local-metadata-and-static-features",
         "registry_checks": registry,
         "intelligence": dict(intelligence or {}),
