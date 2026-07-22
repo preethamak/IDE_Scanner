@@ -338,7 +338,18 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     _add_artifact_inventory_findings(extension_id, version, artifact_inventory, known_bad_hashes or {}, findings, capabilities, path)
     _add_repository_posture_findings(extension_id, version, manifest, path, findings, artifact_inventory)
 
-    for file in files:
+    # Analyze declared activation paths first. Besides making the security-
+    # critical path explicit, this prevents hundreds of auxiliary-file
+    # findings from consuming the memory headroom needed by AST analysis of a
+    # large bundled entrypoint. Inventory order remains untouched.
+    analysis_files = sorted(
+        files,
+        key=lambda candidate: (
+            candidate.relative_to(path).as_posix() not in entrypoints,
+            candidate.relative_to(path).as_posix(),
+        ),
+    )
+    for file in analysis_files:
         rel = file.relative_to(path).as_posix()
         suffix = file.suffix.lower()
         is_entrypoint = rel in entrypoints
