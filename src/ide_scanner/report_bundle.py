@@ -644,9 +644,9 @@ def _sorted_counts(counts: dict[str, int]) -> dict[str, int]:
 
 def _scanner_version() -> str:
     try:
-        return version("ide-scanner")
+        return version("guardlens-core")
     except PackageNotFoundError:
-        return "0.1.0"
+        return "unknown"
 
 
 def _scanner_build() -> str:

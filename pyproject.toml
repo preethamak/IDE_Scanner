@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guardlens-core"
-version = "0.1.1"
+version = "0.2.0"
 description = "Proprietary scanner runtime for Guardrails CLI."
 requires-python = ">=3.11"
 readme = "PYPI_README.md"
