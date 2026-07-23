@@ -74,7 +74,7 @@ jobs:
           IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT: 180
         run: |
           semgrep --validate --config rules/semgrep/vscode-security.yml
-          ide-scanner scan \
+          python -m ide_scanner scan \
             --extension-id '${{ steps.claim.outputs.extension_id }}' \
             --version '${{ steps.claim.outputs.version }}' \
             --profile deep \
