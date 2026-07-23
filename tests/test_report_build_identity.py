@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from importlib.metadata import version
-
 from ide_scanner.report_bundle import build_report_bundle
 
 
-def test_bundle_records_installed_core_distribution_version():
+def test_bundle_records_installed_core_distribution_version(monkeypatch):
+    monkeypatch.setattr("ide_scanner.report_bundle.version", lambda name: "0.2.0" if name == "guardlens-core" else "unexpected")
     bundle = build_report_bundle({"extensions": []})
-    assert bundle["metadata"]["scanner_version"] == version("guardlens-core")
+    assert bundle["metadata"]["scanner_version"] == "0.2.0"
 
 
 def test_bundle_records_ci_build_identity(monkeypatch):

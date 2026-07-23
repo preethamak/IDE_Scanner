@@ -15,6 +15,8 @@ def test_weak_encoded_execution_does_not_become_malware_or_overall_high() -> Non
 
     verdict, _, _, severity, malware_score, _, _ = _classify_findings([weak_high, dependency])
 
-    assert verdict == "review"
-    assert severity == "MEDIUM"
+    # Neither signal is actionable: the encoded-execution match is weak
+    # co-occurrence evidence and the dependency advisory is not exact.
+    assert verdict == "clean"
+    assert severity == "INFO"
     assert malware_score == 0
