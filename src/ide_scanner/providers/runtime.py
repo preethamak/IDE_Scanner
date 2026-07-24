@@ -110,47 +110,29 @@ def yara_diagnostic() -> dict[str, Any]:
 def _probe_semgrep(status: dict[str, Any]) -> None:
     if status["status"] != "available":
         return
-    probe_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            prefix="guardrails-semgrep-probe-",
-            suffix=".js",
-            delete=False,
-        ) as probe:
-            probe.write("const guardrailsProbe = true;\n")
-            probe_path = Path(probe.name)
         with semgrep_runtime_environment() as environment:
             result = subprocess.run(
                 [
                     str(status["executable"]),
                     "scan",
-                    *semgrep_config_arguments(),
-                    "--json",
-                    "--metrics",
-                    "off",
                     "--disable-version-check",
-                    "--no-git-ignore",
-                    "--jobs",
-                    "1",
-                    str(probe_path),
+                    "--version",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=semgrep_timeout_seconds(),
+                timeout=min(semgrep_timeout_seconds(), 20),
                 check=False,
                 env=environment,
             )
     except (OSError, subprocess.SubprocessError) as exc:
         status.update({"status": "failed", "error": str(exc)})
         return
-    finally:
-        if probe_path is not None:
-            probe_path.unlink(missing_ok=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
-        status.update({"status": "failed", "error": detail[:500] or "Semgrep rule validation failed"})
+        status.update({"status": "failed", "error": detail[:500] or "Semgrep startup probe failed"})
+        return
+    status["version"] = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "unknown"
 
 
 def _probe_yara(status: dict[str, Any]) -> None:

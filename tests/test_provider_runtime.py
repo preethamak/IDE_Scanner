@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from ide_scanner.providers.runtime import (
     SEMGREP_RULES,
@@ -73,3 +74,26 @@ def test_semgrep_timeout_is_bounded(monkeypatch) -> None:
     assert semgrep_timeout_seconds() == 600
     monkeypatch.setenv("GUARDRAILS_SEMGREP_TIMEOUT", "invalid")
     assert semgrep_timeout_seconds() == 90
+
+
+def test_semgrep_probe_is_a_fast_offline_version_check(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["timeout"] = kwargs["timeout"]
+        return SimpleNamespace(returncode=0, stdout="1.171.0\n", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+    diagnostic = {"status": "available", "executable": "/env/bin/semgrep"}
+
+    runtime._probe_semgrep(diagnostic)
+
+    assert observed["command"] == [
+        "/env/bin/semgrep",
+        "scan",
+        "--disable-version-check",
+        "--version",
+    ]
+    assert observed["timeout"] == 20
+    assert diagnostic["version"] == "1.171.0"
