@@ -34,7 +34,13 @@ where = ["src"]
 include = ["ide_scanner*"]
 
 [tool.setuptools.package-data]
-ide_scanner = ["js_ast/*.js", "js_ast/*LICENSE*", "intelligence/*.json"]
+ide_scanner = [
+  "intelligence/*.json",
+  "js_ast/*.js",
+  "js_ast/*LICENSE*",
+  "provider_rules/semgrep/*.yml",
+  "provider_rules/yara/*.yar",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
