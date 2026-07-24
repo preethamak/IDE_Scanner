@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 import zipfile
@@ -217,6 +218,33 @@ class ProviderStatusTests(unittest.TestCase):
 
 
 class CoverageHonestyTests(unittest.TestCase):
+    def test_incomplete_analysis_never_publishes_an_approval_decision(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "known-bad", "version": "1.0.0"},
+                source="known bad payload",
+            )
+            digest = hashlib.sha256((root / "extension.js").read_bytes()).hexdigest()
+            providers = (
+                [],
+                {
+                    "semgrep": {"provider": "semgrep", "status": "failed", "required": True},
+                    "yara": {"provider": "yara", "status": "completed", "required": True},
+                },
+            )
+            with patch("ide_scanner.scanner.run_static_providers", return_value=providers):
+                report = scan_extension(
+                    root,
+                    known_bad_hashes={
+                        digest: {"source": "unit-test", "classification": "malware"},
+                    },
+                )
+        self.assertEqual(report.verdict, "malicious")
+        self.assertEqual(report.analysis_status, "incomplete")
+        self.assertEqual(report.decision, "incomplete")
+
     def test_readme_preview_is_captured_without_treating_it_as_executable_code(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -230,7 +258,9 @@ class CoverageHonestyTests(unittest.TestCase):
             )
             report = scan_extension(root)
         previews = report.artifact_inventory["source_previews"]
-        self.assertEqual([item["path"] for item in previews if item["path"] == "README.md"], ["README.md"])
+        readme_preview = next(item for item in previews if item["path"] == "README.md")
+        readme_file = next(item for item in report.artifact_inventory["_all_file_hashes"] if item["path"] == "README.md")
+        self.assertEqual(readme_preview["content_sha256"], readme_file["sha256"])
         self.assertNotIn("README.md", report.analysis_coverage["executable_candidates"])
         self.assertFalse(any("README.md" in finding.file_refs for finding in report.findings))
 
