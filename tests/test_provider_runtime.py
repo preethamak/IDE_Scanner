@@ -57,6 +57,37 @@ def test_provider_is_unavailable_when_bundled_rules_are_missing(monkeypatch, tmp
     assert "rules" in diagnostic["error"].lower()
 
 
+def test_provider_diagnostics_record_exact_runtime_versions(monkeypatch, tmp_path: Path) -> None:
+    semgrep = tmp_path / "semgrep"
+    yara = tmp_path / "yara"
+    semgrep.write_text("", encoding="utf-8")
+    yara.write_text("", encoding="utf-8")
+    semgrep.chmod(0o755)
+    yara.chmod(0o755)
+
+    monkeypatch.setattr(
+        runtime,
+        "find_runtime_executable",
+        lambda name: str(semgrep if name == "semgrep" else yara),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "run_bounded_process",
+        lambda command, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="1.164.0\n" if "semgrep" in command[0] else "4.5.4\n",
+            stderr="",
+        ),
+    )
+    runtime._semgrep_runtime_version.cache_clear()
+    runtime._yara_runtime_version.cache_clear()
+
+    diagnostics = provider_diagnostics()
+
+    assert diagnostics["semgrep"]["version"] == "1.164.0"
+    assert diagnostics["yara"]["version"] == "4.5.4"
+
+
 def test_semgrep_invocations_use_isolated_temporary_state() -> None:
     with semgrep_runtime_environment() as first:
         first_settings = Path(first["SEMGREP_SETTINGS_FILE"])
@@ -88,6 +119,7 @@ def test_semgrep_probe_is_a_fast_offline_version_check(monkeypatch) -> None:
         return SimpleNamespace(returncode=0, stdout="1.171.0\n", stderr="")
 
     monkeypatch.setattr(runtime, "run_bounded_process", fake_run)
+    runtime._semgrep_runtime_version.cache_clear()
     diagnostic = {"status": "available", "executable": "/env/bin/semgrep"}
 
     runtime._probe_semgrep(diagnostic)
