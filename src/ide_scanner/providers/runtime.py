@@ -7,8 +7,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -23,13 +24,17 @@ def find_runtime_executable(name: str) -> str | None:
     return adjacent or shutil.which(name)
 
 
-def semgrep_environment() -> dict[str, str]:
+@contextmanager
+def semgrep_runtime_environment() -> Iterator[dict[str, str]]:
+    runtime_dir = Path(tempfile.mkdtemp(prefix="guardrails-semgrep-"))
     environment = os.environ.copy()
-    temporary = Path(tempfile.gettempdir())
-    environment["SEMGREP_SETTINGS_FILE"] = str(temporary / "guardrails-semgrep-settings.yml")
-    environment["SEMGREP_LOG_FILE"] = str(temporary / "guardrails-semgrep.log")
+    environment["SEMGREP_SETTINGS_FILE"] = str(runtime_dir / "settings.yml")
+    environment["SEMGREP_LOG_FILE"] = str(runtime_dir / "semgrep.log")
     environment["SEMGREP_SEND_METRICS"] = "off"
-    return environment
+    try:
+        yield environment
+    finally:
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 def semgrep_config_arguments() -> list[str]:
@@ -108,24 +113,25 @@ def _probe_semgrep(status: dict[str, Any]) -> None:
         ) as probe:
             probe.write("const guardrailsProbe = true;\n")
             probe_path = Path(probe.name)
-        result = subprocess.run(
-            [
-                str(status["executable"]),
-                "scan",
-                *semgrep_config_arguments(),
-                "--json",
-                "--metrics",
-                "off",
-                "--disable-version-check",
-                "--no-git-ignore",
-                str(probe_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-            env=semgrep_environment(),
-        )
+        with semgrep_runtime_environment() as environment:
+            result = subprocess.run(
+                [
+                    str(status["executable"]),
+                    "scan",
+                    *semgrep_config_arguments(),
+                    "--json",
+                    "--metrics",
+                    "off",
+                    "--disable-version-check",
+                    "--no-git-ignore",
+                    str(probe_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env=environment,
+            )
     except (OSError, subprocess.SubprocessError) as exc:
         status.update({"status": "failed", "error": str(exc)})
         return

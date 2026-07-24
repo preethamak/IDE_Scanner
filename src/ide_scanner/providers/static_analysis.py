@@ -13,7 +13,7 @@ from .runtime import (
     YARA_RULES,
     semgrep_config_arguments,
     semgrep_diagnostic,
-    semgrep_environment,
+    semgrep_runtime_environment,
     yara_diagnostic,
 )
 
@@ -87,14 +87,15 @@ def _run_semgrep(
         *(str(path) for path in selected),
     ]
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-            env=semgrep_environment(),
-        )
+        with semgrep_runtime_environment() as environment:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env=environment,
+            )
         payload = json.loads(result.stdout or "{}")
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         status.update({"status": "failed", "error": str(exc)})

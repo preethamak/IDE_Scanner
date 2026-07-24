@@ -10,6 +10,7 @@ from ide_scanner.providers.runtime import (
     find_runtime_executable,
     provider_diagnostics,
     semgrep_config_arguments,
+    semgrep_runtime_environment,
 )
 from ide_scanner.providers import runtime
 
@@ -49,3 +50,16 @@ def test_provider_is_unavailable_when_bundled_rules_are_missing(monkeypatch, tmp
     assert diagnostic["status"] == "unavailable"
     assert diagnostic["ruleset_hash"] == ""
     assert "rules" in diagnostic["error"].lower()
+
+
+def test_semgrep_invocations_use_isolated_temporary_state() -> None:
+    with semgrep_runtime_environment() as first:
+        first_settings = Path(first["SEMGREP_SETTINGS_FILE"])
+        first_root = first_settings.parent
+        assert first_root.is_dir()
+    with semgrep_runtime_environment() as second:
+        second_settings = Path(second["SEMGREP_SETTINGS_FILE"])
+        assert second_settings.parent != first_root
+
+    assert not first_root.exists()
+    assert not second_settings.parent.exists()
