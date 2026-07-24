@@ -655,7 +655,13 @@ class ScannerTests(unittest.TestCase):
                 "category": "dependency",
                 "rule_id": "vulnerable-npm-dependency",
                 "evidence_summary": "example@1.0.0 has 1 OSV finding(s). Version match: exact.",
-                "evidence": {"package": "example", "version": "1.0.0", "exact": True, "osv_ids": ["GHSA-test"]},
+                "evidence": {
+                    "package": "example",
+                    "version": "1.0.0",
+                    "exact": True,
+                    "osv_ids": ["GHSA-test"],
+                    "rating_average": 5.0,
+                },
             }],
             "errors": [],
         }
@@ -678,6 +684,7 @@ class ScannerTests(unittest.TestCase):
         )
         self.assertEqual(live["intelligence"]["registry"]["sha256"], replay["intelligence"]["registry"]["sha256"])
         self.assertEqual(replay["intelligence"]["registry"]["source"], "replay")
+        self.assertEqual(live["intelligence"]["registry"]["payload"]["findings"][0]["evidence"]["rating_average"], 5)
 
     def test_registry_snapshot_rejects_tampered_contents(self) -> None:
         with TemporaryDirectory() as tmp:
