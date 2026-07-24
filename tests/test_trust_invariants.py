@@ -379,6 +379,22 @@ class InventoryIsolationTests(unittest.TestCase):
 
 
 class VsixArchiveHardeningTests(unittest.TestCase):
+    def test_vsix_instance_identity_is_stable_across_extractions(self) -> None:
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "stable.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr(
+                    "extension/package.json",
+                    '{"publisher":"e","name":"stable","version":"1.0.0","main":"extension.js"}',
+                )
+                archive.writestr("extension/extension.js", "exports.activate = () => {};")
+
+            first = scan_vsix(vsix)
+            second = scan_vsix(vsix)
+
+        self.assertEqual(first.instance_id, second.instance_id)
+        self.assertEqual(first.artifact_hash, second.artifact_hash)
+
     def _write_symlink_member(self, archive: zipfile.ZipFile, name: str, target: str) -> None:
         info = zipfile.ZipInfo(name)
         info.external_attr = (0o120777 << 16)  # symlink mode

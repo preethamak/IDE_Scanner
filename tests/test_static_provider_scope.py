@@ -9,10 +9,28 @@ from ide_scanner.providers.static_analysis import (
     _has_valid_embedded_pe,
     _ignore_yara_match,
     _resolved_targets,
+    _semgrep_diagnostic_text,
 )
 
 
 class StaticProviderScopeTests(unittest.TestCase):
+    def test_semgrep_diagnostics_are_bounded_and_machine_independent(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "random-extraction"
+            root.mkdir()
+            message = (
+                "Timeout when running host.checkout.rules."
+                f"credential-dataflow-to-network on {root}/extension.js:\n"
+                + "x" * 2_000
+            )
+
+            sanitized = _semgrep_diagnostic_text(message, root)
+
+        self.assertEqual(len(sanitized), 500)
+        self.assertNotIn(str(root), sanitized)
+        self.assertNotIn("host.checkout.rules", sanitized)
+        self.assertIn("credential-dataflow-to-network", sanitized)
+
     def test_targets_cannot_escape_artifact_root(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
