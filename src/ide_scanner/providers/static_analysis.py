@@ -10,8 +10,8 @@ from typing import Any
 from ..models import Finding
 from ..rules import score_finding
 from .runtime import (
-    SEMGREP_RULES,
     YARA_RULES,
+    semgrep_config_arguments,
     semgrep_diagnostic,
     semgrep_environment,
     yara_diagnostic,
@@ -78,7 +78,7 @@ def _run_semgrep(
     command = [
         executable,
         "scan",
-        "--config", str(SEMGREP_RULES),
+        *semgrep_config_arguments(),
         "--json",
         "--metrics", "off",
         "--disable-version-check",

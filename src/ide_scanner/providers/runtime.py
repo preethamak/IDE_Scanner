@@ -32,6 +32,17 @@ def semgrep_environment() -> dict[str, str]:
     return environment
 
 
+def semgrep_config_arguments() -> list[str]:
+    """Return explicit local rule paths so Semgrep never resolves a registry alias."""
+    rules = sorted(
+        path
+        for pattern in ("*.yml", "*.yaml")
+        for path in SEMGREP_RULES.rglob(pattern)
+        if path.is_file()
+    )
+    return [value for path in rules for value in ("--config", str(path))]
+
+
 def provider_diagnostics(*, probe: bool = False) -> dict[str, dict[str, Any]]:
     diagnostics = {
         "semgrep": semgrep_diagnostic(),
@@ -86,16 +97,28 @@ def yara_diagnostic() -> dict[str, Any]:
 def _probe_semgrep(status: dict[str, Any]) -> None:
     if status["status"] != "available":
         return
+    probe_path: Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix="guardrails-semgrep-probe-",
+            suffix=".js",
+            delete=False,
+        ) as probe:
+            probe.write("const guardrailsProbe = true;\n")
+            probe_path = Path(probe.name)
         result = subprocess.run(
             [
                 str(status["executable"]),
                 "scan",
-                "--validate",
-                "--config",
-                str(SEMGREP_RULES),
+                *semgrep_config_arguments(),
+                "--json",
                 "--metrics",
                 "off",
+                "--disable-version-check",
+                "--no-git-ignore",
+                str(probe_path),
             ],
             capture_output=True,
             text=True,
@@ -106,6 +129,9 @@ def _probe_semgrep(status: dict[str, Any]) -> None:
     except (OSError, subprocess.SubprocessError) as exc:
         status.update({"status": "failed", "error": str(exc)})
         return
+    finally:
+        if probe_path is not None:
+            probe_path.unlink(missing_ok=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         status.update({"status": "failed", "error": detail[:500] or "Semgrep rule validation failed"})

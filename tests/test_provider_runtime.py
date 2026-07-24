@@ -9,6 +9,7 @@ from ide_scanner.providers.runtime import (
     YARA_RULES,
     find_runtime_executable,
     provider_diagnostics,
+    semgrep_config_arguments,
 )
 from ide_scanner.providers import runtime
 
@@ -19,6 +20,9 @@ def test_provider_rules_are_owned_by_the_python_package() -> None:
     diagnostics = provider_diagnostics()
     assert diagnostics["semgrep"]["ruleset_hash"]
     assert diagnostics["yara"]["ruleset_hash"]
+    arguments = semgrep_config_arguments()
+    assert arguments[::2] == ["--config"]
+    assert all(Path(path).is_file() for path in arguments[1::2])
 
 
 def test_runtime_executable_is_discovered_beside_python(monkeypatch, tmp_path: Path) -> None:
