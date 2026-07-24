@@ -43,4 +43,4 @@ ide_scanner = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
