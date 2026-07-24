@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +12,7 @@ from ide_scanner.providers.runtime import (
     YARA_RULES,
     find_runtime_executable,
     provider_diagnostics,
+    run_bounded_process,
     semgrep_config_arguments,
     semgrep_runtime_environment,
     semgrep_timeout_seconds,
@@ -84,7 +87,7 @@ def test_semgrep_probe_is_a_fast_offline_version_check(monkeypatch) -> None:
         observed["timeout"] = kwargs["timeout"]
         return SimpleNamespace(returncode=0, stdout="1.171.0\n", stderr="")
 
-    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(runtime, "run_bounded_process", fake_run)
     diagnostic = {"status": "available", "executable": "/env/bin/semgrep"}
 
     runtime._probe_semgrep(diagnostic)
@@ -97,3 +100,34 @@ def test_semgrep_probe_is_a_fast_offline_version_check(monkeypatch) -> None:
     ]
     assert observed["timeout"] == 20
     assert diagnostic["version"] == "1.171.0"
+
+
+def test_timeout_terminates_provider_process_group(tmp_path: Path) -> None:
+    if os.name != "posix":
+        return
+    child_pid_file = tmp_path / "child.pid"
+    child = (
+        "import os,time;"
+        f"open({str(child_pid_file)!r},'w').write(str(os.getpid()));"
+        "time.sleep(60)"
+    )
+    parent = (
+        "import subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}]);"
+        "time.sleep(60)"
+    )
+
+    try:
+        run_bounded_process([sys.executable, "-c", parent], timeout=0.5)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("provider process unexpectedly completed")
+
+    child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    proc_state = Path(f"/proc/{child_pid}/stat")
+    for _attempt in range(20):
+        if not proc_state.exists() or proc_state.read_text(encoding="utf-8").split()[2] == "Z":
+            break
+        time.sleep(0.05)
+    assert not proc_state.exists() or proc_state.read_text(encoding="utf-8").split()[2] == "Z"
