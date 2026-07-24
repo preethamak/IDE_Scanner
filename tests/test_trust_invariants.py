@@ -332,6 +332,25 @@ class BoundedReadTests(unittest.TestCase):
 
 
 class InventoryIsolationTests(unittest.TestCase):
+    def test_requested_deep_provider_failure_makes_result_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "deep", "version": "1.0.0", "main": "extension.js"},
+            )
+            report = scan_targets(
+                paths=[root],
+                required_providers={"dependency_intelligence"},
+            )
+
+        extension = report["extensions"][0]
+        provider = extension["analysis_coverage"]["providers"]["dependency_intelligence"]
+        self.assertTrue(provider["required"])
+        self.assertEqual(extension["analysis_status"], "incomplete")
+        self.assertEqual(extension["decision"], "incomplete")
+        self.assertIn("dependency_intelligence", extension["decision_reason"])
+
     def test_one_bad_extension_does_not_abort_inventory(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
