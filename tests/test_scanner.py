@@ -644,6 +644,53 @@ class ScannerTests(unittest.TestCase):
         self.assertGreater(formatter["risk_score"], 0)
         self.assertIn("vulnerable-npm-dependency", {finding["rule_id"] for finding in formatter["findings"]})
 
+    def test_registry_intelligence_can_be_replayed_without_network_drift(self) -> None:
+        registry = {
+            "enabled": True,
+            "mode": "batched",
+            "findings": [{
+                "extension_id": "trusted.trusted-formatter",
+                "severity": "HIGH",
+                "confidence": 0.82,
+                "category": "dependency",
+                "rule_id": "vulnerable-npm-dependency",
+                "evidence_summary": "example@1.0.0 has 1 OSV finding(s). Version match: exact.",
+                "evidence": {"package": "example", "version": "1.0.0", "exact": True, "osv_ids": ["GHSA-test"]},
+            }],
+            "errors": [],
+        }
+        with patch("ide_scanner.scanner.enrich_registry", return_value=registry):
+            live = scan_targets(include_fixtures=True, online=True)
+
+        with TemporaryDirectory() as tmp:
+            snapshot = Path(tmp) / "report.json"
+            snapshot.write_text(json.dumps(live), encoding="utf-8")
+            with patch("ide_scanner.scanner.enrich_registry", side_effect=AssertionError("network enrichment ran")):
+                replay = scan_targets(include_fixtures=True, online=False, registry_snapshot_file=snapshot)
+
+        live_by_id = {item["extension_id"]: item for item in live["extensions"]}
+        replay_by_id = {item["extension_id"]: item for item in replay["extensions"]}
+        self.assertEqual(
+            (live_by_id["trusted.trusted-formatter"]["decision"], live_by_id["trusted.trusted-formatter"]["severity"]),
+            (replay_by_id["trusted.trusted-formatter"]["decision"], replay_by_id["trusted.trusted-formatter"]["severity"]),
+        )
+        self.assertEqual(live["intelligence"]["registry"]["sha256"], replay["intelligence"]["registry"]["sha256"])
+        self.assertEqual(replay["intelligence"]["registry"]["source"], "replay")
+
+    def test_registry_snapshot_rejects_tampered_contents(self) -> None:
+        with TemporaryDirectory() as tmp:
+            snapshot = Path(tmp) / "registry.json"
+            snapshot.write_text(json.dumps({
+                "enabled": True,
+                "mode": "batched",
+                "findings": [],
+                "errors": [],
+                "snapshot": {"sha256": "0" * 64},
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "digest does not match"):
+                scan_targets(include_fixtures=True, registry_snapshot_file=snapshot)
+
     def test_registry_only_extension_id_can_be_marked_malicious(self) -> None:
         registry = {
             "enabled": True,
