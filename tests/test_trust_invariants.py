@@ -217,6 +217,23 @@ class ProviderStatusTests(unittest.TestCase):
 
 
 class CoverageHonestyTests(unittest.TestCase):
+    def test_readme_preview_is_captured_without_treating_it_as_executable_code(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "docs", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            (root / "README.md").write_text(
+                "# Documentation\n\nExample only: eval(Buffer.from('x')).",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+        previews = report.artifact_inventory["source_previews"]
+        self.assertEqual([item["path"] for item in previews if item["path"] == "README.md"], ["README.md"])
+        self.assertNotIn("README.md", report.analysis_coverage["executable_candidates"])
+        self.assertFalse(any("README.md" in finding.file_refs for finding in report.findings))
+
     def test_generated_only_extension_not_reported_complete(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -244,7 +261,34 @@ class CoverageHonestyTests(unittest.TestCase):
         }
         _finalize_analysis_coverage(coverage)
         self.assertEqual(coverage["coverage_percent"], 100)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 100)
+        self.assertTrue(coverage["required_providers_complete"])
         self.assertEqual(coverage["status"], "complete")
+
+    def test_file_coverage_does_not_claim_required_provider_completion(self) -> None:
+        coverage = {
+            "executable_candidates": ["extension.js"],
+            "analyzed_executable_files": ["extension.js"],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "providers": {
+                "semgrep": {
+                    "provider": "semgrep",
+                    "required": True,
+                    "status": "failed",
+                    "error": "timed out",
+                },
+            },
+            "manifest_validation": {"valid": True, "status": "valid"},
+        }
+        _finalize_analysis_coverage(coverage)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 100)
+        self.assertFalse(coverage["required_providers_complete"])
+        self.assertEqual(coverage["completed_required_providers"], [])
+        self.assertEqual(coverage["status"], "incomplete")
+        self.assertIn("Required provider semgrep did not complete", coverage["limitations"])
 
 
 class BoundedReadTests(unittest.TestCase):

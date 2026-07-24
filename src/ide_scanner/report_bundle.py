@@ -15,7 +15,7 @@ from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
 from .rule_registry import rules_json
 
-SCHEMA_VERSION = "2.2"
+SCHEMA_VERSION = "2.3"
 
 
 def build_report_bundle(

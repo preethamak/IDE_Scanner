@@ -178,7 +178,7 @@ class ScannerTests(unittest.TestCase):
         report = scan_targets(include_fixtures=True)
         bundle = build_report_bundle(report, profile="smart", source="fixtures")
 
-        self.assertEqual(bundle["metadata"]["schema_version"], "2.2")
+        self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
         self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.3")
