@@ -3,10 +3,10 @@ from __future__ import annotations
 from ide_scanner.report_bundle import build_report_bundle
 
 
-def test_bundle_records_installed_core_distribution_version(monkeypatch):
-    monkeypatch.setattr("ide_scanner.report_bundle.version", lambda name: "0.2.0" if name == "guardlens-core" else "unexpected")
+def test_bundle_records_guardlens_distribution_version(monkeypatch):
+    monkeypatch.setattr("ide_scanner.report_bundle.version", lambda name: "0.1.0" if name == "guardlens" else "unexpected")
     bundle = build_report_bundle({"extensions": []})
-    assert bundle["metadata"]["scanner_version"] == "0.2.0"
+    assert bundle["metadata"]["scanner_version"] == "0.1.0"
 
 
 def test_bundle_records_ci_build_identity(monkeypatch):
