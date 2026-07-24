@@ -1393,6 +1393,23 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "block")
         self.assertIn("dist/extension.js", report.analysis_coverage["analyzed_executable_files"])
 
+    def test_root_dist_chunks_are_excluded_without_hiding_the_entrypoint(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dist").mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"dist-bundle","version":"1.0.0","main":"dist/extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "dist" / "extension.js").write_text("exports.activate=()=>{};", encoding="utf-8")
+            (root / "dist" / "100.js").write_text("module.exports={};", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertIn("dist/extension.js", report.analysis_coverage["executable_candidates"])
+        self.assertIn("dist/100.js", report.analysis_coverage["excluded_generated_files"])
+        self.assertNotIn("dist/100.js", report.analysis_coverage["executable_candidates"])
+
     def test_executable_content_after_old_text_limit_is_analyzed(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
