@@ -132,6 +132,8 @@ def _probe_semgrep(status: dict[str, Any]) -> None:
                     "off",
                     "--disable-version-check",
                     "--no-git-ignore",
+                    "--jobs",
+                    "1",
                     str(probe_path),
                 ],
                 capture_output=True,

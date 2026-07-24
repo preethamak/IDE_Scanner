@@ -84,6 +84,7 @@ def _run_semgrep(
         "--metrics", "off",
         "--disable-version-check",
         "--no-git-ignore",
+        "--jobs", "1",
         "--max-target-bytes", str(10 * 1024 * 1024),
         *(str(path) for path in selected),
     ]
