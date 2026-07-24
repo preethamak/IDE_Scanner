@@ -665,7 +665,7 @@ class ScannerTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             snapshot = Path(tmp) / "report.json"
             snapshot.write_text(json.dumps({
-                "metadata": {"intelligence_snapshot": live["intelligence"]},
+                "scan": {"intelligence_snapshot": live["intelligence"]},
             }), encoding="utf-8")
             with patch("ide_scanner.scanner.enrich_registry", side_effect=AssertionError("network enrichment ran")):
                 replay = scan_targets(include_fixtures=True, online=False, registry_snapshot_file=snapshot)
