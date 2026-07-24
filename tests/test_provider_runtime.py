@@ -11,6 +11,7 @@ from ide_scanner.providers.runtime import (
     provider_diagnostics,
     semgrep_config_arguments,
     semgrep_runtime_environment,
+    semgrep_timeout_seconds,
 )
 from ide_scanner.providers import runtime
 
@@ -63,3 +64,12 @@ def test_semgrep_invocations_use_isolated_temporary_state() -> None:
 
     assert not first_root.exists()
     assert not second_settings.parent.exists()
+
+
+def test_semgrep_timeout_is_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("GUARDRAILS_SEMGREP_TIMEOUT", "1")
+    assert semgrep_timeout_seconds() == 15
+    monkeypatch.setenv("GUARDRAILS_SEMGREP_TIMEOUT", "9999")
+    assert semgrep_timeout_seconds() == 600
+    monkeypatch.setenv("GUARDRAILS_SEMGREP_TIMEOUT", "invalid")
+    assert semgrep_timeout_seconds() == 90

@@ -14,6 +14,7 @@ from .runtime import (
     semgrep_config_arguments,
     semgrep_diagnostic,
     semgrep_runtime_environment,
+    semgrep_timeout_seconds,
     yara_diagnostic,
 )
 
@@ -92,7 +93,7 @@ def _run_semgrep(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=semgrep_timeout_seconds(),
                 check=False,
                 env=environment,
             )

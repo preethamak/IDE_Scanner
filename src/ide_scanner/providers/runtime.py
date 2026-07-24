@@ -17,6 +17,14 @@ SEMGREP_RULES = _PACKAGE_ROOT / "provider_rules" / "semgrep"
 YARA_RULES = _PACKAGE_ROOT / "provider_rules" / "yara" / "ide-scanner.yar"
 
 
+def semgrep_timeout_seconds() -> int:
+    try:
+        configured = int(os.environ.get("GUARDRAILS_SEMGREP_TIMEOUT", "90"))
+    except ValueError:
+        configured = 90
+    return max(15, min(configured, 600))
+
+
 def find_runtime_executable(name: str) -> str | None:
     """Find a provider installed beside Guardrails before consulting global PATH."""
     environment_bin = Path(sys.executable).parent
@@ -128,7 +136,7 @@ def _probe_semgrep(status: dict[str, Any]) -> None:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=semgrep_timeout_seconds(),
                 check=False,
                 env=environment,
             )
