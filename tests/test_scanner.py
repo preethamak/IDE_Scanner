@@ -1403,12 +1403,21 @@ class ScannerTests(unittest.TestCase):
             )
             (root / "dist" / "extension.js").write_text("exports.activate=()=>{};", encoding="utf-8")
             (root / "dist" / "100.js").write_text("module.exports={};", encoding="utf-8")
+            (root / "types.d.ts").write_text("export interface Settings {};", encoding="utf-8")
+            (root / "webview-ui").mkdir()
+            (root / "webview-ui" / "build").mkdir()
+            (root / "webview-ui" / "build" / "assets").mkdir()
+            (root / "webview-ui" / "build" / "assets" / "chunk-ABC.js").write_text(
+                "module.exports={};",
+                encoding="utf-8",
+            )
 
             report = scan_extension(root)
 
         self.assertIn("dist/extension.js", report.analysis_coverage["executable_candidates"])
-        self.assertIn("dist/100.js", report.analysis_coverage["excluded_generated_files"])
-        self.assertNotIn("dist/100.js", report.analysis_coverage["executable_candidates"])
+        for generated in ("dist/100.js", "types.d.ts", "webview-ui/build/assets/chunk-ABC.js"):
+            self.assertIn(generated, report.analysis_coverage["excluded_generated_files"])
+            self.assertNotIn(generated, report.analysis_coverage["executable_candidates"])
 
     def test_executable_content_after_old_text_limit_is_analyzed(self) -> None:
         with TemporaryDirectory() as tmp:
