@@ -222,6 +222,7 @@
       "artifact_aware_expected_decision": "review",
       "classification": "ai-agentic",
       "extension_id": "Continue.continue",
+      "target_platform": "linux-arm64",
       "final": {
         "coverage_percent": 100,
         "coverage_status": "complete",
@@ -711,6 +712,7 @@
       "artifact_aware_expected_decision": "review",
       "classification": "legitimate-privileged",
       "extension_id": "ms-python.python",
+      "target_platform": "darwin-x64",
       "final": {
         "coverage_percent": 100,
         "coverage_status": "complete",
@@ -859,6 +861,7 @@
       "artifact_aware_expected_decision": "review",
       "classification": "native-packed",
       "extension_id": "ms-vscode.cpptools",
+      "target_platform": "alpine-x64",
       "final": {
         "coverage_percent": 100,
         "coverage_status": "complete",
@@ -1118,6 +1121,7 @@
       "artifact_aware_expected_decision": "review",
       "classification": "security-tool-control",
       "extension_id": "semgrep.semgrep",
+      "target_platform": "darwin-arm64",
       "final": {
         "coverage_percent": 100,
         "coverage_status": "complete",

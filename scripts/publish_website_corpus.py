@@ -27,12 +27,7 @@ def main() -> int:
     published = {} if args.include_published else published_artifacts(args.publication_url, current_build if args.require_current_build else None)
     pending = rows_to_dispatch(rows, published)
     for row in pending:
-        command = [
-            "gh", "workflow", "run", "deep-scan.yml", "--ref", "main",
-            "-f", f"extension_id={row['extension_id']}",
-            "-f", f"version={row['version']}",
-            "-f", "scan_purpose=public_intelligence",
-        ]
+        command = workflow_command(row)
         if args.dry_run:
             print(f"Would dispatch {row['extension_id']}@{row['version']}")
         else:
@@ -63,6 +58,19 @@ def rows_to_dispatch(rows: list[dict[str, Any]], published: dict[str, str]) -> l
 
 def artifact_key(extension_id: object, version: object) -> str:
     return f"{str(extension_id).lower()}@{version}"
+
+
+def workflow_command(row: dict[str, Any]) -> list[str]:
+    command = [
+        "gh", "workflow", "run", "deep-scan.yml", "--ref", "main",
+        "-f", f"extension_id={row['extension_id']}",
+        "-f", f"version={row['version']}",
+        "-f", "scan_purpose=public_intelligence",
+    ]
+    target_platform = str(row.get("target_platform") or "").strip()
+    if target_platform:
+        command.extend(["-f", f"target_platform={target_platform}"])
+    return command
 
 
 def git_output(*arguments: str) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.publish_website_corpus import rows_to_dispatch
+from scripts.publish_website_corpus import rows_to_dispatch, workflow_command
 from scripts.validate_website_publication import validate_rows
 
 
@@ -14,6 +14,15 @@ class WebsitePublicationTests(unittest.TestCase):
         ]
         pending = rows_to_dispatch(rows, {"publisher.one@1.0.0": "a" * 64, "publisher.two@2.0.0": "c" * 64})
         self.assertEqual([row["extension_id"] for row in pending], ["publisher.two"])
+
+    def test_platform_qualified_artifact_is_dispatched_explicitly(self) -> None:
+        command = workflow_command({
+            "extension_id": "ms-python.python",
+            "version": "1.2.3",
+            "target_platform": "darwin-x64",
+        })
+
+        self.assertIn("target_platform=darwin-x64", command)
 
     def test_validator_compares_exact_hash_decision_coverage_and_schema(self) -> None:
         expected = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "review"}]

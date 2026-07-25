@@ -91,6 +91,27 @@ class RegistryTests(unittest.TestCase):
 
     @patch("ide_scanner.registry._fetch_openvsx_metadata")
     @patch("ide_scanner.registry._fetch_marketplace_metadata")
+    def test_target_platform_qualifies_marketplace_artifact_url(self, marketplace, openvsx) -> None:
+        marketplace.return_value = ({"found": True, "publisher": "ms-python", "extension_name": "python", "version": "1.0.0", "registry": "vs-marketplace"}, None)
+        openvsx.return_value = ({"found": False}, None)
+        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download:
+            download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04platform")
+            download_marketplace_vsix(
+                "ms-python.python",
+                version="1.0.0",
+                target_platform="darwin-x64",
+                destination_dir=Path(temp),
+            )
+
+        self.assertTrue(download.call_args.args[0].endswith("/vspackage?targetPlatform=darwin-x64"))
+        self.assertEqual(download.call_count, 1)
+
+    def test_target_platform_rejects_untrusted_url_input(self) -> None:
+        with self.assertRaisesRegex(MarketplaceDownloadError, "target platform"):
+            download_marketplace_vsix("ms-python.python", target_platform="darwin-x64&redirect=1")
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata")
+    @patch("ide_scanner.registry._fetch_marketplace_metadata")
     def test_cloud_worker_can_raise_bounded_download_limit(self, marketplace, openvsx) -> None:
         marketplace.return_value = ({"found": True, "publisher": "publisher", "extension_name": "large", "version": "1.0.0", "registry": "vs-marketplace"}, None)
         openvsx.return_value = ({"found": False}, None)

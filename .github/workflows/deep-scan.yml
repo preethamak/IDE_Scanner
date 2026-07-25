@@ -17,6 +17,10 @@ on:
         description: Exact extension version to enqueue
         required: false
         type: string
+      target_platform:
+        description: Exact VS Marketplace artifact variant, such as darwin-x64
+        required: false
+        type: string
       scan_purpose:
         description: Canonical publication purpose (benchmark or public_intelligence)
         required: false
@@ -72,11 +76,17 @@ jobs:
           # local CLI retains its conservative 50 MiB default.
           IDE_SCANNER_MAX_VSIX_BYTES: 268435456
           IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT: 180
+          SCAN_TARGET_PLATFORM: ${{ inputs.target_platform }}
         run: |
           semgrep --validate --config rules/semgrep/vscode-security.yml
+          target_platform_args=()
+          if [[ -n "$SCAN_TARGET_PLATFORM" ]]; then
+            target_platform_args=(--target-platform "$SCAN_TARGET_PLATFORM")
+          fi
           python -m ide_scanner scan \
             --extension-id '${{ steps.claim.outputs.extension_id }}' \
             --version '${{ steps.claim.outputs.version }}' \
+            "${target_platform_args[@]}" \
             --profile deep \
             --online \
             --format bundle.json \
