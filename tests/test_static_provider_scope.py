@@ -1,19 +1,67 @@
 from __future__ import annotations
 
+import json
 import struct
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from ide_scanner.providers.static_analysis import (
     _has_valid_embedded_pe,
     _ignore_yara_match,
     _resolved_targets,
+    _run_semgrep,
     _semgrep_diagnostic_text,
 )
 
 
 class StaticProviderScopeTests(unittest.TestCase):
+    def test_semgrep_target_errors_fail_provider_completion(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "extension.js"
+            target.write_text("exports.activate = () => {};", encoding="utf-8")
+            payload = {
+                "results": [],
+                "errors": [{"message": f"Syntax error at {target}"}],
+            }
+            diagnostic = {
+                "provider": "semgrep",
+                "status": "available",
+                "executable": "/scanner/semgrep",
+                "ruleset_hash": "rules",
+            }
+            with (
+                patch(
+                    "ide_scanner.providers.static_analysis.semgrep_diagnostic",
+                    return_value=diagnostic,
+                ),
+                patch(
+                    "ide_scanner.providers.static_analysis.semgrep_config_arguments",
+                    return_value=[],
+                ),
+                patch(
+                    "ide_scanner.providers.static_analysis.run_bounded_process",
+                    return_value=SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(payload),
+                        stderr="",
+                    ),
+                ),
+            ):
+                _findings, status = _run_semgrep(
+                    root,
+                    "example.extension",
+                    "1.0.0",
+                    [target],
+                )
+
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["error_count"], 1)
+        self.assertIn("<artifact>/extension.js", status["errors"][0])
+
     def test_semgrep_diagnostics_are_bounded_and_machine_independent(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "random-extraction"

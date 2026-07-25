@@ -1393,7 +1393,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "block")
         self.assertIn("dist/extension.js", report.analysis_coverage["analyzed_executable_files"])
 
-    def test_root_dist_chunks_are_excluded_without_hiding_the_entrypoint(self) -> None:
+    def test_root_dist_modules_are_analyzed_without_hiding_the_entrypoint(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "dist").mkdir()
@@ -1415,7 +1415,9 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         self.assertIn("dist/extension.js", report.analysis_coverage["executable_candidates"])
-        for generated in ("dist/100.js", "types.d.ts", "webview-ui/build/assets/chunk-ABC.js"):
+        self.assertIn("dist/100.js", report.analysis_coverage["executable_candidates"])
+        self.assertIn("dist/100.js", report.analysis_coverage["analyzed_executable_files"])
+        for generated in ("types.d.ts", "webview-ui/build/assets/chunk-ABC.js"):
             self.assertIn(generated, report.analysis_coverage["excluded_generated_files"])
             self.assertNotIn(generated, report.analysis_coverage["executable_candidates"])
 
