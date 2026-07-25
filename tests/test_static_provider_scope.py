@@ -62,6 +62,44 @@ class StaticProviderScopeTests(unittest.TestCase):
         self.assertEqual(status["error_count"], 1)
         self.assertIn("<artifact>/extension.js", status["errors"][0])
 
+    def test_semgrep_parser_incompatibility_is_disclosed_without_failing_other_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "extension.js"
+            target.write_text("exports.activate = () => {};", encoding="utf-8")
+            payload = {
+                "results": [],
+                "errors": [{
+                    "type": "Parse error",
+                    "message": f"Syntax error at line {target}:1",
+                }],
+            }
+            diagnostic = {
+                "provider": "semgrep",
+                "status": "available",
+                "executable": "/scanner/semgrep",
+                "ruleset_hash": "rules",
+            }
+            with (
+                patch("ide_scanner.providers.static_analysis.semgrep_diagnostic", return_value=diagnostic),
+                patch("ide_scanner.providers.static_analysis.semgrep_config_arguments", return_value=[]),
+                patch(
+                    "ide_scanner.providers.static_analysis.run_bounded_process",
+                    return_value=SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""),
+                ),
+            ):
+                _findings, status = _run_semgrep(
+                    root,
+                    "example.extension",
+                    "1.0.0",
+                    [target],
+                )
+
+        self.assertEqual(status["status"], "completed")
+        self.assertEqual(status["error_count"], 0)
+        self.assertEqual(status["unsupported_parse_error_count"], 1)
+        self.assertIn("<artifact>/extension.js", status["unsupported_targets"][0])
+
     def test_semgrep_diagnostics_are_bounded_and_machine_independent(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "random-extraction"

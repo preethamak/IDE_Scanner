@@ -17,7 +17,15 @@ from ide_scanner.registry import _marketplace_metadata_findings, _repository_met
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import run_sandbox
 from ide_scanner.models import Finding
-from ide_scanner.scanner import _classify_findings, _is_generated_code_blob, _marketplace_error_extension, _score_details, scan_extension, scan_targets
+from ide_scanner.scanner import (
+    _classify_findings,
+    _is_generated_code_blob,
+    _marketplace_error_extension,
+    _score_details,
+    _semgrep_scope_exclusion,
+    scan_extension,
+    scan_targets,
+)
 
 
 class ScannerTests(unittest.TestCase):
@@ -1299,6 +1307,17 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(_is_generated_code_blob("out/extension.js", medium_minified))
         self.assertTrue(_is_generated_code_blob("out/extension.js", large_compiled))
         self.assertFalse(_is_generated_code_blob("src/extension.js", "const x=1;\n" * 100))
+
+    def test_semgrep_scope_excludes_large_and_minified_bundles_explicitly(self) -> None:
+        self.assertIn(
+            "source limit",
+            _semgrep_scope_exclusion("const value = 1;\n" * 70_000) or "",
+        )
+        self.assertIn(
+            "line density",
+            _semgrep_scope_exclusion("const value=1;" * 2_000) or "",
+        )
+        self.assertIsNone(_semgrep_scope_exclusion("export function activate() { return true; }\n"))
 
     def test_generated_bundle_does_not_create_file_wide_csp_finding(self) -> None:
         with TemporaryDirectory() as tmp:

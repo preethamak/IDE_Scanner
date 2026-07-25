@@ -158,8 +158,15 @@ def test_timeout_terminates_provider_process_group(tmp_path: Path) -> None:
 
     child_pid = int(child_pid_file.read_text(encoding="utf-8"))
     proc_state = Path(f"/proc/{child_pid}/stat")
+
+    def process_state() -> str | None:
+        try:
+            return proc_state.read_text(encoding="utf-8").split()[2]
+        except FileNotFoundError:
+            return None
+
     for _attempt in range(20):
-        if not proc_state.exists() or proc_state.read_text(encoding="utf-8").split()[2] == "Z":
+        if process_state() in (None, "Z"):
             break
         time.sleep(0.05)
-    assert not proc_state.exists() or proc_state.read_text(encoding="utf-8").split()[2] == "Z"
+    assert process_state() in (None, "Z")
