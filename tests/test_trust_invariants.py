@@ -297,6 +297,26 @@ class CoverageHonestyTests(unittest.TestCase):
         self.assertNotIn("README.md", report.analysis_coverage["executable_candidates"])
         self.assertFalse(any("README.md" in finding.file_refs for finding in report.findings))
 
+    def test_lowercase_root_readme_is_reserved_before_preview_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "docs", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            for index in range(45):
+                (root / f"a{index:02}.json").write_text(
+                    json.dumps({"index": index}),
+                    encoding="utf-8",
+                )
+            (root / "readme.md").write_text("# Lowercase documentation\n", encoding="utf-8")
+            report = scan_extension(root)
+        previews = report.artifact_inventory["source_previews"]
+        self.assertLessEqual(len(previews), 40)
+        readme_preview = next(item for item in previews if item["path"] == "readme.md")
+        readme_file = next(item for item in report.artifact_inventory["_all_file_hashes"] if item["path"] == "readme.md")
+        self.assertEqual(readme_preview["content_sha256"], readme_file["sha256"])
+
     def test_generated_only_extension_not_reported_complete(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
