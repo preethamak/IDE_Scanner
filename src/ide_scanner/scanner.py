@@ -26,6 +26,7 @@ from .classification_policy import (
     is_decision_relevant,
     is_review_relevant,
 )
+from .contracts import ScanRequest
 from .discovery import discover_from_path, discover_local_installations
 from .jsonc import loads_jsonc
 from .models import ExtensionReport, Finding
@@ -234,43 +235,65 @@ def scan_targets(
     include_posture: bool = True,
     required_providers: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
+    request = ScanRequest.create(
+        paths=paths,
+        extension_ids=extension_ids,
+        marketplace_scan_ids=marketplace_scan_ids,
+        marketplace_version=marketplace_version,
+        marketplace_target_platform=marketplace_target_platform,
+        include_fixtures=include_fixtures,
+        all_local=all_local,
+        online=online,
+        known_bad_hashes_file=known_bad_hashes_file,
+        threat_feed_file=threat_feed_file,
+        extension_advisories_file=extension_advisories_file,
+        registry_snapshot_file=registry_snapshot_file,
+        sandbox_observations_file=sandbox_observations_file,
+        previous_report_file=previous_report_file,
+        include_posture=include_posture,
+        required_providers=required_providers,
+    )
+    return _scan_request(request)
+
+
+def _scan_request(request: ScanRequest) -> dict[str, Any]:
     targets: list[dict[str, str]] = []
     root = Path.cwd()
 
-    if include_fixtures:
+    if request.include_fixtures:
         targets.extend(discover_from_path(root / "fixtures"))
-    for path in paths or []:
+    for path in request.paths:
         targets.extend(discover_from_path(path))
-    if all_local:
+    if request.all_local:
         targets.extend(discover_local_installations())
 
     unique: dict[str, dict[str, str]] = {}
     for target in targets:
         unique[target["path"]] = target
 
-    known_bad_hashes = _load_known_bad_hashes(known_bad_hashes_file)
+    known_bad_hashes = _load_known_bad_hashes(request.known_bad_hashes_file)
     extensions = [
         _scan_discovered_target(target, known_bad_hashes)
         for target in unique.values()
     ]
-    extensions.extend(_registry_only_extension(extension_id) for extension_id in extension_ids or [])
+    extensions.extend(_registry_only_extension(extension_id) for extension_id in request.extension_ids)
     extensions.extend(
         scan_marketplace_extension(
             identifier,
-            version=marketplace_version,
-            target_platform=marketplace_target_platform,
+            version=request.marketplace_version,
+            target_platform=request.marketplace_target_platform,
             known_bad_hashes=known_bad_hashes,
         )
-        for identifier in marketplace_scan_ids or []
+        for identifier in request.marketplace_scan_ids
     )
-    _apply_threat_feed(extensions, _load_threat_feed(threat_feed_file))
-    advisory_bundle = _load_extension_advisories(extension_advisories_file)
+    _apply_threat_feed(extensions, _load_threat_feed(request.threat_feed_file))
+    advisory_bundle = _load_extension_advisories(request.extension_advisories_file)
     _apply_extension_advisories(extensions, advisory_bundle)
-    _apply_sandbox_observations(extensions, _load_sandbox_observations(sandbox_observations_file))
+    _apply_sandbox_observations(extensions, _load_sandbox_observations(request.sandbox_observations_file))
     registry = (
-        _load_registry_snapshot(registry_snapshot_file)
-        if registry_snapshot_file is not None
-        else _capture_registry_snapshot(enrich_registry(extensions, online=online), source="live")
+        _load_registry_snapshot(request.registry_snapshot_file)
+        if request.registry_snapshot_file is not None
+        else _capture_registry_snapshot(enrich_registry(extensions, online=request.online), source="live")
     )
     _apply_registry_findings(extensions, registry["findings"])
     dependency_errors = [
@@ -279,11 +302,7 @@ def scan_targets(
     ]
     registry_enabled = bool(registry.get("enabled"))
     registry_identity = registry.get("snapshot") if isinstance(registry.get("snapshot"), dict) else {}
-    requested_providers = {
-        str(item).strip().lower()
-        for item in (required_providers or set())
-        if str(item).strip()
-    }
+    requested_providers = request.required_providers
     for extension in extensions:
         acquisition_failure = str(extension.artifact_inventory.get("skipped_reason") or "") if extension.source == "marketplace-error" else ""
         providers = extension.analysis_coverage.setdefault("providers", {})
@@ -347,8 +366,8 @@ def scan_targets(
     return _build_report(
         extensions,
         registry,
-        _load_previous_report(previous_report_file),
-        include_posture=include_posture,
+        _load_previous_report(request.previous_report_file),
+        include_posture=request.include_posture,
         intelligence=intelligence,
     )
 
