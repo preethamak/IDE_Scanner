@@ -12,8 +12,8 @@
 
 ## Versioning and trust
 
-The `guardlens-core` wheel is the only distributable engine. Its wheel `RECORD` hashes cover every `ide_scanner` file. Consumers must record the engine version and build identity in generated reports. A policy, ruleset, or report-schema change requires contract-test coverage before release.
+`ide-scanner` is the canonical development and release source for the scanner runtime. The public Guardrails CLI ships a self-contained, hash-verified copy of that runtime; CI rejects source drift before release. Consumers must record the engine version and build identity in generated reports. A policy, ruleset, or report-schema change requires contract-test coverage before release.
 
 ## Consumers
 
-The Guardrails CLI consumes `guardlens-core` as a dependency. The web worker invokes the canonical engine and sends a signed report bundle to the web ingestion boundary. Neither consumer may rewrite the canonical decision, score, analysis status, or provenance.
+The Guardrails CLI vendors the canonical runtime as part of its single installable package. The web worker invokes the canonical engine and sends a signed report bundle to the web ingestion boundary. Neither consumer may rewrite the canonical decision, score, analysis status, or provenance.
