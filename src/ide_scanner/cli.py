@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .artifact_store import FilesystemArtifactStore
+
 from .agent import build_agent_report, upload_agent_report
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
@@ -27,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
+    scan.add_argument("--artifact-store", help="Preserve downloaded Marketplace VSIX files in this private vault.")
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles; only 'deep' additionally enables online registry checks (same as --online).")
     scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
@@ -44,6 +47,14 @@ def main(argv: list[str] | None = None) -> int:
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
     inventory.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to inspect.")
+
+    artifacts = subparsers.add_parser("artifacts", help="Search preserved Marketplace artifact history.")
+    artifacts.add_argument("--store", required=True, help="Artifact vault directory.")
+    artifacts.add_argument("--extension-id")
+    artifacts.add_argument("--version")
+    artifacts.add_argument("--registry")
+    artifacts.add_argument("--target-platform")
+    artifacts.add_argument("--sha256")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -105,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_observations_file=args.sandbox_observations,
             previous_report_file=args.previous_report,
             required_providers=DEEP_REQUIRED_PROVIDERS if args.profile == "deep" else None,
+            marketplace_artifact_store=FilesystemArtifactStore(args.artifact_store) if args.artifact_store else None,
         )
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
@@ -147,6 +159,13 @@ def main(argv: list[str] | None = None) -> int:
         if output_format in {"sarif", "sqlite"}:
             parser.error(f"scan --format {output_format} is reserved but not implemented yet")
         _emit(report, args.output)
+        return 0
+    if args.command == "artifacts":
+        store = FilesystemArtifactStore(args.store)
+        _emit({"artifacts": store.search(
+            extension_id=args.extension_id, version=args.version, registry=args.registry,
+            target_platform=args.target_platform, sha256=args.sha256,
+        )}, None)
         return 0
     if args.command == "inventory":
         targets: list[dict[str, str]] = []

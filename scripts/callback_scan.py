@@ -9,6 +9,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import re
 from pathlib import Path
 
 CALLBACK_ATTEMPTS = 4
@@ -25,7 +26,10 @@ TRANSIENT_UPSTREAM_MARKERS = (
 
 def main() -> int:
     bundle_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-    value = {"job_id": os.environ["SCAN_JOB_ID"]}
+    target_platform = os.environ.get("SCAN_TARGET_PLATFORM", "").strip().lower()
+    if target_platform and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", target_platform):
+        raise RuntimeError("target platform is invalid")
+    value = {"job_id": os.environ["SCAN_JOB_ID"], "target_platform": target_platform or None}
     if bundle_path and bundle_path.exists():
         value["bundle"] = json.loads(bundle_path.read_text(encoding="utf-8"))
     else:

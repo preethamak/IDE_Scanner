@@ -204,7 +204,13 @@ def download_marketplace_vsix(
                 try:
                     _download_to_file(candidate_url, handle, max_bytes=max_bytes, timeout=timeout)
                     if registry_out is not None:
-                        registry_out["registry"] = "openvsx" if "open-vsx.org" in candidate_url else "vs-marketplace"
+                        registry_out.update({
+                            "extension_id": resolved_id,
+                            "version": str(target_version),
+                            "registry": "openvsx" if "open-vsx.org" in candidate_url else "vs-marketplace",
+                            "target_platform": target_platform or "",
+                            "download_url": candidate_url,
+                        })
                     break
                 except MarketplaceDownloadError as exc:
                     failures.append(str(exc))

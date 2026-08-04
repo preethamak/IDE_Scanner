@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .artifact_store import ArtifactStore
 from .discovery import discover_from_path, discover_local_installations
 from .scanner import scan_targets
 
@@ -14,6 +15,9 @@ class ScanRequest:
     paths: list[Path | str] = field(default_factory=list)
     extension_ids: list[str] = field(default_factory=list)
     marketplace_scan_ids: list[str] = field(default_factory=list)
+    marketplace_version: str | None = None
+    marketplace_target_platform: str | None = None
+    marketplace_artifact_store: ArtifactStore | None = None
     include_fixtures: bool = False
     all_local: bool = False
     online: bool = False
@@ -48,6 +52,9 @@ def run_scan(request: ScanRequest) -> dict[str, Any]:
         paths=request.paths,
         extension_ids=request.extension_ids,
         marketplace_scan_ids=request.marketplace_scan_ids,
+        marketplace_version=request.marketplace_version,
+        marketplace_target_platform=request.marketplace_target_platform,
+        marketplace_artifact_store=request.marketplace_artifact_store,
         include_fixtures=request.include_fixtures,
         all_local=request.all_local,
         online=request.online,
