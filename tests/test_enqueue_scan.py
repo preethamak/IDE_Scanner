@@ -40,6 +40,7 @@ class EnqueueScanTests(unittest.TestCase):
                 "SCAN_PURPOSE": "public_intelligence",
                 "SCAN_GITHUB_SHA": "a" * 40,
                 "SCAN_RUNNER_SECRET": "secret",
+                "SCAN_TARGET_PLATFORM": "Darwin-X64",
             }
             with patch.dict(os.environ, environment, clear=True), patch("urllib.request.urlopen", return_value=_Response()) as urlopen:
                 self.assertEqual(main(), 0)
@@ -47,7 +48,19 @@ class EnqueueScanTests(unittest.TestCase):
             self.assertEqual(request.get_header("Authorization"), "Bearer secret")
             self.assertIn(b'"version": "3.0.33"', request.data)
             self.assertIn(b'"scanner_build": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"', request.data)
+            self.assertIn(b'"target_platform": "darwin-x64"', request.data)
             self.assertEqual(output.read_text(encoding="utf-8"), "has_job=true\njob_id=job-1\n")
+
+    def test_invalid_target_platform_is_rejected_before_enqueue(self) -> None:
+        environment = {
+            "GITHUB_OUTPUT": "/dev/null", "SCAN_EXTENSION_ID": "a.b",
+            "SCAN_EXTENSION_VERSION": "1", "SCAN_PURPOSE": "benchmark",
+            "SCAN_TARGET_PLATFORM": "linux-x64\ninjected=true",
+        }
+        with patch.dict(os.environ, environment, clear=True), patch("urllib.request.urlopen") as urlopen:
+            with self.assertRaisesRegex(RuntimeError, "target platform"):
+                main()
+        urlopen.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from ide_scanner.benchmarks.adapters.protect_your_secrets import normalize_ground_truth_csv
 from ide_scanner.benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
@@ -24,11 +24,75 @@ from ide_scanner.scanner import (
     _score_details,
     _semgrep_scope_exclusion,
     scan_extension,
+    scan_marketplace_extension,
     scan_targets,
 )
+from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_marketplace_scan_preserves_before_analysis_and_reports_storage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            downloaded = Path(tmp) / "download.vsix"
+            downloaded.write_bytes(b"PK\x03\x04exact")
+            preserved = Path(tmp) / "vault" / "object.vsix"
+            preserved.parent.mkdir()
+            preserved.write_bytes(downloaded.read_bytes())
+            digest = hashlib.sha256(preserved.read_bytes()).hexdigest()
+            store = MagicMock()
+            store.preserve.return_value = StoredArtifact(
+                preserved, "filesystem", f"sha256/{digest[:2]}/{digest}.vsix", digest,
+                preserved.stat().st_size, "publisher.extension", "1.2.3", "vs-marketplace",
+                "linux-x64", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
+            )
+            report = MagicMock()
+            report.extension_id = "publisher.extension"
+            report.version = "1.2.3"
+            report.artifact_identity = {"sha256": digest}
+            report.artifact_inventory = {}
+            metadata = {
+                "extension_id": "publisher.extension", "version": "1.2.3",
+                "registry": "vs-marketplace", "target_platform": "linux-x64",
+            }
+
+            def download(*_args, registry_out, **_kwargs):
+                registry_out.update(metadata)
+                return downloaded
+
+            with patch("ide_scanner.scanner.download_marketplace_vsix", side_effect=download), patch(
+                "ide_scanner.scanner.scan_vsix", return_value=report
+            ) as scan:
+                result = scan_marketplace_extension(
+                    "publisher.extension", version="1.2.3", target_platform="linux-x64",
+                    artifact_store=store,
+                )
+
+            store.preserve.assert_called_once()
+            scan.assert_called_once_with(preserved, known_bad_hashes=None)
+            self.assertFalse(downloaded.exists())
+            self.assertTrue(preserved.exists())
+            self.assertEqual(result.artifact_identity["target_platform"], "linux-x64")
+            self.assertEqual(result.artifact_identity["storage"]["sha256"], digest)
+            self.assertEqual(result.artifact_inventory["artifact_storage"]["storage_key"], store.preserve.return_value.storage_key)
+            self.assertNotIn(str(Path(tmp) / "vault"), json.dumps(result.artifact_identity))
+
+    def test_marketplace_preservation_failure_is_incomplete_and_deletes_download(self) -> None:
+        with TemporaryDirectory() as tmp:
+            downloaded = Path(tmp) / "download.vsix"
+            downloaded.write_bytes(b"PK\x03\x04exact")
+            store = MagicMock()
+            store.preserve.side_effect = ArtifactStoreError("vault unavailable")
+            with patch("ide_scanner.scanner.download_marketplace_vsix", return_value=downloaded), patch(
+                "ide_scanner.scanner.scan_vsix"
+            ) as scan:
+                result = scan_marketplace_extension("publisher.extension", version="1.2.3", artifact_store=store)
+
+            scan.assert_not_called()
+            self.assertFalse(downloaded.exists())
+            self.assertEqual(result.source, "marketplace-error")
+            self.assertTrue(result.artifact_inventory["scan_incomplete"])
+            self.assertIn("could not be preserved", result.artifact_inventory["skipped_reason"])
+
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
             finding_id="range-advisory",

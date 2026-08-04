@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+import re
+
+TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 
 def main() -> int:
     extension_id = os.environ.get("SCAN_EXTENSION_ID", "").strip()
     version = os.environ.get("SCAN_EXTENSION_VERSION", "").strip()
     purpose = os.environ.get("SCAN_PURPOSE", "").strip()
+    target_platform = os.environ.get("SCAN_TARGET_PLATFORM", "").strip().lower()
+    if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
+        raise RuntimeError("target platform is invalid")
     if not extension_id and not version:
         write_outputs({"has_job": "false"})
         return 0
@@ -21,6 +27,7 @@ def main() -> int:
             "scan_purpose": purpose,
             "registry": os.environ.get("SCAN_REGISTRY", "vs-marketplace"),
             "scanner_build": os.environ.get("SCAN_GITHUB_SHA", ""),
+            "target_platform": target_platform or None,
         }]
     }).encode()
     request = urllib.request.Request(

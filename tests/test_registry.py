@@ -96,15 +96,24 @@ class RegistryTests(unittest.TestCase):
         openvsx.return_value = ({"found": False}, None)
         with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download:
             download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04platform")
+            source = {}
             download_marketplace_vsix(
                 "ms-python.python",
                 version="1.0.0",
                 target_platform="darwin-x64",
                 destination_dir=Path(temp),
+                registry_out=source,
             )
 
         self.assertTrue(download.call_args.args[0].endswith("/vspackage?targetPlatform=darwin-x64"))
         self.assertEqual(download.call_count, 1)
+        self.assertEqual(source, {
+            "extension_id": "ms-python.python",
+            "version": "1.0.0",
+            "registry": "vs-marketplace",
+            "target_platform": "darwin-x64",
+            "download_url": download.call_args.args[0],
+        })
 
     def test_target_platform_rejects_untrusted_url_input(self) -> None:
         with self.assertRaisesRegex(MarketplaceDownloadError, "target platform"):
