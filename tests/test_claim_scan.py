@@ -51,7 +51,7 @@ class ClaimScanTests(unittest.TestCase):
         self.assertEqual(self.output.read_text(), "has_job=false\n")
 
     def test_claim_writes_exact_artifact_outputs(self):
-        payload = {"id": "job-1", "extension_id": "publisher.extension", "version": "1.2.3", "callback_url": "https://scanner.example/callback"}
+        payload = {"id": "job-1", "extension_id": "publisher.extension", "version": "1.2.3", "target_platform": "linux-x64", "callback_url": "https://scanner.example/callback"}
         with patch.dict("os.environ", self.environment, clear=True), patch.object(claim_scan.urllib.request, "urlopen", return_value=Response(200, payload)):
             self.assertEqual(claim_scan.main(), 0)
         output = self.output.read_text()
@@ -59,6 +59,16 @@ class ClaimScanTests(unittest.TestCase):
         self.assertIn("job_id=job-1", output)
         self.assertIn("extension_id=publisher.extension", output)
         self.assertIn("version=1.2.3", output)
+        self.assertIn("target_platform=linux-x64", output)
+
+    def test_claim_rejects_target_platform_output_injection(self):
+        payload = {"id": "job-1", "extension_id": "publisher.extension", "version": "1.2.3",
+                   "target_platform": "linux-x64\nevil=value", "callback_url": "https://scanner.example/callback"}
+        with patch.dict("os.environ", self.environment, clear=True), patch.object(
+            claim_scan.urllib.request, "urlopen", return_value=Response(200, payload)
+        ), self.assertRaisesRegex(RuntimeError, "target platform"):
+            claim_scan.main()
+        self.assertFalse(self.output.exists())
 
     def test_claim_sends_exact_job_and_github_run_identity(self):
         environment = {**self.environment, "SCAN_JOB_ID": "job-42", "SCAN_GITHUB_RUN_ID": "987654"}

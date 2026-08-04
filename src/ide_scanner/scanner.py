@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .artifact_store import ArtifactStore, ArtifactStoreError, StoredArtifact, artifact_store_from_environment
+
 from .ast_analyzer import (
     JS_AST_EXTS,
     JS_AST_MAX_OLD_SPACE_MB,
@@ -233,6 +235,7 @@ def scan_targets(
     previous_report_file: Path | str | None = None,
     include_posture: bool = True,
     required_providers: set[str] | frozenset[str] | None = None,
+    marketplace_artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     targets: list[dict[str, str]] = []
     root = Path.cwd()
@@ -260,6 +263,7 @@ def scan_targets(
             version=marketplace_version,
             target_platform=marketplace_target_platform,
             known_bad_hashes=known_bad_hashes,
+            artifact_store=marketplace_artifact_store,
         )
         for identifier in marketplace_scan_ids or []
     )
@@ -780,6 +784,7 @@ def scan_marketplace_extension(
     version: str | None = None,
     target_platform: str | None = None,
     known_bad_hashes: dict[str, dict[str, Any]] | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> ExtensionReport:
     """Download a VSIX from the VS Marketplace gallery and run the normal
     quarantine-extraction static scan on it (scan_vsix). This is a hosted,
@@ -801,8 +806,22 @@ def scan_marketplace_extension(
     except MarketplaceDownloadError as exc:
         return _marketplace_error_extension(resolved_id, str(exc))
 
+    stored: StoredArtifact | None = None
     try:
-        report = scan_vsix(vsix_path, known_bad_hashes=known_bad_hashes)
+        configured_store = artifact_store if artifact_store is not None else artifact_store_from_environment()
+        scan_path = vsix_path
+        if configured_store is not None:
+            stored = configured_store.preserve(
+                vsix_path,
+                extension_id=registry_source.get("extension_id", resolved_id),
+                version=registry_source.get("version", version or ""),
+                registry=registry_source.get("registry", "vs-marketplace"),
+                target_platform=registry_source.get("target_platform", target_platform or ""),
+            )
+            scan_path = stored.path
+        report = scan_vsix(scan_path, known_bad_hashes=known_bad_hashes)
+    except ArtifactStoreError as exc:
+        return _marketplace_error_extension(resolved_id, f"Downloaded VSIX could not be preserved: {exc}")
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         return _marketplace_error_extension(resolved_id, f"Downloaded VSIX could not be scanned: {exc}")
     finally:
@@ -818,6 +837,19 @@ def scan_marketplace_extension(
 
     report.source = registry_source.get("registry", "marketplace")
     report.install_path = f"{report.source}:{resolved_id}"
+    report.artifact_identity.update({
+        "registry": report.source,
+        "target_platform": registry_source.get("target_platform", target_platform or ""),
+        "preserved": stored is not None,
+    })
+    if stored is not None:
+        storage = {
+            "backend": stored.backend, "storage_key": stored.storage_key,
+            "sha256": stored.sha256, "size_bytes": stored.size_bytes,
+            "first_seen": stored.first_seen, "last_seen": stored.last_seen,
+        }
+        report.artifact_identity["storage"] = storage
+        report.artifact_inventory["artifact_storage"] = storage
     return report
 
 

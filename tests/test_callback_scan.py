@@ -2,11 +2,36 @@ import io
 import unittest
 from unittest.mock import MagicMock, patch
 import urllib.error
+import gzip
+import json
+import os
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from scripts import callback_scan
 
 
 class CallbackScanTests(unittest.TestCase):
+    def test_callback_wrapper_contains_validated_target_platform(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "bundle.json"
+            bundle.write_text('{"extensions":[]}', encoding="utf-8")
+            environment = {"SCAN_JOB_ID": "job-1", "SCAN_TARGET_PLATFORM": "Darwin-X64"}
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                sys, "argv", ["callback_scan.py", str(bundle)]
+            ), patch.object(callback_scan, "submit_callback", return_value="ok") as submit:
+                self.assertEqual(callback_scan.main(), 0)
+            wrapper = json.loads(gzip.decompress(submit.call_args.args[0]))
+            self.assertEqual(wrapper["target_platform"], "darwin-x64")
+            self.assertEqual(wrapper["bundle"], {"extensions": []})
+
+    def test_callback_rejects_invalid_target_platform(self) -> None:
+        with patch.dict(os.environ, {"SCAN_JOB_ID": "job-1", "SCAN_TARGET_PLATFORM": "x\nevil=y"}, clear=True), patch.object(
+            callback_scan, "submit_callback"
+        ) as submit, self.assertRaisesRegex(RuntimeError, "target platform"):
+            callback_scan.main()
+        submit.assert_not_called()
     def test_retries_transient_upstream_failure(self) -> None:
         transient = urllib.error.HTTPError(
             "https://example.invalid/callback",
