@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "corpus_id": "ide-scanner-production-gate",
+  "corpus_version": "2026-08-11.1",
+  "description": "Version-pinned production readiness corpus. Required fixtures protect deterministic decision invariants; optional real-world artifacts become required after their original bytes are retained in the artifact vault.",
+  "thresholds": {
+    "required_pass_rate": 1.0,
+    "max_safe_block_rate": 0.0,
+    "max_malicious_allow_rate": 0.0,
+    "max_incomplete_required": 0
+  },
+  "artifacts": [
+    {
+      "extension_id": "trusted.trusted-formatter",
+      "version": "1.0.0",
+      "category": "formatter",
+      "label": "known_safe",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/benign-formatter", "sha256": "5f50b7fef34dafb4618a78b175404a566f30c10e1295571ecac32bd247b3b0f0", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["clean"], "allowed_decisions": ["allow"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain"], "max_risk_score": 0, "max_malware_score": 0}
+    },
+    {
+      "extension_id": "trusted.startup-theme",
+      "version": "1.0.0",
+      "category": "theme",
+      "label": "known_safe",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/startup-theme", "sha256": "bea7f538e7b47bf47e4af3a3010b6cac0e67b9a733f1c159ad8367252485076d", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["clean"], "allowed_decisions": ["allow"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["download-and-execute", "credential-exfiltration-chain"], "max_risk_score": 0, "max_malware_score": 0}
+    },
+    {
+      "extension_id": "example.agent-toolbox",
+      "version": "0.3.0",
+      "category": "coding-agent",
+      "label": "gray",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/agent-tool", "sha256": "834480f89a06de49952e250be3a4a92f65dbcb5d7b83f663f2cbb867b33d233d", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["clean", "review"], "allowed_decisions": ["allow", "review"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain"], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "example.native-artifact",
+      "version": "1.0.0",
+      "category": "native-tool",
+      "label": "gray",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/native-artifact", "sha256": "7391734eafbe982cbab9edf258b57d148d035edd65baf7b016478c4ff1cf1221", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["review"], "allowed_decisions": ["review"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["native-or-packed-artifact"], "forbidden_rule_ids": [], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "unknown.shadow-helper",
+      "version": "9.9.9",
+      "category": "credential-stealer",
+      "label": "known_malicious",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/credential-exfil", "sha256": "b68d32c263860140c78ce882d0f3965f75f32454d0d12d99be135be34b612c44", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["suspicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["credential-exfiltration-chain"], "forbidden_rule_ids": [], "min_risk_score": 80, "max_malware_score": 0}
+    },
+    {
+      "extension_id": "unknown.dropper",
+      "version": "1.0.0",
+      "category": "dropper",
+      "label": "known_malicious",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/lifecycle-dropper", "sha256": "e398877290d90e75c19e5ca6ab2bdfed557666ddc69f1075de1bf8fa87443f52", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["suspicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["install-download-execute"], "forbidden_rule_ids": [], "min_risk_score": 80, "max_malware_score": 0}
+    },
+    {
+      "extension_id": "knownbad.feed-hit",
+      "version": "9.9.9",
+      "category": "confirmed-malware",
+      "label": "known_malicious",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/threat-feed-malware", "sha256": "14cb65a7893c0f9bd07c1728b618379938f84b0535487842256ac7d6289aaa70", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["malicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["trusted-threat-feed-hit"], "forbidden_rule_ids": [], "min_risk_score": 90, "min_malware_score": 90}
+    },
+    {
+      "extension_id": "GitHub.github-vscode-theme",
+      "version": "6.3.5",
+      "category": "theme",
+      "label": "known_safe",
+      "gate_required": false,
+      "artifact": {"source_type": "vs_marketplace", "sha256": "74e69da1804f718ae9ce6a8ea49c06fbf9cfc137c9b65b0e14353715cb5d474a", "original_bytes_available": false},
+      "expected": {"allowed_verdicts": ["clean"], "allowed_decisions": ["allow"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain"], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "PKief.material-icon-theme",
+      "version": "5.37.0",
+      "category": "theme",
+      "label": "known_safe",
+      "gate_required": false,
+      "artifact": {"source_type": "vs_marketplace", "sha256": "ade9adefe3909cea92aed52850ddd00975d1dc1b62fe558831f6fb8b88f7c3ce", "original_bytes_available": false},
+      "expected": {"allowed_verdicts": ["clean"], "allowed_decisions": ["allow"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain"], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "anthropic.claude-code",
+      "version": "2.1.227",
+      "category": "coding-agent",
+      "label": "gray",
+      "gate_required": false,
+      "artifact": {"source_type": "vs_marketplace", "sha256": "3afdb3b7bc54663a69c6f22a57b4fca7750f2802a1b0b4b248f1a8a229a087b3", "original_bytes_available": false},
+      "expected": {"allowed_verdicts": ["clean", "review"], "allowed_decisions": ["allow", "review"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain", "credential-harvesting-exfiltration"], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "openai.chatgpt",
+      "version": "26.5803.61601",
+      "category": "coding-agent",
+      "label": "gray",
+      "gate_required": false,
+      "artifact": {"source_type": "vs_marketplace", "sha256": "611742df2904256e1af544526863cb9085a85999412bfe5d16bbab2c1a3afcd3", "original_bytes_available": false},
+      "expected": {"allowed_verdicts": ["clean", "review"], "allowed_decisions": ["allow", "review"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": [], "forbidden_rule_ids": ["credential-exfiltration-chain", "credential-harvesting-exfiltration"], "max_malware_score": 0}
+    },
+    {
+      "extension_id": "web3devtoolsx.solidity-pro",
+      "version": "3.4.0",
+      "category": "credential-stealer",
+      "label": "known_malicious",
+      "gate_required": false,
+      "artifact": {"source_type": "source_snapshot", "commit": "fe794a2", "sha256": "", "original_bytes_available": false},
+      "expected": {"allowed_verdicts": ["suspicious", "malicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["credential-harvesting-exfiltration"], "forbidden_rule_ids": [], "min_risk_score": 80}
+    }
+  ]
+}

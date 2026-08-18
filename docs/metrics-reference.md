@@ -303,6 +303,7 @@ Implemented now:
 - local static code scan
 - install-time chain detection for download-execute, secret access, telemetry, and obfuscated shell behavior
 - static behavior-chain detection for obfuscation+execution+network, persistence, and agent data exfiltration
+- high-specificity cross-function credential-harvesting detection requiring multiple credential families, home-directory enumeration, file reads, serialization, and an explicit outbound write
 - local artifact inventory with package hash, file count, byte count, and risky artifact hashes
 - VSIX quarantine extraction and scanning without installing the extension
 - VSIX artifact hash capture and known-bad VSIX hash matching
@@ -330,9 +331,19 @@ Implemented now:
 - separate `malware_score` and `risk_score`
 - current `score_details`
 - `malware_authority`
+- packaged, versioned scoring calibration with fail-closed schema and score-range validation
+- exact Marketplace VSIX SHA-256 verification against the version property before scanning
+- detached Marketplace signature-asset presence reporting without claiming cryptographic verification
+- sequential executable-source analysis that does not retain every source blob for the duration of a scan
+- a 32 MiB AST per-file input boundary and 1 GiB Node heap boundary; resource-skipped AST files fail required coverage closed
+- subprocess-isolated Semgrep and YARA analysis with timeout, memory, file-output, and process-tree boundaries
+- bounded yara-python worker output and fail-closed worker error reporting
 
 Implemented benchmark support:
 
+- version-pinned production corpus validation with safe, gray, and malicious labels
+- fail-closed regression gates for verdicts, decisions, analysis coverage, rule expectations, score bounds, and artifact hashes
+- explicit `not_scanned` tracking for optional real-world artifacts awaiting retention and calibration
 - normalized Protect Your Secrets public CSV adapter
 - credential-exposure benchmark runner against scanner JSON/report.zip
 - dashboard-ready `benchmark.zip`
@@ -340,17 +351,22 @@ Implemented benchmark support:
 
 Not implemented yet:
 
-- verified publisher/signature scoring
+- cryptographic verification of the detached Marketplace VSIX signature and signer identity
 - source-to-VSIX provenance comparison
 - full calibration corpus beyond bundled fixtures and the public credential-exposure labels
 - full dynamic sandbox runner execution
 
 ## Recommended Next Build Order
 
-1. Add marketplace signature state and VSIX signature verification.
+1. Cryptographically verify the Marketplace signature asset and signer identity; package SHA-256 matching and signature presence are already recorded.
 2. Add source-to-VSIX provenance comparison.
 3. Add dynamic sandbox runner with fake credential canaries.
 4. Expand benchmark corpora and publish precision/recall for each verdict and exposure vector.
+
+Numeric calibration changes must update the packaged policy version and run the
+known-safe and known-abuse regression scans. Authority gates are deliberately
+not configurable: only confirmed evidence may produce `malicious`, regardless
+of a rule's numeric score.
 
 ## User-Facing Explanation Template
 

@@ -1,0 +1,45 @@
+name: Scanner production gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest
+      - name: Unit and integration tests
+        run: python -m pytest -q
+      - name: Scan deterministic production fixtures
+        run: |
+          python -m ide_scanner scan \
+            --fixtures \
+            --threat-feed benchmarks/threat-feed.json \
+            --format json \
+            --out production-fixtures.json
+      - name: Enforce production corpus invariants
+        run: |
+          python -m ide_scanner benchmark production \
+            --corpus benchmarks/production-corpus.json \
+            --report production-fixtures.json \
+            --fail-on-regression \
+            --out production-gate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scanner-production-gate
+          path: |
+            production-fixtures.json
+            production-gate.json
+          retention-days: 30
+          if-no-files-found: warn

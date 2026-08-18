@@ -6,10 +6,20 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import ide_scanner.ast_analyzer as ast_analyzer
-from ide_scanner.ast_analyzer import analyze_js_source_status, node_available
+from ide_scanner.ast_analyzer import JS_AST_MAX_INPUT_BYTES, analyze_js_source_status, node_available
 
 
 class WalkerLargeOutputTests(unittest.TestCase):
+    def test_oversized_source_fails_closed_without_spawning_node(self) -> None:
+        source = "x" * (JS_AST_MAX_INPUT_BYTES + 1)
+        with patch.object(ast_analyzer.subprocess, "run") as run, \
+             patch.object(ast_analyzer, "node_available", return_value=True):
+            findings, status = analyze_js_source_status("oversized.js", source)
+
+        self.assertEqual(findings, [])
+        self.assertEqual(status, "resource-skipped")
+        run.assert_not_called()
+
     def test_timeout_is_retried_once_before_failing_closed(self) -> None:
         completed = MagicMock(returncode=0, stdout=json.dumps({"findings": []}))
         timeout = subprocess.TimeoutExpired(["node"], ast_analyzer.JS_AST_TIMEOUT_SECONDS)

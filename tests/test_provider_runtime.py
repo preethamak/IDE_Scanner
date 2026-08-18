@@ -170,3 +170,34 @@ def test_timeout_terminates_provider_process_group(tmp_path: Path) -> None:
             break
         time.sleep(0.05)
     assert process_state() in (None, "Z")
+
+
+def test_bounded_process_applies_posix_resource_limits(monkeypatch) -> None:
+    if os.name != "posix" or runtime.resource is None:
+        return
+    observed: dict[str, object] = {}
+
+    class FakeProcess:
+        returncode = 0
+
+        def communicate(self, timeout):
+            observed["timeout"] = timeout
+            return "ok", ""
+
+    def fake_popen(command, **kwargs):
+        observed["command"] = command
+        observed["options"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", fake_popen)
+    result = run_bounded_process(
+        ["provider"],
+        timeout=3,
+        memory_limit_mb=128,
+        file_size_limit_mb=4,
+    )
+
+    assert result.stdout == "ok"
+    options = observed["options"]
+    assert options["start_new_session"] is True
+    assert callable(options["preexec_fn"])

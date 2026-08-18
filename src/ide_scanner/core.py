@@ -23,6 +23,9 @@ class ScanRequest:
     sandbox_observations_file: Path | str | None = None
     previous_report_file: Path | str | None = None
     include_posture: bool = True
+    path_artifact_origin: str | None = None
+    artifact_url: str | None = None
+    artifact_sha256: str | None = None
 
 
 def build_inventory(paths: list[Path | str] | None = None, all_local: bool = False) -> dict[str, Any]:
@@ -57,6 +60,9 @@ def run_scan(request: ScanRequest) -> dict[str, Any]:
         sandbox_observations_file=request.sandbox_observations_file,
         previous_report_file=request.previous_report_file,
         include_posture=request.include_posture,
+        path_artifact_origin=request.path_artifact_origin,
+        artifact_url=request.artifact_url,
+        artifact_sha256=request.artifact_sha256,
     )
 
 
