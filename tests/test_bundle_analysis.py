@@ -95,3 +95,21 @@ def test_alternate_obfuscator_without_hex_identifier_names_is_detected() -> None
     assert profile["strong_obfuscation"] is True
     assert profile["harvesting_exfiltration"] is True
     assert "systematic-hex-identifiers" not in profile["obfuscation_indicators"]
+
+
+def test_unrelated_polling_loop_and_array_calls_do_not_form_rotation_scaffold() -> None:
+    source = (
+        "while (true) { await client.messages.create({tools}); break; }"
+        "var docs=['/.ssh/id_rsa','/.aws/credentials','/.npmrc','wallet.dat'];"
+        "var ops=['homedir','readdir','readFile','request','write','stringify'];"
+        + r"\x61" * 120
+        + "obj[key];" * 40
+        + "x" * 5_000
+        + "queue.push(item); values.shift();"
+    )
+
+    profile = analyze_generated_bundle(source)
+
+    assert "rotating-string-array" not in profile["obfuscation_indicators"]
+    assert profile["strong_obfuscation"] is False
+    assert profile["harvesting_exfiltration"] is False
