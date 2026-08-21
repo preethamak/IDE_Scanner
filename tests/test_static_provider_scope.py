@@ -13,12 +13,51 @@ from ide_scanner.providers.static_analysis import (
     _ignore_yara_match,
     _resolved_targets,
     _run_semgrep,
+    _run_yara,
     _run_yara_python,
     _semgrep_diagnostic_text,
 )
 
 
 class StaticProviderScopeTests(unittest.TestCase):
+    def test_native_yara_scans_only_selected_targets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "extension.js"
+            excluded = root / "excluded.js"
+            selected.write_text("const selected = 1;", encoding="utf-8")
+            excluded.write_text("const excluded = 1;", encoding="utf-8")
+            observed = {}
+
+            def fake_run(command, **kwargs):
+                observed["command"] = command
+                observed["targets"] = Path(command[-1]).read_text(encoding="utf-8").splitlines()
+                observed.update(kwargs)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=f"ide_scanner_unicode_evasion {selected}\n",
+                    stderr="",
+                )
+
+            diagnostic = {"provider": "yara", "status": "available", "executable": "/scanner/yara"}
+            with (
+                patch("ide_scanner.providers.static_analysis.yara_diagnostic", return_value=diagnostic),
+                patch("ide_scanner.providers.static_analysis.run_bounded_process", side_effect=fake_run),
+            ):
+                findings, result = _run_yara(
+                    root,
+                    "example.extension",
+                    "1.0.0",
+                    [selected],
+                )
+
+        self.assertIn("--scan-list", observed["command"])
+        self.assertNotIn("-r", observed["command"])
+        self.assertEqual(observed["targets"], [str(selected.resolve())])
+        self.assertNotIn(str(excluded.resolve()), observed["targets"])
+        self.assertEqual(result["files_analyzed"], 1)
+        self.assertEqual([item.rule_id for item in findings], ["unicode-evasion"])
+
     def test_yara_python_runs_in_bounded_worker_process(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

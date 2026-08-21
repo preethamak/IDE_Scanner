@@ -162,7 +162,7 @@ def test_timeout_terminates_provider_process_group(tmp_path: Path) -> None:
     def process_state() -> str | None:
         try:
             return proc_state.read_text(encoding="utf-8").split()[2]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return None
 
     for _attempt in range(20):

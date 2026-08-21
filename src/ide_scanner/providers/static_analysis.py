@@ -253,16 +253,35 @@ def _run_yara(
         status.update({"status": "completed", "finding_count": 0, "files_analyzed": 0, "error": ""})
         return [], status
     findings: list[Finding] = []
+    target_file: Path | None = None
     try:
+        if selected is None:
+            scan_options = ["-r"]
+            scan_target = root
+        else:
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", prefix="ide-scanner-native-yara-targets-", delete=False
+            ) as handle:
+                target_file = Path(handle.name)
+                for path in selected:
+                    resolved = str(path.resolve())
+                    if "\n" in resolved or "\r" in resolved:
+                        raise ValueError("YARA target path cannot contain a line break")
+                    handle.write(resolved + "\n")
+            scan_options = ["--scan-list"]
+            scan_target = target_file
         result = run_bounded_process(
-            [executable, "-N", "-r", str(YARA_RULES), str(root)],
+            [executable, "-N", *scan_options, str(YARA_RULES), str(scan_target)],
             timeout=120,
             memory_limit_mb=PROVIDER_MEMORY_LIMIT_MB,
             file_size_limit_mb=PROVIDER_FILE_SIZE_LIMIT_MB,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         status.update({"status": "failed", "error_count": 1, "error": str(exc)})
         return [], status
+    finally:
+        if target_file is not None:
+            target_file.unlink(missing_ok=True)
     if result.returncode in {0, 1}:
         for line in result.stdout.splitlines():
             rule_name, separator, matched_path = line.partition(" ")
