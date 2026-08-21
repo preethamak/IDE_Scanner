@@ -20,6 +20,36 @@ from ide_scanner.providers.static_analysis import (
 
 
 class StaticProviderScopeTests(unittest.TestCase):
+    def test_semgrep_uses_native_memory_guard_without_address_space_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "extension.js"
+            target.write_text("exports.activate = () => {};", encoding="utf-8")
+            observed = {}
+
+            def fake_run(command, **kwargs):
+                observed["command"] = command
+                observed.update(kwargs)
+                return SimpleNamespace(returncode=0, stdout='{"results": [], "errors": []}', stderr="")
+
+            diagnostic = {
+                "provider": "semgrep",
+                "status": "available",
+                "executable": "/scanner/semgrep",
+                "ruleset_hash": "rules",
+            }
+            with (
+                patch("ide_scanner.providers.static_analysis.semgrep_diagnostic", return_value=diagnostic),
+                patch("ide_scanner.providers.static_analysis.semgrep_config_arguments", return_value=[]),
+                patch("ide_scanner.providers.static_analysis.run_bounded_process", side_effect=fake_run),
+            ):
+                _findings, status = _run_semgrep(root, "example.extension", "1.0.0", [target])
+
+        max_memory_index = observed["command"].index("--max-memory")
+        self.assertEqual(observed["command"][max_memory_index + 1], "1536")
+        self.assertIsNone(observed["memory_limit_mb"])
+        self.assertEqual(status["memory_limit_enforcement"], "semgrep_per_file")
+
     def test_native_yara_scans_only_selected_targets(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

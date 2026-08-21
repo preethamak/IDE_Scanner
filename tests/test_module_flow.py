@@ -173,3 +173,16 @@ def test_coverage_ignores_unresolved_non_executable_asset_import():
     modules = [module_summary("extension.js", "require('./package.json')")]
     coverage = module_flow_coverage(modules, {"extension.js"})
     assert coverage["unresolved_executable_import_count"] == 0
+
+
+def test_generated_bundle_keeps_capabilities_without_false_import_edges():
+    module = module_summary(
+        "dist/extension.js",
+        "fetch('https://example.test'); require('../shared/logger')",
+        analyze_imports=False,
+    )
+
+    assert module["download"] is True
+    assert module["imports"] == []
+    coverage = module_flow_coverage([module], {"dist/extension.js"})
+    assert coverage["unresolved_executable_import_count"] == 0

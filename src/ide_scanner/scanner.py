@@ -612,7 +612,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
             if suffix in JS_AST_EXTS:
-                module_summaries.append(module_summary(rel, text))
+                module_summaries.append(module_summary(rel, text, analyze_imports=not generated_blob))
             _add_code_findings(extension_id, version, rel, text, findings, capabilities)
             _add_workspace_cli_path_findings(extension_id, version, manifest, [(rel, text)], findings)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
