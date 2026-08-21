@@ -17,7 +17,7 @@ def test_packaged_calibration_is_valid_and_versioned() -> None:
 
     _validate_calibration(calibration)
     assert calibration["schema_version"] == "1"
-    assert policy_version() == "3.1.0-calibration.2"
+    assert policy_version() == "3.1.0-calibration.3"
 
 
 def test_authoritative_and_heuristic_scores_stay_below_their_safety_gates() -> None:
