@@ -35,6 +35,8 @@ include = ["ide_scanner*"]
 
 [tool.setuptools.package-data]
 ide_scanner = [
+  "calibration/*.json",
+  "contracts/*.json",
   "intelligence/*.json",
   "js_ast/*.js",
   "js_ast/*LICENSE*",

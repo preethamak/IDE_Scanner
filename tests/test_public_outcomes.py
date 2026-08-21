@@ -22,6 +22,22 @@ class PublicOutcomeTests(unittest.TestCase):
         self.assertEqual(report.decision, "review")
         self.assertEqual(report.public_outcome, "investigate")
         self.assertEqual(report.capability_assessment["unexpected"], ["credential_input"])
+        self.assertEqual(report.capability_assessment["contract_class"], "formatter_linter")
+        self.assertEqual(report.capability_assessment["forbidden_observed"], ["credential_input"])
+
+    def test_unprofiled_theme_is_classified_but_not_established(self) -> None:
+        report = _report()
+        report.extension_id = "unknown.pretty-theme"
+        report.publisher = "unknown"
+        report.name = "Pretty Theme"
+        report.description = "A color theme"
+        report.repository = ""
+        apply_public_assessment(report)
+
+        classification = report.capability_assessment["classification"]
+        self.assertEqual(classification["primary"], "theme")
+        self.assertEqual(report.provenance["tier"], "verified")
+        self.assertNotEqual(report.public_outcome, "expected_capability")
 
 
 def _report() -> ExtensionReport:

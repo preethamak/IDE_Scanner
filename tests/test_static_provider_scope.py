@@ -13,11 +13,106 @@ from ide_scanner.providers.static_analysis import (
     _ignore_yara_match,
     _resolved_targets,
     _run_semgrep,
+    _run_yara,
+    _run_yara_python,
     _semgrep_diagnostic_text,
 )
 
 
 class StaticProviderScopeTests(unittest.TestCase):
+    def test_native_yara_scans_only_selected_targets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "extension.js"
+            excluded = root / "excluded.js"
+            selected.write_text("const selected = 1;", encoding="utf-8")
+            excluded.write_text("const excluded = 1;", encoding="utf-8")
+            observed = {}
+
+            def fake_run(command, **kwargs):
+                observed["command"] = command
+                observed["targets"] = Path(command[-1]).read_text(encoding="utf-8").splitlines()
+                observed.update(kwargs)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=f"ide_scanner_unicode_evasion {selected}\n",
+                    stderr="",
+                )
+
+            diagnostic = {"provider": "yara", "status": "available", "executable": "/scanner/yara"}
+            with (
+                patch("ide_scanner.providers.static_analysis.yara_diagnostic", return_value=diagnostic),
+                patch("ide_scanner.providers.static_analysis.run_bounded_process", side_effect=fake_run),
+            ):
+                findings, result = _run_yara(
+                    root,
+                    "example.extension",
+                    "1.0.0",
+                    [selected],
+                )
+
+        self.assertIn("--scan-list", observed["command"])
+        self.assertNotIn("-r", observed["command"])
+        self.assertEqual(observed["targets"], [str(selected.resolve())])
+        self.assertNotIn(str(excluded.resolve()), observed["targets"])
+        self.assertEqual(result["files_analyzed"], 1)
+        self.assertEqual([item.rule_id for item in findings], ["unicode-evasion"])
+
+    def test_yara_python_runs_in_bounded_worker_process(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "extension.js"
+            target.write_text("const value = 1;", encoding="utf-8")
+            payload = {
+                "schema_version": "1",
+                "files_analyzed": 1,
+                "matches": [{"rule": "ide_scanner_unicode_evasion", "path": "extension.js"}],
+                "errors": [],
+                "truncated": False,
+            }
+            observed = {}
+
+            def fake_run(command, **kwargs):
+                observed["command"] = command
+                observed.update(kwargs)
+                return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+            status = {"provider": "yara", "status": "available", "executable": "yara-python"}
+            with patch("ide_scanner.providers.static_analysis.run_bounded_process", side_effect=fake_run):
+                findings, result = _run_yara_python(root, "example.extension", "1.0.0", status, [target])
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["isolation"], "subprocess")
+        self.assertEqual(result["files_analyzed"], 1)
+        self.assertEqual([item.rule_id for item in findings], ["unicode-evasion"])
+        self.assertIn("ide_scanner.providers.yara_worker", observed["command"])
+        self.assertGreater(observed["memory_limit_mb"], 0)
+        self.assertGreater(observed["file_size_limit_mb"], 0)
+
+    def test_yara_worker_errors_fail_provider_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "extension.js"
+            target.write_text("const value = 1;", encoding="utf-8")
+            payload = {
+                "schema_version": "1",
+                "files_analyzed": 0,
+                "matches": [],
+                "errors": [{"path": "extension.js", "error": "scan timeout"}],
+                "truncated": False,
+            }
+            status = {"provider": "yara", "status": "available", "executable": "yara-python"}
+            with patch(
+                "ide_scanner.providers.static_analysis.run_bounded_process",
+                return_value=SimpleNamespace(returncode=2, stdout=json.dumps(payload), stderr=""),
+            ):
+                findings, result = _run_yara_python(root, "example.extension", "1.0.0", status, [target])
+
+        self.assertEqual(findings, [])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_count"], 1)
+        self.assertIn("scan timeout", result["error"])
+
     def test_semgrep_target_errors_fail_provider_completion(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

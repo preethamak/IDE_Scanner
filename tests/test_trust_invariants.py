@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import unittest
 import zipfile
 from pathlib import Path
@@ -9,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ide_scanner.scanner import (
+    _artifact_inventory,
     _finalize_analysis_coverage,
     _javascript_ast_provider_status,
     _read_manifest_status,
@@ -120,6 +122,15 @@ class ProviderStatusTests(unittest.TestCase):
         self.assertTrue(record["required"])
         self.assertIn("Node runtime unavailable", record["error"])
         self.assertEqual(record["failed_paths"], ["extension.js"])
+
+    def test_ast_resource_skip_is_disclosed_and_fails_required_provider(self) -> None:
+        record = _javascript_ast_provider_status(["resource-skipped"], ["large.js"])
+
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["failed_files"], 1)
+        self.assertEqual(record["failed_paths"], ["large.js"])
+        self.assertIn("memory-safety limit", record["error"])
+        self.assertIn("max_input_bytes_per_file", record)
 
     def test_all_ok_completes(self) -> None:
         record = _javascript_ast_provider_status(["ok", "ok"])
@@ -385,6 +396,35 @@ class BoundedReadTests(unittest.TestCase):
 
 
 class InventoryIsolationTests(unittest.TestCase):
+    def test_artifact_hashing_runs_in_bounded_worker(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "extension.js"
+            artifact.write_text("const x = 1;", encoding="utf-8")
+            payload = {
+                "schema_version": "1",
+                "status": "complete",
+                "inventory": {"package_hash": "a" * 64, "_all_file_hashes": []},
+            }
+            completed = subprocess.CompletedProcess([], 0, json.dumps(payload), "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=completed) as bounded:
+                inventory = _artifact_inventory(root, [artifact])
+        self.assertEqual(inventory["package_hash"], "a" * 64)
+        kwargs = bounded.call_args.kwargs
+        self.assertEqual(kwargs["timeout"], 300)
+        self.assertEqual(kwargs["memory_limit_mb"], 768)
+        self.assertIn("inventory", bounded.call_args.args[0])
+
+    def test_artifact_worker_failure_is_fail_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "extension.js"
+            artifact.write_text("const x = 1;", encoding="utf-8")
+            failed = subprocess.CompletedProcess([], 1, '{"status":"failed","error":"hash failed"}', "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=failed):
+                with self.assertRaisesRegex(ValueError, "hash failed"):
+                    _artifact_inventory(root, [artifact])
+
     def test_requested_deep_provider_failure_makes_result_incomplete(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -432,6 +472,35 @@ class InventoryIsolationTests(unittest.TestCase):
 
 
 class VsixArchiveHardeningTests(unittest.TestCase):
+    def test_extraction_runs_in_bounded_worker(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vsix = root / "safe.vsix"
+            destination = root / "out"
+            destination.mkdir()
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{}')
+            with patch("ide_scanner.scanner.run_bounded_process") as bounded:
+                bounded.return_value = subprocess.CompletedProcess(
+                    [], 0, '{"schema_version":"1","status":"complete","anomalies":{}}', ""
+                )
+                self.assertEqual(_safe_extract_vsix(vsix, destination), {})
+        kwargs = bounded.call_args.kwargs
+        self.assertEqual(kwargs["timeout"], 180)
+        self.assertEqual(kwargs["memory_limit_mb"], 512)
+
+    def test_extraction_worker_failure_is_fail_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vsix = root / "bad.vsix"
+            vsix.write_bytes(b"not-used")
+            destination = root / "out"
+            destination.mkdir()
+            failed = subprocess.CompletedProcess([], 1, '{"status":"failed","error":"bad archive"}', "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=failed):
+                with self.assertRaisesRegex(ValueError, "bad archive"):
+                    _safe_extract_vsix(vsix, destination)
+
     def test_vsix_instance_identity_is_stable_across_extractions(self) -> None:
         with TemporaryDirectory() as tmp:
             vsix = Path(tmp) / "stable.vsix"
