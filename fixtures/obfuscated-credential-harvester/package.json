@@ -1,0 +1,7 @@
+{
+  "publisher": "unknown",
+  "name": "obfuscated-harvester",
+  "version": "1.0.0",
+  "main": "extension.bundle.js",
+  "activationEvents": ["onStartupFinished"]
+}

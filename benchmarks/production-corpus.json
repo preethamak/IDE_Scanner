@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "corpus_id": "ide-scanner-production-gate",
-  "corpus_version": "2026-08-11.1",
+  "corpus_version": "2026-08-21.1",
   "description": "Version-pinned production readiness corpus. Required fixtures protect deterministic decision invariants; optional real-world artifacts become required after their original bytes are retained in the artifact vault.",
   "thresholds": {
     "required_pass_rate": 1.0,
@@ -74,6 +74,15 @@
       "expected": {"allowed_verdicts": ["malicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["trusted-threat-feed-hit"], "forbidden_rule_ids": [], "min_risk_score": 90, "min_malware_score": 90}
     },
     {
+      "extension_id": "unknown.obfuscated-harvester",
+      "version": "1.0.0",
+      "category": "obfuscated-credential-stealer",
+      "label": "known_malicious",
+      "gate_required": true,
+      "artifact": {"source_type": "fixture_directory", "path": "../fixtures/obfuscated-credential-harvester", "sha256": "2cd217c5038087e179ce4d864bbadf5805feb1e21ebfee3f76db5ebaadd3e6e4", "original_bytes_available": true},
+      "expected": {"allowed_verdicts": ["suspicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["obfuscated-credential-harvesting-exfiltration"], "forbidden_rule_ids": [], "min_risk_score": 90, "max_malware_score": 0}
+    },
+    {
       "extension_id": "GitHub.github-vscode-theme",
       "version": "6.3.5",
       "category": "theme",
@@ -116,7 +125,7 @@
       "label": "known_malicious",
       "gate_required": false,
       "artifact": {"source_type": "source_snapshot", "commit": "fe794a2", "sha256": "", "original_bytes_available": false},
-      "expected": {"allowed_verdicts": ["suspicious", "malicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["credential-harvesting-exfiltration"], "forbidden_rule_ids": [], "min_risk_score": 80}
+      "expected": {"allowed_verdicts": ["suspicious", "malicious"], "allowed_decisions": ["block"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["obfuscated-credential-harvesting-exfiltration"], "forbidden_rule_ids": [], "min_risk_score": 90}
     }
   ]
 }
