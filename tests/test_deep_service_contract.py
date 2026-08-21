@@ -20,9 +20,11 @@ def test_marketplace_service_uses_exact_version_and_deep_provider_contract() -> 
         store = JobStore(Path(temp))
         job = store.create("publisher.extension")
         job["version"] = "1.2.3"
+        job["target_platform"] = "linux-x64"
         execute_marketplace_job(store, job, scan=fake_scan)
 
     assert observed["marketplace_version"] == "1.2.3"
+    assert observed["marketplace_target_platform"] == "linux-x64"
     assert observed["required_providers"] == frozenset(
         {"semgrep", "yara", "dependency_intelligence"}
     )

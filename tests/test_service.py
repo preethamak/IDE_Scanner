@@ -16,6 +16,14 @@ class ScannerServiceTests(unittest.TestCase):
             self.assertEqual(report_ref, f"/v1/reports/{job['id']}")
             self.assertEqual(store.get_report(job["id"])["metadata"]["scan_id"], "scan-1")
 
+    def test_job_store_persists_exact_marketplace_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension", version="1.2.3", target_platform="linux-x64")
+            persisted = store.get(job["id"])
+            self.assertEqual(persisted["version"], "1.2.3")
+            self.assertEqual(persisted["target_platform"], "linux-x64")
+
     def test_marketplace_job_writes_canonical_bundle(self) -> None:
         fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
 
