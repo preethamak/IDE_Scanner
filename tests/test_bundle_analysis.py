@@ -113,3 +113,18 @@ def test_unrelated_polling_loop_and_array_calls_do_not_form_rotation_scaffold() 
     assert "rotating-string-array" not in profile["obfuscation_indicators"]
     assert profile["strong_obfuscation"] is False
     assert profile["harvesting_exfiltration"] is False
+
+
+def test_parser_loop_with_separate_push_and_shift_is_not_array_rotation() -> None:
+    source = (
+        "while (true) { switch (token()) { case 1: comments.push(text); break; } }"
+        + "x" * 3_000
+        + "comments.shift();"
+        + r"\x61" * 120
+        + "obj[key];" * 40
+    )
+
+    profile = analyze_generated_bundle(source)
+
+    assert "rotating-string-array" not in profile["obfuscation_indicators"]
+    assert profile["strong_obfuscation"] is False
