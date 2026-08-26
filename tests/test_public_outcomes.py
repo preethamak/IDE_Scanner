@@ -1,7 +1,7 @@
 import unittest
 
 from ide_scanner.models import ExtensionReport, Finding
-from ide_scanner.public_outcomes import _repository_owner_match, apply_public_assessment
+from ide_scanner.public_outcomes import _repository_owner_match, apply_public_assessment, provenance_facts
 
 
 class RepositoryOwnerMatchTests(unittest.TestCase):
@@ -56,6 +56,31 @@ class PublicOutcomeTests(unittest.TestCase):
         self.assertEqual(report.capability_assessment["unexpected"], ["credential_input"])
         self.assertEqual(report.capability_assessment["contract_class"], "formatter_linter")
         self.assertEqual(report.capability_assessment["forbidden_observed"], ["credential_input"])
+
+    def test_marketplace_cdn_acquisition_binds_when_digest_unavailable(self) -> None:
+        """Listings without a per-version digest (platform-variant artifacts)
+        still bind via TLS-served marketplace CDN origin; Open VSX fallback
+        downloads never qualify."""
+        report = _report()
+        report.artifact_inventory["vsix_signature"]["package_integrity"] = {
+            "matched": False, "expected": "", "actual": "a" * 64, "source": "unavailable",
+        }
+        report.artifact_identity["acquisition"] = {
+            "url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/x/vsextensions/y/1/vspackage",
+            "download_host": "marketplace.visualstudio.com",
+            "registry_served": True,
+        }
+        facts = provenance_facts(report)
+        self.assertTrue(facts["artifact_bound"])
+        self.assertEqual(facts["tier"], "established")
+
+        report.artifact_identity["acquisition"] = {
+            "url": "https://open-vsx.org/api/-/extension/x/y/1/file/x.y-1.vsix",
+            "download_host": "open-vsx.org",
+            "registry_served": False,
+        }
+        facts = provenance_facts(report)
+        self.assertFalse(facts["artifact_bound"])
 
     def test_unprofiled_theme_is_classified_but_not_established(self) -> None:
         report = _report()

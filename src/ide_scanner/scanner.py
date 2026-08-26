@@ -11,6 +11,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 from .artifact_store import ArtifactStore, ArtifactStoreError, StoredArtifact, artifact_store_from_environment
@@ -1055,6 +1056,23 @@ def _apply_marketplace_integrity(report: ExtensionReport, registry_source: dict[
     }
     report.artifact_inventory["vsix_signature"] = signature
     report.artifact_identity["signature"] = dict(signature)
+    # Some listings (notably platform-variant artifacts) publish no per-version
+    # digest. Record where the bytes actually came from: TLS-served marketplace
+    # CDN origin is a weaker but still meaningful identity anchor for the
+    # provenance tier, while Open VSX fallback downloads never qualify.
+    download_url = str(registry_source.get("download_url") or "")
+    host = urlparse(download_url).netloc.lower() if download_url else ""
+    report.artifact_identity["acquisition"] = {
+        "url": download_url,
+        "download_host": host,
+        "registry_served": bool(
+            registry_source.get("registry") == "vs-marketplace"
+            and (
+                host == "marketplace.visualstudio.com"
+                or host.endswith(".vsassets.io")
+            )
+        ),
+    }
 
 
 def _marketplace_error_extension(identifier: str, message: str) -> ExtensionReport:
@@ -1379,6 +1397,41 @@ def _extract_download_url(text: str) -> str:
     """
     match = re.search(r"https?://[^\s\"'`<>\\)]+", text)
     return match.group(0).rstrip(".,;") if match else ""
+
+
+# Whole-file "first URL" attribution is noise on real bundles: telemetry
+# collectors (dc.services.visualstudio.com), docs links, and shorteners
+# outnumber actual download targets. Chain findings anchor their URL stamp to
+# the call sites instead.
+_CHAIN_WINDOW_CHARS = 600
+
+_INSTALL_EXTENSION_RE = re.compile(
+    r"(?:workbench\.extensions\.installExtension|commands\.executeCommand\s*\(\s*['\"]workbench\.extensions\.installExtension)",
+    re.I,
+)
+
+
+def _extract_window_download(text: str, anchors: list[re.Pattern[str]]) -> tuple[str, str]:
+    """Return ``(host, url)`` for the first literal URL within a character
+    window of any anchor match (download or install call sites).
+
+    No nearby literal URL returns ``("", "")`` — the finding stays unstamped
+    and the intent gate fails closed rather than guessing.
+    """
+    spans: list[tuple[int, int]] = []
+    for anchor in anchors:
+        for match in anchor.finditer(text):
+            spans.append((
+                max(0, match.start() - _CHAIN_WINDOW_CHARS),
+                min(len(text), match.end() + _CHAIN_WINDOW_CHARS),
+            ))
+    for start, end in sorted(spans):
+        url_match = re.search(r"https?://[^\s\"'`<>\\)]+", text[start:end])
+        if url_match:
+            url = url_match.group(0).rstrip(".,;")
+            host_match = _URL_HOST_RE.search(url)
+            return (str(host_match.group(1)).lower() if host_match else "", url)
+    return "", ""
 
 
 _MINIFIED_BLOB_MIN_BYTES = 48 * 1024
@@ -1828,11 +1881,7 @@ def _add_code_findings(
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
     file_class = "bundled-dependency" if _is_bundled_dependency(rel, text) else "hand-written"
-    has_remote_vsix_install = bool(re.search(
-        r"(?:workbench\.extensions\.installExtension|commands\.executeCommand\s*\(\s*['\"]workbench\.extensions\.installExtension)",
-        text,
-        re.I,
-    ))
+    has_remote_vsix_install = bool(_INSTALL_EXTENSION_RE.search(text))
     has_integrity_verification = has_integrity_gate(text)
     # A standalone "mcp" token is common in documentation, error messages, and
     # word lists. Require an actual agent API or protocol identifier before using
@@ -1885,6 +1934,7 @@ def _add_code_findings(
         ))
 
     if has_remote_vsix_install and has_download and has_file_write and not has_integrity_verification:
+        chain_host, chain_url = _extract_window_download(text, [DOWNLOAD_RE, _INSTALL_EXTENSION_RE])
         findings.append(_finding(
             extension_id,
             version,
@@ -1902,8 +1952,8 @@ def _add_code_findings(
                 "transform": "local-vsix-write",
                 "sink": "workbench.extensions.installExtension",
                 "integrity_verification": False,
-                "download_host": _extract_download_host(text),
-                "download_url": _extract_download_url(text),
+                "download_host": chain_host,
+                "download_url": chain_url,
             },
         ))
 
@@ -2170,6 +2220,7 @@ def _add_code_findings(
         DOWNLOAD_RE,
         process_exec_re,
     ]):
+        chain_host, chain_url = _extract_window_download(text, [DOWNLOAD_RE, process_exec_re])
         findings.append(_finding(
             extension_id,
             version,
@@ -2183,8 +2234,8 @@ def _add_code_findings(
             {
                 "evidence_class": "correlated",
                 "context": {"file_class": file_class},
-                "download_host": _extract_download_host(text),
-                "download_url": _extract_download_url(text),
+                "download_host": chain_host,
+                "download_url": chain_url,
             },
         ))
     _add_cross_extension_code_findings(

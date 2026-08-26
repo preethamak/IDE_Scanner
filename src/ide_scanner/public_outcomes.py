@@ -107,7 +107,13 @@ def provenance_facts(extension: ExtensionReport) -> dict[str, Any]:
     signature = signature if isinstance(signature, dict) else {}
     package_integrity = signature.get("package_integrity")
     package_integrity = package_integrity if isinstance(package_integrity, dict) else {}
-    artifact_sha_bound = bool(package_integrity.get("matched"))
+    acquisition = identity.get("acquisition")
+    acquisition = acquisition if isinstance(acquisition, dict) else {}
+    # Two binding tiers: exact digest equality against the listing's published
+    # hash (strongest), or bytes served by the marketplace CDN itself over TLS
+    # for listings that publish no per-version digest. Open VSX fallback
+    # downloads never qualify.
+    artifact_sha_bound = bool(package_integrity.get("matched")) or bool(acquisition.get("registry_served"))
     artifact_consistent = (
         identity.get("extension_id") == extension.extension_id
         and identity.get("version") == extension.version

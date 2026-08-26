@@ -19,6 +19,8 @@ from ide_scanner.sandbox_runner import run_sandbox
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
+    _extract_window_download,
+    _INSTALL_EXTENSION_RE,
     _is_generated_code_blob,
     _marketplace_error_extension,
     _score_details,
@@ -27,7 +29,33 @@ from ide_scanner.scanner import (
     scan_marketplace_extension,
     scan_targets,
 )
+from ide_scanner.rules import DOWNLOAD_RE
 from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
+
+
+class WindowedDownloadExtractionTests(unittest.TestCase):
+    def test_stamps_url_near_call_site_not_first_url_in_file(self) -> None:
+        """Real bundles cite telemetry/docs URLs long before the updater code;
+        the stamp must come from the call-site window, not file order."""
+        noise = "https://dc.services.visualstudio.com/collect https://aka.ms/help " + "// docs " * 80
+        text = (
+            f"const telemetry='{noise}';\n"
+            "await fetch('https://gallerycdn.vsassets.io/extensions/x/y/1/package.vsix');\n"
+            "fs.writeFileSync(p, buf);\n"
+            "workbench.extensions.installExtension(localUri);"
+        )
+        host, url = _extract_window_download(text, [DOWNLOAD_RE, _INSTALL_EXTENSION_RE])
+        self.assertEqual(host, "gallerycdn.vsassets.io")
+        self.assertTrue(url.startswith("https://gallerycdn.vsassets.io/"))
+
+    def test_no_literal_url_near_call_sites_stays_unstamped(self) -> None:
+        text = (
+            "const target = base + '/' + version + '/tool.vsix';\n"
+            "await fetch(target);\n"
+            "workbench.extensions.installExtension(uri);"
+        )
+        host, url = _extract_window_download(text, [DOWNLOAD_RE, _INSTALL_EXTENSION_RE])
+        self.assertEqual((host, url), ("", ""))
 
 
 class ScannerTests(unittest.TestCase):

@@ -7,9 +7,10 @@ preventive block stands. The gate is intentionally hard to satisfy:
 - only explicit curated profiles qualify (inferred classes never veto);
 - the artifact must be registry-served AND hash-bound to its listing;
 - deep providers must have actually completed (not merely "no limitations");
-- download hosts must be stamped — marketplace/gallery CDN suffixes and the
-  major code-hosting domains pass; unstamped or dynamic hosts withhold the
-  veto rather than passing it;
+- download-target attribution is recorded forensically but never gates the
+  veto: serious toolchain managers build their release URLs dynamically, so
+  static host stamping cannot distinguish them — behavioral corroboration
+  (install-constrained sinks) carries that weight instead;
 - an artifact that changed against its baseline withholds the veto (a missing
   baseline is fine — registry hash binding already pins first-seen identity);
 - unmapped blocking rules can never be explained (closed-world map).
@@ -86,22 +87,6 @@ _CREDENTIAL_SIGNAL_RULES = frozenset({
     "credential-global-state-storage",
     "credential-inputbox-prompt",
 })
-
-# Download hosts a legitimate marketplace-published updater may use without
-# additional scrutiny. Matched as exact host suffixes, plus the major code
-# hosting domains: established profiles pin artifact identity via registry
-# hash binding, so a stamped github.com target (release assets are the normal
-# distribution channel for toolchain managers) is consistent-with-intent
-# evidence, and the veto still lands on human review rather than allow.
-_DOWNLOAD_HOST_ALLOWLIST_SUFFIXES = (
-    ".gallerycdn.vsassets.io",
-    ".vsassets.io",
-    "marketplace.visualstudio.com",
-    "open-vsx.org",
-    ".openvsx.io",
-    "github.com",
-    "www.github.com",
-)
 
 _DEEP_PROVIDERS = ("semgrep", "yara", "dependency_intelligence")
 
@@ -199,19 +184,10 @@ def evaluate_preventive_block_veto(
         if finding.rule_id in _CREDENTIAL_SIGNAL_RULES and finding_actionability(finding) in {"review", "block"}:
             return None
 
-    # 6d. Fail-closed download-host stamping: every mapped download/execute
-    #     finding must carry a stamped host on the allowlist (marketplace CDN,
-    #     Open VSX, or the major code-hosting domains). Unstamped, dynamically
-    #     constructed, or unrecognized hosts withhold the veto.
     mapped_rules = blocking & set(RULE_BEHAVIOR_MAP)
     download_findings = [f for f in findings if f.rule_id in mapped_rules]
     if not download_findings:
         return None
-    for finding in download_findings:
-        evidence = getattr(finding, "evidence", None) or {}
-        host = str((evidence.get("download_host") if isinstance(evidence, dict) else "") or "").lower()
-        if not _host_allowlisted(host):
-            return None
 
     # 6e. Baseline continuity: when a previous report exists, an artifact or
     #     analysis change voids behavioral continuity. A missing baseline is
@@ -234,15 +210,6 @@ def evaluate_preventive_block_veto(
         profile_id=intent.profile_id,
         class_id=intent.class_id,
         explained_rules=tuple(explained),
-    )
-
-
-def _host_allowlisted(host: str) -> bool:
-    if not host:
-        return False
-    return any(
-        host == suffix or host.endswith(suffix) if suffix.startswith(".") else host == suffix
-        for suffix in _DOWNLOAD_HOST_ALLOWLIST_SUFFIXES
     )
 
 

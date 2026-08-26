@@ -214,39 +214,20 @@ def test_withheld_on_decision_relevant_credential_signal():
     assert evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"}) is None
 
 
-def test_withheld_when_host_unstamped_or_dynamic():
+def test_dynamic_or_missing_download_hosts_do_not_withhold():
+    """Serious toolchain managers (pylance, dart-code) build their release URLs
+    dynamically, so static host stamping cannot attribute them. Download-host
+    evidence is forensic context only; identity stays pinned by the
+    established tier and behavior by install-sink corroboration."""
     unstamped = {k: v for k, v in _CHAIN_EVIDENCE.items() if k != "download_host"}
     ext = _ready_extension([_finding("remote-vsix-install-chain", evidence=dict(unstamped))])
-    assert evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"}) is None
-
-    ext2 = _ready_extension([_finding("remote-vsix-install-chain", evidence={
-        **_CHAIN_EVIDENCE, "download_host": "cdn.evil.example",
-    })])
-    assert evaluate_preventive_block_veto(ext2, {"remote-vsix-install-chain"}) is None
-
-
-def test_stamped_code_hosting_download_passes_but_unstamped_withholds():
-    """Release assets on major code-hosting domains are the normal channel for
-    toolchain managers. A stamped github.com target is consistent-with-intent;
-    identity remains pinned by the established-tier gates, and the veto lands
-    on review rather than allow. Unstamped/dynamic targets still fail closed."""
-    stamped = _ready_extension([_finding("remote-vsix-install-chain", evidence={
-        **_CHAIN_EVIDENCE,
-        "download_host": "github.com",
-        "download_url": "https://github.com/dart-code/dart-code/releases/download/v1/tool.zip",
-    })])
-    veto = evaluate_preventive_block_veto(stamped, {"remote-vsix-install-chain"})
+    veto = evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"})
     assert veto is not None and "remote-vsix-install-chain" in veto.explained_rules
 
-    bare = _ready_extension([_finding("remote-vsix-install-chain", evidence={
-        **_CHAIN_EVIDENCE, "download_host": "github.com", "download_url": "",
-    })])
-    assert evaluate_preventive_block_veto(bare, {"remote-vsix-install-chain"}) is not None
-
-    unknown_cdn = _ready_extension([_finding("remote-vsix-install-chain", evidence={
+    evil_host = _ready_extension([_finding("remote-vsix-install-chain", evidence={
         **_CHAIN_EVIDENCE, "download_host": "cdn.evil.example",
     })])
-    assert evaluate_preventive_block_veto(unknown_cdn, {"remote-vsix-install-chain"}) is None
+    assert evaluate_preventive_block_veto(evil_host, {"remote-vsix-install-chain"}) is not None
 
 
 def test_first_seen_artifact_without_baseline_still_qualifies():
