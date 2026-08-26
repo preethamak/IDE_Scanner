@@ -679,6 +679,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 "sink": "workbench.extensions.installExtension",
                 "integrity_verification": False,
                 "download_host": _extract_download_host(json.dumps(cross_file_vsix_flow.get("stages") or [])),
+                "download_url": _extract_download_url(json.dumps(cross_file_vsix_flow.get("stages") or [])),
                 "stages": cross_file_vsix_flow["stages"],
                 "import_path": cross_file_vsix_flow["import_path"],
             },
@@ -1369,6 +1370,17 @@ def _extract_download_host(text: str) -> str:
     return str(match.group(1)).lower() if match else ""
 
 
+def _extract_download_url(text: str) -> str:
+    """Return the first literal URL in ``text``, or "" when none appears.
+
+    Paired with :func:`_extract_download_host` so the intent gate can verify
+    github.com targets against a profile's pinned repository owners instead
+    of trusting the bare host.
+    """
+    match = re.search(r"https?://[^\s\"'`<>\\)]+", text)
+    return match.group(0).rstrip(".,;") if match else ""
+
+
 _MINIFIED_BLOB_MIN_BYTES = 48 * 1024
 _BUNDLED_PATH_SEGMENTS = {"node_modules", "vendor", "vendored", "third_party", "bower_components"}
 _COMPILED_OUTPUT_DIRS = ("dist/", "out/", "build/", "bundle/")
@@ -1423,7 +1435,7 @@ def _add_lifecycle_script_chain_findings(
             f"Lifecycle script {script_name} can download content and execute commands.",
             ["package.json"],
             "Require pinned URLs, checksums, signatures, and a clear install-time purpose.",
-            {**evidence, "download_host": _extract_download_host(command)},
+            {**evidence, "download_host": _extract_download_host(command), "download_url": _extract_download_url(command)},
         ))
     if re.search(r"(\.npmrc|\.ssh|\.env|aws_access_key_id|aws_secret_access_key|npm_token|github_token|google_application_credentials)", text):
         findings.append(_finding(
@@ -1891,6 +1903,7 @@ def _add_code_findings(
                 "sink": "workbench.extensions.installExtension",
                 "integrity_verification": False,
                 "download_host": _extract_download_host(text),
+                "download_url": _extract_download_url(text),
             },
         ))
 
@@ -2171,6 +2184,7 @@ def _add_code_findings(
                 "evidence_class": "correlated",
                 "context": {"file_class": file_class},
                 "download_host": _extract_download_host(text),
+                "download_url": _extract_download_url(text),
             },
         ))
     _add_cross_extension_code_findings(

@@ -1,9 +1,9 @@
 """Run the served-registry cohort through the full production scan path.
 
 For every artifact listed in the expectations manifest this performs the same
-flow the CI runner uses — marketplace download with SHA-256 integrity binding,
-online registry enrichment, deep profile with required providers — then saves
-the canonical report JSON for comparison against pre-change baselines.
+flow the CI worker uses — ``scan_targets`` with marketplace download (SHA-256
+integrity binding), online registry enrichment, and the deep provider profile
+— then saves the canonical report JSON for comparison against expectations.
 
 Resumable: an artifact whose report already exists on disk is skipped unless
 --force is passed. Designed to run in the background over long wall clocks;
@@ -28,6 +28,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+# Large publisher artifacts (claude-code, pylance, ...) exceed the 50 MiB
+# default download cap; match the production worker's ceiling.
+os.environ.setdefault("IDE_SCANNER_MAX_VSIX_BYTES", "524288000")
 os.environ.setdefault("IDE_SCANNER_BUILD_SHA", "local-cohort-validation")
 
 
@@ -52,7 +55,7 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     wanted_ids = {item.strip().lower() for item in args.ids.split(",") if item.strip()}
-    pending: list[str] = []
+    pending: list[tuple[str, str, dict, Path]] = []
     for key, row in expectations.items():
         ext_id = str(row.get("extension_id") or key.split("@")[0])
         if wanted_ids and ext_id.lower() not in wanted_ids:
@@ -60,7 +63,7 @@ def main() -> None:
         report_path = args.out_dir / f"{ext_id.replace('/', '_')}@{row.get('version')}.json"
         if not args.force and report_path.exists():
             continue
-        pending.append((key, ext_id, row, report_path))  # type: ignore[list-item]
+        pending.append((key, ext_id, row, report_path))
     pending.sort()
     if args.limit:
         pending = pending[: args.limit]
@@ -68,8 +71,9 @@ def main() -> None:
     print(f"{len(pending)} artifact(s) to scan", flush=True)
 
     # Imported after env setup so IDE_SCANNER_BUILD_SHA binds this run.
-    from ide_scanner.scanner import scan_marketplace_extension
+    from ide_scanner.scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
+    meta_path = args.out_dir / "_meta.json"
     failures: list[str] = []
     started = time.time()
     for index, (key, ext_id, row, report_path) in enumerate(pending, start=1):
@@ -77,13 +81,29 @@ def main() -> None:
         label = f"[{index}/{len(pending)}] {ext_id}@{version}"
         began = time.time()
         try:
-            report = scan_marketplace_extension(ext_id, version=version)
-            payload = report.to_dict()
+            bundle = scan_targets(
+                marketplace_scan_ids=[ext_id],
+                marketplace_version=version,
+                online=True,
+                required_providers=set(DEEP_REQUIRED_PROVIDERS),
+            )
+            extensions = [item for item in bundle.get("extensions", []) if isinstance(item, dict)]
+            if len(extensions) != 1:
+                raise RuntimeError(f"expected exactly one extension in bundle, got {len(extensions)}")
+            payload = extensions[0]
             report_path.write_text(json.dumps(payload, ensure_ascii=False))
+            if not meta_path.exists():
+                meta_path.write_text(json.dumps({
+                    "policy_version": bundle.get("policy_version"),
+                    "ruleset_version": bundle.get("ruleset_version"),
+                    "scanner_build": bundle.get("scanner_build"),
+                    "score_schema_version": bundle.get("score_schema_version"),
+                }, indent=2))
             status = payload.get("analysis_status")
             decision = payload.get("decision")
+            basis = payload.get("decision_basis")
             print(
-                f"{label} -> {status}/{decision} "
+                f"{label} -> {status}/{decision}/{basis} "
                 f"risk={payload.get('risk_score')} malware={payload.get('malware_score')} "
                 f"({time.time() - began:.0f}s)",
                 flush=True,

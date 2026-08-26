@@ -1,7 +1,39 @@
 import unittest
 
 from ide_scanner.models import ExtensionReport, Finding
-from ide_scanner.public_outcomes import apply_public_assessment
+from ide_scanner.public_outcomes import _repository_owner_match, apply_public_assessment
+
+
+class RepositoryOwnerMatchTests(unittest.TestCase):
+    def test_matches_owner_repo_pair_case_insensitively(self) -> None:
+        self.assertTrue(
+            _repository_owner_match("https://github.com/Dart-Code/Dart-Code", ["dart-code/dart-code"])
+        )
+
+    def test_strips_git_suffix(self) -> None:
+        """Marketplace manifests overwhelmingly use ``.git`` URLs; the segment
+        comparison must normalize the suffix or every real profile fails."""
+        self.assertTrue(
+            _repository_owner_match("https://github.com/Dart-Code/Dart-Code.git", ["dart-code/dart-code"])
+        )
+        self.assertTrue(
+            _repository_owner_match("https://github.com/MICROSOFT/vscode-python-environments.GIT", [
+                "microsoft/vscode-python-environments"
+            ])
+        )
+
+    def test_rejects_substring_and_path_spoofs(self) -> None:
+        self.assertFalse(
+            _repository_owner_match("https://github.com/attacker/dart-code.git", ["dart-code/dart-code"])
+        )
+        self.assertFalse(
+            _repository_owner_match("https://github.com/dart-code/dart-code-extra.git", ["dart-code/dart-code"])
+        )
+        self.assertFalse(
+            _repository_owner_match("https://gitlab.com/dart-code/dart-code.git", ["dart-code/dart-code"])
+        )
+        self.assertFalse(_repository_owner_match("", ["dart-code/dart-code"]))
+        self.assertFalse(_repository_owner_match("https://github.com/dart-code/dart-code.git", []))
 
 
 class PublicOutcomeTests(unittest.TestCase):

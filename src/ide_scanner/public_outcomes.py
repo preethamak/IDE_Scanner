@@ -164,7 +164,10 @@ def _repository_owner_match(repository: str, owners: list[str] | None) -> bool:
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:
         return False
-    candidate = f"{parts[0]}/{parts[1]}".lower()
+    repo_segment = parts[1]
+    if repo_segment.lower().endswith(".git"):
+        repo_segment = repo_segment[: -len(".git")]
+    candidate = f"{parts[0]}/{repo_segment}".lower()
     return candidate in {str(owner).strip().lower() for owner in owners}
 
 

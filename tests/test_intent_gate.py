@@ -187,12 +187,23 @@ def test_withheld_on_deny_family_presence():
         assert evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"}) is None
 
 
-def test_withheld_on_secret_reference():
-    ext = _ready_extension([
+def test_weak_secret_reference_does_not_withhold_but_correlated_does():
+    """Weak/contextual secret mentions (tooling legitimately loading .env
+    files) coexist with established profiles; decision-relevant ones do not."""
+    weak = _ready_extension([
         _finding("remote-vsix-install-chain", evidence=dict(_CHAIN_EVIDENCE)),
-        _finding("secret-reference:env-file", severity="INFO", confidence=0.56),
+        _finding("secret-reference:env-file", severity="LOW", confidence=0.56,
+                 evidence={"evidence_class": "weak"}),
     ])
-    assert evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"}) is None
+    veto = evaluate_preventive_block_veto(weak, {"remote-vsix-install-chain"})
+    assert veto is not None and "remote-vsix-install-chain" in veto.explained_rules
+
+    correlated = _ready_extension([
+        _finding("remote-vsix-install-chain", evidence=dict(_CHAIN_EVIDENCE)),
+        _finding("secret-reference:hardcoded-key", severity="HIGH", confidence=0.9,
+                 evidence={"evidence_class": "correlated"}),
+    ])
+    assert evaluate_preventive_block_veto(correlated, {"remote-vsix-install-chain"}) is None
 
 
 def test_withheld_on_decision_relevant_credential_signal():
@@ -214,10 +225,39 @@ def test_withheld_when_host_unstamped_or_dynamic():
     assert evaluate_preventive_block_veto(ext2, {"remote-vsix-install-chain"}) is None
 
 
-def test_withheld_without_baseline_history():
+def test_stamped_code_hosting_download_passes_but_unstamped_withholds():
+    """Release assets on major code-hosting domains are the normal channel for
+    toolchain managers. A stamped github.com target is consistent-with-intent;
+    identity remains pinned by the established-tier gates, and the veto lands
+    on review rather than allow. Unstamped/dynamic targets still fail closed."""
+    stamped = _ready_extension([_finding("remote-vsix-install-chain", evidence={
+        **_CHAIN_EVIDENCE,
+        "download_host": "github.com",
+        "download_url": "https://github.com/dart-code/dart-code/releases/download/v1/tool.zip",
+    })])
+    veto = evaluate_preventive_block_veto(stamped, {"remote-vsix-install-chain"})
+    assert veto is not None and "remote-vsix-install-chain" in veto.explained_rules
+
+    bare = _ready_extension([_finding("remote-vsix-install-chain", evidence={
+        **_CHAIN_EVIDENCE, "download_host": "github.com", "download_url": "",
+    })])
+    assert evaluate_preventive_block_veto(bare, {"remote-vsix-install-chain"}) is not None
+
+    unknown_cdn = _ready_extension([_finding("remote-vsix-install-chain", evidence={
+        **_CHAIN_EVIDENCE, "download_host": "cdn.evil.example",
+    })])
+    assert evaluate_preventive_block_veto(unknown_cdn, {"remote-vsix-install-chain"}) is None
+
+
+def test_first_seen_artifact_without_baseline_still_qualifies():
+    """Registry hash binding + verified-publisher gates already pin identity,
+    so brand-new versions of established publishers must not be blocked just
+    for having no prior report."""
     ext = _ready_extension([_finding("remote-vsix-install-chain", evidence=dict(_CHAIN_EVIDENCE))])
     ext.baseline_diff = {}
-    assert evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"}) is None
+    veto = evaluate_preventive_block_veto(ext, {"remote-vsix-install-chain"})
+    assert veto is not None
+    assert "remote-vsix-install-chain" in veto.explained_rules
 
 
 def test_withheld_when_baseline_changed():

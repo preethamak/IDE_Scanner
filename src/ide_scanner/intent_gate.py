@@ -7,10 +7,11 @@ preventive block stands. The gate is intentionally hard to satisfy:
 - only explicit curated profiles qualify (inferred classes never veto);
 - the artifact must be registry-served AND hash-bound to its listing;
 - deep providers must have actually completed (not merely "no limitations");
-- download hosts must be stamped and allowlisted — an unstamped or dynamic
-  host withholds the veto rather than passing it;
-- a missing previous-report baseline withholds the veto (first-seen artifacts
-  of a profiled publisher still go to human review);
+- download hosts must be stamped — marketplace/gallery CDN suffixes and the
+  major code-hosting domains pass; unstamped or dynamic hosts withhold the
+  veto rather than passing it;
+- an artifact that changed against its baseline withholds the veto (a missing
+  baseline is fine — registry hash binding already pins first-seen identity);
 - unmapped blocking rules can never be explained (closed-world map).
 """
 
@@ -87,13 +88,19 @@ _CREDENTIAL_SIGNAL_RULES = frozenset({
 })
 
 # Download hosts a legitimate marketplace-published updater may use without
-# additional scrutiny. Matched as exact host suffixes.
+# additional scrutiny. Matched as exact host suffixes, plus the major code
+# hosting domains: established profiles pin artifact identity via registry
+# hash binding, so a stamped github.com target (release assets are the normal
+# distribution channel for toolchain managers) is consistent-with-intent
+# evidence, and the veto still lands on human review rather than allow.
 _DOWNLOAD_HOST_ALLOWLIST_SUFFIXES = (
     ".gallerycdn.vsassets.io",
     ".vsassets.io",
     "marketplace.visualstudio.com",
     "open-vsx.org",
     ".openvsx.io",
+    "github.com",
+    "www.github.com",
 )
 
 _DEEP_PROVIDERS = ("semgrep", "yara", "dependency_intelligence")
@@ -179,9 +186,12 @@ def evaluate_preventive_block_veto(
     # 6a. Deny-family co-factors: presence alone disqualifies.
     if rule_ids & _VETO_DENY_RULES:
         return None
-    # 6b. Any secret reference disqualifies.
-    if any(rule_id.startswith("secret-reference:") for rule_id in rule_ids):
-        return None
+    # 6b. Secret references count only when decision-relevant. Weak/contextual
+    #     mentions (e.g. tooling that legitimately loads .env files) coexist
+    #     with established profiles; correlated/observed ones do not.
+    for finding in findings:
+        if finding.rule_id.startswith("secret-reference:") and _decision_relevant(finding):
+            return None
     # 6c. Credential signals count only when decision-relevant. Contextual
     #     exposure surfaces (config keys etc.) legitimately coexist with
     #     container/toolchain managers.
@@ -190,7 +200,8 @@ def evaluate_preventive_block_veto(
             return None
 
     # 6d. Fail-closed download-host stamping: every mapped download/execute
-    #     finding must carry an allowlisted host. Unstamped, dynamically
+    #     finding must carry a stamped host on the allowlist (marketplace CDN,
+    #     Open VSX, or the major code-hosting domains). Unstamped, dynamically
     #     constructed, or unrecognized hosts withhold the veto.
     mapped_rules = blocking & set(RULE_BEHAVIOR_MAP)
     download_findings = [f for f in findings if f.rule_id in mapped_rules]
@@ -202,11 +213,13 @@ def evaluate_preventive_block_veto(
         if not _host_allowlisted(host):
             return None
 
-    # 6e. Baseline availability: a first-seen version has no baseline to diff
-    #     against, so behavioral continuity cannot be corroborated. Withhold.
+    # 6e. Baseline continuity: when a previous report exists, an artifact or
+    #     analysis change voids behavioral continuity. A missing baseline is
+    #     NOT itself disqualifying — brand-new versions of established
+    #     publishers have no prior report, and their identity is already
+    #     pinned by the registry hash binding + verified-publisher gates
+    #     required above.
     baseline_diff = extension.baseline_diff if isinstance(extension.baseline_diff, dict) else {}
-    if not baseline_diff:
-        return None
     if baseline_diff.get("artifact_changed"):
         return None
 
@@ -231,6 +244,15 @@ def _host_allowlisted(host: str) -> bool:
         host == suffix or host.endswith(suffix) if suffix.startswith(".") else host == suffix
         for suffix in _DOWNLOAD_HOST_ALLOWLIST_SUFFIXES
     )
+
+
+def _decision_relevant(finding: Any) -> bool:
+    """True when a finding's evidence weight or actionability makes it a
+    decision-relevant co-factor rather than contextual surface."""
+    evidence_class = str((getattr(finding, "evidence", None) or {}).get("evidence_class") or "weak")
+    if evidence_class in {"confirmed", "correlated", "observed", "vulnerability"}:
+        return True
+    return finding_actionability(finding) in {"review", "block"}
 
 
 def _install_chain_corroborated(findings: list[Any]) -> bool:
