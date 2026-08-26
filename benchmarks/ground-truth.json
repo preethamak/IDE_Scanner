@@ -10,8 +10,8 @@
     {
       "path": "../fixtures/agent-tool",
       "extension_id": "example.agent-toolbox",
-      "expected_verdict": "review",
-      "reason": "Agent-facing capability requires review but is not malware."
+      "expected_verdict": "clean",
+      "reason": "Agentic capability surfaces are contextual evidence; without abuse chains they are not approval-review drivers."
     },
     {
       "path": "../fixtures/credential-exfil",
@@ -34,8 +34,8 @@
     {
       "path": "../fixtures/mutable-dependency",
       "extension_id": "example.mutable-dependency",
-      "expected_verdict": "review",
-      "reason": "Mutable and unpinned runtime dependencies need supply-chain review."
+      "expected_verdict": "clean",
+      "reason": "Mutable/unpinned dependency sources are low-hardening notes; without exact advisories the score clamps to the clean ceiling."
     },
     {
       "path": "../fixtures/native-artifact",

@@ -305,7 +305,9 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
-        self.assertEqual(bundle["summary"]["summary"]["suspicious"], 3)
+        # suspicious: shadow-helper, lifecycle-dropper, credential-harvester,
+        # plus the calibration fixtures toolchain-installer and fake-sdk-dropper.
+        self.assertEqual(bundle["summary"]["summary"]["suspicious"], 5)
         self.assertIn("rules", bundle["rules"])
 
         rows = bundle["leaderboard"]["extensions"]
