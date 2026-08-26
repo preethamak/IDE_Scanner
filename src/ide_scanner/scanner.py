@@ -49,6 +49,7 @@ from .module_flow import (
     remote_vsix_install_flow,
 )
 from .value_flow import credential_value_flow
+from .intent_gate import evaluate_preventive_block_veto
 from .public_outcomes import apply_public_assessment
 from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
@@ -677,6 +678,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 "transform": "local-vsix-write",
                 "sink": "workbench.extensions.installExtension",
                 "integrity_verification": False,
+                "download_host": _extract_download_host(json.dumps(cross_file_vsix_flow.get("stages") or [])),
                 "stages": cross_file_vsix_flow["stages"],
                 "import_path": cross_file_vsix_flow["import_path"],
             },
@@ -1223,7 +1225,7 @@ def _add_manifest_findings(
                 {"contribution": key},
             ))
             capabilities.setdefault("ide_contributions", {"id": "ide_contributions", "evidence": []})["evidence"].append(key)
-    for key in ("languageModelTools", "chatParticipants", "mcpServers"):
+    for key in ("languageModelTools", "chatParticipants", "mcpServers", "chatSlashCommands", "defaultChatParticipant"):
         if key in contributes:
             findings.append(_finding(
                 extension_id,
@@ -1339,6 +1341,63 @@ def _add_workspace_cli_path_findings(
                     "sink": "execFile",
                 },
             ))
+_URL_HOST_RE = re.compile(r"https?://([A-Za-z0-9._-]+)", re.I)
+
+# Chat/language-model registration APIs (VS Code Chat extension API surface).
+_AGENTIC_API_RE = re.compile(
+    r"(?:asChatParticipant|createChatParticipant|registerChatSlashCommand"
+    r"|lm\s*\.\s*registerTool|registerLanguageModelTool"
+    r"|languageModels?\s*\.\s*(?:selectChatModels|sendChatRequest)"
+    r"|getChatAccessProvider)",
+    re.I,
+)
+# Inline-completion provider APIs (Copilot/TabNine-style clients).
+_INLINE_COMPLETION_API_RE = re.compile(
+    r"(?:registerInlineCompletionItemProvider|provideInlineCompletions\s*\()",
+    re.I,
+)
+
+
+def _extract_download_host(text: str) -> str:
+    """Return the first literal URL host in ``text``, or "" when none appears.
+
+    Deliberately literal-only: a host built through concatenation, encoding,
+    or configuration leaves no stamp, and the intent gate treats an unstamped
+    download finding as unexplained (fail closed).
+    """
+    match = _URL_HOST_RE.search(text)
+    return str(match.group(1)).lower() if match else ""
+
+
+_MINIFIED_BLOB_MIN_BYTES = 48 * 1024
+_BUNDLED_PATH_SEGMENTS = {"node_modules", "vendor", "vendored", "third_party", "bower_components"}
+_COMPILED_OUTPUT_DIRS = ("dist/", "out/", "build/", "bundle/")
+
+
+def _looks_minified(text: str) -> bool:
+    lines = text.splitlines()
+    return bool(lines) and (len(text) / len(lines)) >= 300
+
+
+def _is_bundled_dependency(rel: str, text: str) -> bool:
+    """Cheap vendored-code classifier.
+
+    Used ONLY to demote low-signal proximity and weak YARA findings inside
+    dependency code. HIGH/blocking chain emitters ignore this classification
+    entirely, so a misclassification can never suppress dropper detection.
+    """
+    normalized = rel.replace("\\", "/").lower()
+    parts = [part for part in normalized.split("/") if part]
+    if any(part in _BUNDLED_PATH_SEGMENTS for part in parts):
+        return True
+    if any(normalized.startswith(prefix) or f"/{prefix}" in f"/{normalized}" for prefix in _COMPILED_OUTPUT_DIRS):
+        # Compiled output counts only when the content also looks minified,
+        # so a readable primary payload is never demoted.
+        if len(text) >= _MINIFIED_BLOB_MIN_BYTES and _looks_minified(text):
+            return True
+    return False
+
+
 def _add_lifecycle_script_chain_findings(
     extension_id: str,
     version: str,
@@ -1364,7 +1423,7 @@ def _add_lifecycle_script_chain_findings(
             f"Lifecycle script {script_name} can download content and execute commands.",
             ["package.json"],
             "Require pinned URLs, checksums, signatures, and a clear install-time purpose.",
-            evidence,
+            {**evidence, "download_host": _extract_download_host(command)},
         ))
     if re.search(r"(\.npmrc|\.ssh|\.env|aws_access_key_id|aws_secret_access_key|npm_token|github_token|google_application_credentials)", text):
         findings.append(_finding(
@@ -1756,6 +1815,7 @@ def _add_code_findings(
     has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
+    file_class = "bundled-dependency" if _is_bundled_dependency(rel, text) else "hand-written"
     has_remote_vsix_install = bool(re.search(
         r"(?:workbench\.extensions\.installExtension|commands\.executeCommand\s*\(\s*['\"]workbench\.extensions\.installExtension)",
         text,
@@ -1830,6 +1890,7 @@ def _add_code_findings(
                 "transform": "local-vsix-write",
                 "sink": "workbench.extensions.installExtension",
                 "integrity_verification": False,
+                "download_host": _extract_download_host(text),
             },
         ))
 
@@ -1848,6 +1909,29 @@ def _add_code_findings(
             "Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
         ))
         capabilities.setdefault(rule.capability, {"id": rule.capability, "evidence": []})["evidence"].append(rel)
+
+    # Code-level AI-assistant surfaces. These fire in hand-written AND bundled
+    # files: thin completion clients often live in minified bundles, and the
+    # manifest contribution check alone misses them (TabNine-style inline
+    # completion providers contribute nothing under chatParticipants etc.).
+    if not any(item.rule_id == "agentic-tooling" and rel in item.file_refs for item in findings):
+        agentic_api_match = _AGENTIC_API_RE.search(text)
+        inline_completion_match = _INLINE_COMPLETION_API_RE.search(text)
+        if agentic_api_match or inline_completion_match:
+            surface = "chat-language-model" if agentic_api_match else "inline-completion"
+            findings.append(_finding(
+                extension_id,
+                version,
+                "agentic-tooling",
+                "agentic",
+                "MEDIUM",
+                0.62,
+                f"Code registers an AI assistant API surface ({surface}).",
+                [rel],
+                "Review what code context the assistant sends off-device and how tool invocations are approved.",
+                {"evidence_class": "capability", "api_surface": surface},
+            ))
+            capabilities.setdefault("agentic", {"id": "agentic", "evidence": []})["evidence"].append(rel)
 
     if aliased_process_re and not any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings):
         findings.append(_finding(
@@ -1980,7 +2064,7 @@ def _add_code_findings(
     # extensions. The Semgrep taint rule emits untrusted-workspace-input-to-process
     # only when it can establish a source-to-sink flow.
 
-    if secret_refs and has_file_read and _features_nearby(text, [secret_regex, FILE_READ_RE]):
+    if secret_refs and has_file_read and file_class == "hand-written" and _features_nearby(text, [secret_regex, FILE_READ_RE]):
         labels = ", ".join(label for _, label in secret_refs)
         findings.append(_finding(
             extension_id,
@@ -2004,6 +2088,7 @@ def _add_code_findings(
             "Code combines credential references, local file reads, and outbound network writes.",
             [rel],
             "Remove or block this extension until the data flow is manually verified.",
+            {"evidence_class": "correlated", "context": {"file_class": file_class}},
         ))
     if has_destructive and has_encode and has_network and _features_nearby(text, [DESTRUCTIVE_RE, ENCODE_ARCHIVE_RE, NETWORK_SINK_RE]):
         findings.append(_finding(
@@ -2016,6 +2101,7 @@ def _add_code_findings(
             "Code combines destructive file activity with archive/encoding and network behavior.",
             [rel],
             "Treat as suspicious unless this is a clearly documented backup, cleanup, or migration tool.",
+            {"evidence_class": "correlated", "context": {"file_class": file_class}},
         ))
     if has_obfuscation and _DECODED_EXECUTION_RE.search(text) and has_network and _features_nearby(text, [
         _DECODED_EXECUTION_RE,
@@ -2031,6 +2117,7 @@ def _add_code_findings(
             "Code combines obfuscation, dynamic execution, and network behavior.",
             [rel],
             "Treat as suspicious unless the generated or dynamic code path is clearly documented and reproducible.",
+            {"evidence_class": "correlated", "context": {"file_class": file_class}},
         ))
     if has_persistence and has_file_write and (has_network or has_dynamic_exec) and _features_nearby(text, [
         re.compile(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", re.I),
@@ -2047,8 +2134,9 @@ def _add_code_findings(
             "Code appears to modify persistence locations and execute or communicate externally.",
             [rel],
             "Block or manually review persistence behavior in IDE extensions.",
+            {"evidence_class": "correlated", "context": {"file_class": file_class}},
         ))
-    if has_agent_surface and secret_refs and has_network and _features_nearby(text, [
+    if has_agent_surface and secret_refs and has_network and file_class == "hand-written" and _features_nearby(text, [
         re.compile(r"(?:languageModel|chatParticipant|toolInvocation|invokeTool|mcpServer|@modelcontextprotocol|register(?:Tool|ChatParticipant))", re.I),
         secret_regex,
         NETWORK_SINK_RE,
@@ -2079,6 +2167,11 @@ def _add_code_findings(
             "Code can download content and execute local processes from the same file.",
             [rel],
             "Verify the download source, integrity checks, and execution purpose.",
+            {
+                "evidence_class": "correlated",
+                "context": {"file_class": file_class},
+                "download_host": _extract_download_host(text),
+            },
         ))
     _add_cross_extension_code_findings(
         extension_id,
@@ -3130,6 +3223,21 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         )
         return
     if blocking_rule_ids:
+        veto = evaluate_preventive_block_veto(extension, blocking_rule_ids)
+        if veto is not None:
+            # A curated profile explains every triggering chain: registry-bound
+            # artifact, verified publisher, completed deep providers, no
+            # co-factors, corroborated install sink. Human review, not a block.
+            extension.decision = "review"
+            extension.decision_reason = (
+                "Preventive-chain evidence ("
+                + ", ".join(sorted(blocking_rule_ids))
+                + ") is fully explained by the extension's established publisher intent ("
+                + (veto.profile_id or veto.class_id)
+                + "); no credential, obfuscation, observed-runtime, or confirmed evidence is present."
+            )
+            extension.decision_basis = "intent_explained_preventive_chain"
+            return
         extension.decision = "block"
         extension.decision_reason = (
             "Prevent execution pending review: high-confidence abuse-chain evidence matched "
@@ -4371,19 +4479,31 @@ def _reputation_score(findings: list[Finding]) -> int:
 
 def _suppressors(findings: list[Finding]) -> list[dict[str, Any]]:
     suppressors: list[dict[str, Any]] = []
-    if any(finding.rule_id == "marketplace-verified-publisher" for finding in findings):
+    if _suppressor_reduction(findings):
         suppressors.append({
             "id": "verified-publisher",
             "reduction": 5,
-            "reason": "Marketplace metadata reports a verified publisher. This reduces reputation risk only.",
+            "reason": (
+                "Marketplace metadata reports a verified publisher and no confirmed, "
+                "correlated, or observed evidence is present; the reputation bonus is waived."
+            ),
         })
     return suppressors
 
 
 def _suppressor_reduction(findings: list[Finding]) -> int:
-    # Publisher verification is reputation context, not a reason to discount
-    # observed code behavior, capabilities, dependencies, or provenance.
-    return 0
+    """Verified-publisher reputation relief: cancels the additive reputation
+    bonus when nothing serious was found. Never applies when confirmed,
+    correlated, or observed evidence exists — publisher verification is
+    identity context, not a reason to discount real behavior. The reduction
+    touches only the additive padding (weak + reputation), so the strongest
+    behavior component still floors the score."""
+    if not any(finding.rule_id == "marketplace-verified-publisher" for finding in findings):
+        return 0
+    for finding in findings:
+        if _finding_evidence_class(finding) in {"confirmed", "correlated", "observed"}:
+            return 0
+    return 5
 
 
 def _weak_score(findings: list[Finding], has_actionable_context: bool) -> int:

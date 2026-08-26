@@ -87,12 +87,28 @@ def _report() -> ExtensionReport:
         risk_score=51,
         score_details={"confidence": "medium"},
         capabilities=[{"id": "activation", "evidence": []}, {"id": "process_execution", "evidence": ["extension.js"]}],
-        artifact_inventory={},
+        artifact_inventory={
+            # Established provenance now requires registry hash binding: the
+            # scanned VSIX must be the marketplace-served artifact.
+            "vsix_signature": {
+                "package_integrity": {
+                    "matched": True,
+                    "expected": artifact_hash,
+                    "actual": artifact_hash,
+                    "source": "vs-marketplace-version-property",
+                },
+            },
+        },
         findings=[verified, capability],
         scanned_files=1,
         decision="review",
         decision_reason="Capability needs context.",
-        artifact_identity={"extension_id": "dbaeumer.vscode-eslint", "version": "3.0.33", "sha256": artifact_hash},
+        artifact_identity={
+            "extension_id": "dbaeumer.vscode-eslint",
+            "version": "3.0.33",
+            "sha256": artifact_hash,
+            "original_registry_artifact": True,
+        },
         analysis_coverage={"status": "complete", "coverage_percent": 100},
     )
 

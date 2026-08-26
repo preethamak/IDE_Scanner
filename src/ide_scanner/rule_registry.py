@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.08.21-obfuscated-bundle.1"
+RULESET_VERSION = "2026.08.26-intent-gate.1"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -156,8 +156,9 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "category": "agentic",
         "evidence_class": "capability",
         "default_severity": "MEDIUM",
-        "description": "Extension contributes language model tools, chat participants, or MCP server surfaces.",
+        "description": "Extension contributes language model tools, chat participants, or MCP server surfaces, or registers a chat/language-model or inline-completion API in code.",
         "recommendation": "Review tool permissions and approval behavior before trusting agent-facing extensions.",
+        "false_positive_notes": "Any AI-assistant product legitimately trips this; it records capability, not misuse. Detected from manifest contributions and code-level registration APIs (hand-written and bundled).",
         "benchmark_tags": ["agentic", "mcp"],
     },
     "native-or-packed-artifact": {

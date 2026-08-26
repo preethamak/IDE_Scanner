@@ -245,6 +245,45 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(agent["risk_score"], 0)
         self.assertIn("agentic-tooling", {finding["rule_id"] for finding in agent["findings"]})
 
+    def test_calibration_regression_fixtures(self) -> None:
+        report = scan_targets(include_fixtures=True)
+        by_id = {extension["extension_id"]: extension for extension in report["extensions"]}
+
+        # Unprofiled installer: chain evidence stands as a preventive block and
+        # carries a literal download host stamp.
+        installer = by_id["trusted.toolchain-installer"]
+        chain = next(f for f in installer["findings"] if f["rule_id"] == "remote-vsix-install-chain")
+        self.assertEqual(installer["decision"], "block")
+        self.assertEqual(chain["evidence"]["download_host"], "marketplace.visualstudio.com")
+
+        # Dynamic-host dropper: block survives; no host stamp exists so the
+        # intent gate could never explain it even with a profile.
+        dropper = by_id["unknown.fake-sdk-dropper"]
+        self.assertEqual(dropper["decision"], "block")
+        dropper_chain = next(
+            f for f in dropper["findings"]
+            if f["rule_id"] in {"download-and-execute", "remote-vsix-install-chain"}
+        )
+        self.assertFalse(dropper_chain.get("evidence", {}).get("download_host"))
+        self.assertTrue(
+            any(f["rule_id"].startswith("secret-reference:") for f in dropper["findings"])
+        )
+
+        # Vendored YARA noise: weak encoded-payload hits are demoted inside
+        # bundled context instead of driving review-band scores.
+        decorated = by_id["trusted.bundled-yara"]
+        yara_hits = [f for f in decorated["findings"] if f["rule_id"] == "encoded-dynamic-execution"]
+        if yara_hits:
+            self.assertTrue(all(f["actionability"] == "low" for f in yara_hits))
+        self.assertEqual(decorated["verdict"], "clean")
+
+        # Thin AI completion client: code-level API emitter classifies it even
+        # without manifest chat contributions.
+        completer = by_id["unknown.inline-completion-client"]
+        agentic = [f for f in completer["findings"] if f["rule_id"] == "agentic-tooling"]
+        self.assertTrue(agentic)
+        self.assertEqual(agentic[0]["evidence"]["api_surface"], "inline-completion")
+
     def test_posture_can_be_disabled_for_hosted_package_scans(self) -> None:
         report = scan_targets(include_fixtures=True, include_posture=False)
 
@@ -260,7 +299,9 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.3")
+        from ide_scanner.classification_policy import POLICY_VERSION
+
+        self.assertEqual(bundle["metadata"]["policy_version"], POLICY_VERSION)
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))

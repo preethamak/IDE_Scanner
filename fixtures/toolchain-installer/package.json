@@ -1,0 +1,13 @@
+{
+  "name": "toolchain-installer",
+  "publisher": "trusted",
+  "version": "1.0.0",
+  "description": "Installs the vendor toolchain runtime on first activation.",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": []
+  }
+}

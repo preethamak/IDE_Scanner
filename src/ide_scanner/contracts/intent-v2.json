@@ -1,0 +1,202 @@
+{
+  "schema_version": "2",
+  "policy_version": "intent-v2",
+  "_comment": [
+    "Class templates explain intended power per functional category; explicit",
+    "extension_profiles are curated identity-bound expectations. Neither grants",
+    "trust by itself: the preventive-block veto (intent_gate.py) requires an",
+    "explicit profile AND spoof-proof provenance AND completed deep providers.",
+    "repository_owners values are pinned from the served artifacts' package.json",
+    "manifests (verified during the calibration sweep); update via Phase 0",
+    "assertions when publishers migrate repositories."
+  ],
+  "classes": {
+    "language_toolchain_manager": {
+      "keywords": ["sdk", "toolchain", "compiler", "language server", "runtime", "kernel", "interpreter", "environment manager", "virtual environment"],
+      "signals": ["lifecycle_scripts", "process_execution", "native_code"],
+      "expected": ["activation", "ide_contributions", "lifecycle_scripts", "process_execution", "network", "filesystem", "native_code", "packed_artifacts", "dynamic_code"],
+      "forbidden": ["destructive_file_activity"]
+    },
+    "debugger": {
+      "keywords": ["debugger", "debug adapter", "breakpoints", "debugging"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions", "process_execution", "network", "filesystem"],
+      "forbidden": []
+    },
+    "ai_assistant": {
+      "keywords": ["copilot", "autocomplete", "code completion", "llm", "assistant", "chatbot", "pair programmer", "ai coding"],
+      "signals": ["agentic", "agent_shell", "agent_filesystem", "agent_network", "credential_configuration"],
+      "expected": ["activation", "agentic", "agent_shell", "agent_filesystem", "agent_network", "ide_contributions", "network", "credential_configuration", "credential_commands", "process_execution", "dynamic_code", "obfuscation", "native_code", "packed_artifacts", "lifecycle_scripts", "filesystem"],
+      "forbidden": ["destructive_file_activity"]
+    },
+    "vcs_tooling": {
+      "keywords": ["git", "version control", "blame", "commit history", "merge", "pull request"],
+      "signals": ["credential_commands"],
+      "expected": ["activation", "ide_contributions", "credential_commands", "credential_configuration", "process_execution", "network", "filesystem", "dynamic_code", "obfuscation", "native_code", "packed_artifacts", "lifecycle_scripts"],
+      "forbidden": ["destructive_file_activity"]
+    },
+    "schema_validator": {
+      "keywords": ["yaml", "json schema", "schema validation", "schema store"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions", "network", "filesystem"],
+      "forbidden": []
+    },
+    "formatter_linter": {
+      "keywords": ["formatter", "linter", "linting", "code style", "formatting"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions", "filesystem", "process_execution", "lifecycle_scripts"],
+      "forbidden": []
+    },
+    "language_tool": {
+      "keywords": ["language support", "syntax highlighting", "snippets", "intellisense"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions", "filesystem"],
+      "forbidden": []
+    },
+    "security_tool": {
+      "keywords": ["security scan", "vulnerability scan", "static analysis", "sast"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions", "network", "filesystem", "process_execution", "lifecycle_scripts", "native_code", "packed_artifacts", "dynamic_code"],
+      "forbidden": []
+    },
+    "theme_cosmetic": {
+      "keywords": ["theme", "color scheme", "icon theme", "decoration", "rainbow", "highlight color"],
+      "signals": [],
+      "expected": ["activation", "ide_contributions"],
+      "forbidden": ["process_execution", "lifecycle_scripts", "native_code", "packed_artifacts", "agent_shell", "agent_network"]
+    }
+  },
+  "extension_profiles": {
+    "dbaeumer.vscode-eslint": {
+      "id": "vscode-eslint-v2",
+      "class_id": "formatter_linter",
+      "publisher": "dbaeumer",
+      "repository_owners": ["microsoft/vscode-eslint"],
+      "capabilities": ["activation", "ide_contributions", "dynamic_code", "filesystem", "lifecycle_scripts", "process_execution", "network"]
+    },
+    "eamodio.gitlens": {
+      "id": "gitlens-v2",
+      "class_id": "vcs_tooling",
+      "publisher": "eamodio",
+      "repository_owners": ["gitkraken/vscode-gitlens", "eamodio/vscode-gitlens"],
+      "capabilities": ["activation", "credential_commands", "credential_configuration", "ide_contributions", "lifecycle_scripts", "process_execution", "network", "filesystem", "dynamic_code", "obfuscation"]
+    },
+    "ms-python.python": {
+      "id": "vscode-python-v2",
+      "class_id": "language_toolchain_manager",
+      "publisher": "ms-python",
+      "repository_owners": ["microsoft/vscode-python"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "ms-python.vscode-pylance": {
+      "id": "pylance-v1",
+      "class_id": "language_toolchain_manager",
+      "publisher": "ms-python",
+      "repository_owners": ["microsoft/pylance-release"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "ms-python.vscode-python-envs": {
+      "id": "vscode-python-envs-v1",
+      "class_id": "language_toolchain_manager",
+      "publisher": "ms-python",
+      "repository_owners": ["microsoft/vscode-python-environments"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "ms-toolsai.jupyter": {
+      "id": "vscode-jupyter-v1",
+      "class_id": "language_toolchain_manager",
+      "publisher": "ms-toolsai",
+      "repository_owners": ["microsoft/vscode-jupyter"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "ms-vscode-remote.remote-containers": {
+      "id": "remote-containers-v1",
+      "class_id": "language_toolchain_manager",
+      "publisher": "ms-vscode-remote",
+      "repository_owners": ["microsoft/vscode-remote-release"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "process_execution", "network", "filesystem", "dynamic_code", "native_code", "packed_artifacts", "credential_configuration"]
+    },
+    "redhat.vscode-yaml": {
+      "id": "vscode-yaml-v1",
+      "class_id": "schema_validator",
+      "publisher": "redhat",
+      "repository_owners": ["redhat-developer/vscode-yaml"],
+      "capabilities": ["activation", "ide_contributions", "network", "filesystem", "lifecycle_scripts", "process_execution"]
+    },
+    "dart-code.dart-code": {
+      "id": "dart-code-v1",
+      "class_id": "language_toolchain_manager",
+      "publisher": "Dart-Code",
+      "repository_owners": ["dart-code/dart-code"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "process_execution", "network", "filesystem", "dynamic_code", "agentic", "agent_shell", "agent_network", "agent_filesystem", "native_code", "packed_artifacts", "obfuscation"]
+    },
+    "github.copilot": {
+      "id": "copilot-v1",
+      "class_id": "ai_assistant",
+      "publisher": "GitHub",
+      "repository_owners": ["microsoft/vscode-copilot-release"],
+      "verify_owner_in_phase0": true,
+      "capabilities": ["activation", "agentic", "ide_contributions", "network", "filesystem", "dynamic_code", "obfuscation", "process_execution", "native_code", "packed_artifacts", "lifecycle_scripts", "credential_commands"]
+    },
+    "github.copilot-chat": {
+      "id": "copilot-chat-v1",
+      "class_id": "ai_assistant",
+      "publisher": "GitHub",
+      "repository_owners": ["microsoft/vscode-copilot-release"],
+      "verify_owner_in_phase0": true,
+      "capabilities": ["activation", "agentic", "ide_contributions", "network", "filesystem", "dynamic_code", "obfuscation", "process_execution", "native_code", "packed_artifacts", "lifecycle_scripts"]
+    },
+    "anthropic.claude-code": {
+      "id": "claude-code-v1",
+      "class_id": "ai_assistant",
+      "publisher": "Anthropic",
+      "repository_owners": ["anthropics/claude-code"],
+      "verify_owner_in_phase0": true,
+      "capabilities": ["activation", "agentic", "agent_shell", "agent_network", "agent_filesystem", "ide_contributions", "network", "filesystem", "dynamic_code", "obfuscation", "process_execution", "credential_configuration", "credential_commands"]
+    },
+    "tabnine.tabnine-vscode": {
+      "id": "tabnine-vscode-v1",
+      "class_id": "ai_assistant",
+      "publisher": "TabNine",
+      "repository_owners": ["codota/tabnine-vscode"],
+      "verify_owner_in_phase0": true,
+      "capabilities": ["activation", "agentic", "ide_contributions", "network", "filesystem", "dynamic_code", "obfuscation", "process_execution", "credential_commands", "native_code", "packed_artifacts"]
+    },
+    "openai.chatgpt": {
+      "id": "openai-chatgpt-v1",
+      "class_id": "ai_assistant",
+      "publisher": "openai",
+      "repository_owners": ["openai/chatgpt-extension"],
+      "verify_owner_in_phase0": true,
+      "capabilities": ["activation", "agentic", "ide_contributions", "network", "filesystem", "dynamic_code", "obfuscation", "process_execution", "credential_commands"]
+    },
+    "rust-lang.rust-analyzer": {
+      "id": "rust-analyzer-v2",
+      "class_id": "language_toolchain_manager",
+      "publisher": "rust-lang",
+      "repository_owners": ["rust-lang/rust-analyzer"],
+      "capabilities": ["activation", "ide_contributions", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "semgrep.semgrep": {
+      "id": "semgrep-vscode-v2",
+      "class_id": "security_tool",
+      "publisher": "semgrep",
+      "repository_owners": ["semgrep/semgrep-vscode"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "snyk-security.snyk-vulnerability-scanner": {
+      "id": "snyk-vscode-v2",
+      "class_id": "security_tool",
+      "publisher": "snyk-security",
+      "repository_owners": ["snyk/vscode-extension"],
+      "capabilities": ["activation", "credential_commands", "credential_configuration", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    },
+    "sonarsource.sonarlint-vscode": {
+      "id": "sonarqube-vscode-v2",
+      "class_id": "security_tool",
+      "publisher": "sonarsource",
+      "repository_owners": ["sonarsource/sonarlint-vscode"],
+      "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution", "network", "filesystem", "dynamic_code"]
+    }
+  }
+}

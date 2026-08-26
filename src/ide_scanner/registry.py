@@ -501,6 +501,72 @@ def _fetch_removed_packages() -> tuple[dict[str, dict[str, str]], str | None]:
     return removed, None
 
 
+_ADVISORY_SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "MEDIUM": 2, "LOW": 1}
+_ADVISORY_TO_FINDING_SEVERITY = {
+    "CRITICAL": "CRITICAL", "HIGH": "HIGH", "MODERATE": "MEDIUM", "MEDIUM": "MEDIUM", "LOW": "LOW",
+}
+_OSV_DETAIL_CAP = 10
+_osv_detail_cache: dict[str, str | None] = {}
+
+
+def _advisory_severity(detail: dict[str, Any]) -> str | None:
+    specific = detail.get("database_specific")
+    if isinstance(specific, dict):
+        severity = str(specific.get("severity") or "").upper()
+        if severity in _ADVISORY_TO_FINDING_SEVERITY:
+            return severity
+    for entry in detail.get("severity", []) or []:
+        if isinstance(entry, dict) and str(entry.get("type") or "").upper() == "CVSS_V4":
+            vector = str(entry.get("score") or "")
+            # CVSS v4 encodes the qualitative severity directly.
+            for token in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                if f"/S:{token}" in vector or f"/ES:{token}" in vector:
+                    return token
+    return None
+
+
+def fetch_osv_advisory_severities(ids: list[str]) -> tuple[dict[str, str], bool]:
+    """Resolve database-reported severities for OSV advisory ids.
+
+    Deterministic: ids are de-duplicated and sorted before the cap applies, so
+    a given extension always resolves the same subset. Truncation is recorded
+    rather than hidden. Failures fall back to the exact/range heuristic by
+    simply omitting the id."""
+    wanted = sorted({str(vuln_id) for vuln_id in ids if vuln_id})
+    truncated = len(wanted) > _OSV_DETAIL_CAP
+    out: dict[str, str] = {}
+    for vuln_id in wanted[:_OSV_DETAIL_CAP]:
+        if vuln_id in _osv_detail_cache:
+            severity = _osv_detail_cache[vuln_id]
+        else:
+            try:
+                text = _http_get_text(f"https://api.osv.dev/v1/vulns/{quote(vuln_id)}", timeout=10)
+                severity = _advisory_severity(json.loads(text))
+            except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+                severity = None
+            _osv_detail_cache[vuln_id] = severity
+        if severity:
+            out[vuln_id] = severity
+    return out, truncated
+
+
+def _dependency_finding_severity(dep: dict[str, Any], malicious: bool, vulns: list[dict[str, Any]]) -> tuple[str, dict[str, str], bool]:
+    """Advisory-severity mapping for vulnerable-npm-dependency findings.
+
+    Falls back to the historical exact/range heuristic when no advisory
+    severity could be resolved (offline runs keep today's behavior)."""
+    if malicious:
+        return "CRITICAL", {}, False
+    severities, truncated = fetch_osv_advisory_severities([vuln.get("id") for vuln in vulns])
+    ranked = [_ADVISORY_SEVERITY_RANK.get(severity) for severity in severities.values()]
+    ranked = [rank for rank in ranked if rank]
+    if not ranked:
+        return ("HIGH" if dep["exact"] else "MEDIUM"), severities, truncated
+    best = max(ranked)
+    label = next(label for label, rank in _ADVISORY_SEVERITY_RANK.items() if rank == best)
+    return _ADVISORY_TO_FINDING_SEVERITY[label], severities, truncated
+
+
 def _check_osv(extension: Any) -> tuple[list[dict[str, Any]], str | None]:
     entries = [
         {"name": name, "version": _normalize_version(version), "exact": bool(re.match(r"^\d+\.\d+\.\d+", str(version)))}
@@ -529,19 +595,25 @@ def _check_osv(extension: Any) -> tuple[list[dict[str, Any]], str | None]:
             continue
         dep = entries[index]
         malicious = any(str(vuln.get("id", "")).startswith("MAL-") for vuln in vulns)
+        severity, advisory_severities, fetch_truncated = _dependency_finding_severity(dep, malicious, vulns)
+        evidence = {
+            "package": dep["name"],
+            "version": dep["version"],
+            "exact": dep["exact"],
+            "osv_ids": [vuln.get("id") for vuln in vulns if vuln.get("id")],
+        }
+        if advisory_severities:
+            evidence["osv_severities"] = advisory_severities
+        if fetch_truncated:
+            evidence["fetch_truncated"] = True
         findings.append({
             "extension_id": extension.extension_id,
-            "severity": "CRITICAL" if malicious else "HIGH" if dep["exact"] else "MEDIUM",
+            "severity": severity,
             "confidence": 0.94 if malicious else 0.82 if dep["exact"] else 0.58,
             "category": "dependency",
             "rule_id": "malicious-npm-dependency" if malicious else "vulnerable-npm-dependency",
             "evidence_summary": f"{dep['name']}@{dep['version']} has {len(vulns)} OSV finding(s). Version match: {'exact' if dep['exact'] else 'range-derived'}.",
-            "evidence": {
-                "package": dep["name"],
-                "version": dep["version"],
-                "exact": dep["exact"],
-                "osv_ids": [vuln.get("id") for vuln in vulns if vuln.get("id")],
-            },
+            "evidence": evidence,
         })
     return findings, None
 
@@ -591,19 +663,25 @@ def _check_osv_many(extensions: list[Any]) -> tuple[dict[str, list[dict[str, Any
             if not vulns:
                 continue
             malicious = any(str(vuln.get("id", "")).startswith("MAL-") for vuln in vulns)
+            severity, advisory_severities, fetch_truncated = _dependency_finding_severity(dep, malicious, vulns)
+            evidence = {
+                "package": dep["name"],
+                "version": dep["version"],
+                "exact": dep["exact"],
+                "osv_ids": [vuln.get("id") for vuln in vulns if vuln.get("id")],
+            }
+            if advisory_severities:
+                evidence["osv_severities"] = advisory_severities
+            if fetch_truncated:
+                evidence["fetch_truncated"] = True
             extension_findings.append({
                 "extension_id": extension.extension_id,
-                "severity": "CRITICAL" if malicious else "HIGH" if dep["exact"] else "MEDIUM",
+                "severity": severity,
                 "confidence": 0.94 if malicious else 0.82 if dep["exact"] else 0.58,
                 "category": "dependency",
                 "rule_id": "malicious-npm-dependency" if malicious else "vulnerable-npm-dependency",
                 "evidence_summary": f"{dep['name']}@{dep['version']} has {len(vulns)} OSV finding(s). Version match: {'exact' if dep['exact'] else 'range-derived'}.",
-                "evidence": {
-                    "package": dep["name"],
-                    "version": dep["version"],
-                    "exact": dep["exact"],
-                    "osv_ids": [vuln.get("id") for vuln in vulns if vuln.get("id")],
-                },
+                "evidence": evidence,
             })
         if extension_findings:
             findings_by_extension[extension.extension_id] = extension_findings

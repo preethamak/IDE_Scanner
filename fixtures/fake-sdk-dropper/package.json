@@ -1,0 +1,10 @@
+{
+  "name": "fake-sdk-dropper",
+  "publisher": "unknown",
+  "version": "0.9.1",
+  "description": "SDK manager that keeps the developer toolkit up to date automatically.",
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js"
+}

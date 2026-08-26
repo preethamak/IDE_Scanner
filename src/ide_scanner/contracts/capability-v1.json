@@ -61,7 +61,12 @@
       "keywords": [
         "coding agent",
         "ai assistant",
-        "copilot"
+        "copilot",
+        "code completion",
+        "autocomplete",
+        "llm",
+        "ai coding",
+        "chatbot"
       ],
       "signals": [
         "agent_tools"

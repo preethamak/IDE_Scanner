@@ -1,0 +1,10 @@
+{
+  "name": "inline-completion-client",
+  "publisher": "unknown",
+  "version": "1.2.0",
+  "description": "AI code completion assistant providing inline suggestions as you type.",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js"
+}

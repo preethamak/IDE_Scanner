@@ -20,3 +20,7 @@ report.json
 real-extensions*.json
 python-solidity-metrics-report.json
 ten-extension-comparison-report.json
+
+# Editable-install metadata and local sweep outputs
+src/*.egg-info/
+benchmarks/marketplace-cohort/v2/results/

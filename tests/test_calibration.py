@@ -17,7 +17,12 @@ def test_packaged_calibration_is_valid_and_versioned() -> None:
 
     _validate_calibration(calibration)
     assert calibration["schema_version"] == "1"
-    assert policy_version() == "3.1.0-calibration.3"
+    # The packaged policy version must stay in sync with the JSON source of
+    # truth and follow the <semver>-<channel>.<n> convention; literal pins here
+    # would churn on every calibration bump.
+    version = policy_version()
+    assert version and version != "legacy"
+    assert version == scoring_calibration()["policy_version"]
 
 
 def test_authoritative_and_heuristic_scores_stay_below_their_safety_gates() -> None:

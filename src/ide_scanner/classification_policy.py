@@ -54,6 +54,31 @@ _REVIEW_POSTURE_RULES = {
     "executable-heavy-obfuscation",
 }
 
+# Proximity-window chains inside bundled dependency code lose their proximity
+# meaning: minified vendor bundles co-locate unrelated tokens, which is why
+# cosmetic extensions scored HIGH on them historically. HIGH/blocking chain
+# emitters themselves still fire everywhere — this backstop only demotes the
+# stale finding's actionability when its evidence records a bundled context.
+_BUNDLED_PROXIMITY_LOW_RULES = {
+    "download-and-execute",
+    "destructive-transfer-chain",
+    "persistence-chain",
+    "credential-exfiltration-chain",
+}
+
+# Weak-evidence YARA detectors (encoded-payload heuristics) fire constantly on
+# vendored library code (playwright, webpack runtimes). In bundled context they
+# are hardening notes, not approval-review drivers.
+_BUNDLED_WEAK_LOW_RULES = {
+    "encoded-dynamic-execution",
+    "unicode-evasion",
+}
+
+
+def _finding_bundled_context(finding: Any) -> bool:
+    context = _evidence(finding).get("context")
+    return isinstance(context, dict) and context.get("file_class") == "bundled-dependency"
+
 
 def finding_actionability(finding: Any) -> FindingActionability:
     evidence_class = finding_evidence_class(finding)
@@ -64,7 +89,11 @@ def finding_actionability(finding: Any) -> FindingActionability:
     if evidence_class == "vulnerability":
         return "block" if str(_evidence(finding).get("policy_action") or "review") == "block" else "review"
     if evidence_class in {"correlated", "observed"}:
+        if rule_id in _BUNDLED_PROXIMITY_LOW_RULES and _finding_bundled_context(finding):
+            return "low"
         return "review"
+    if evidence_class == "weak" and rule_id in _BUNDLED_WEAK_LOW_RULES and _finding_bundled_context(finding):
+        return "low"
     if evidence_class == "dependency":
         if rule_id == "vulnerable-npm-dependency" and not bool(_evidence(finding).get("exact")):
             return "contextual"

@@ -1,0 +1,10 @@
+{
+  "name": "bundled-yara",
+  "publisher": "trusted",
+  "version": "2.1.0",
+  "description": "Indentation decoration for the editor workspace.",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js"
+}
