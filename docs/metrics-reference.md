@@ -321,11 +321,11 @@ Implemented now:
 - agent-specific tool surface findings for shell, filesystem, network, MCP server, and prompt-injection sink risk
 - dynamic sandbox observation import through `--sandbox-observations` or `IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE`
 - known-bad SHA-256 hash feed matching through `--known-bad-hashes` or `IDE_SCANNER_KNOWN_BAD_HASHES_FILE`
-- Microsoft removed package check when online mode is enabled
+- Microsoft removed package check (online checks run by default; disable with `--offline`)
 - marketplace removal type splitting, so `Malware`, `Suspicious`, and non-malware removals are not treated the same
-- marketplace metadata scoring when online mode is enabled: found/not found, verified publisher, install count, rating, and stale update context
+- marketplace metadata scoring (online, on by default): found/not found, verified publisher, install count, rating, and stale update context
 - verified publisher suppressor in `score_details.suppressors`
-- OSV dependency check when online mode is enabled
+- OSV dependency check (online, on by default)
 - report-level environment posture checks for Workspace Trust, automatic tasks, agent auto-approval, terminal auto-approval, and extension trust overrides
 - evidence classes: `confirmed`, `observed`, `correlated`, `capability`, `dependency`, `posture`, `provenance`, `reputation`, `weak`
 - separate `malware_score` and `risk_score`

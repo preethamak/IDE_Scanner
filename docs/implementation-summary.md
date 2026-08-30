@@ -295,7 +295,6 @@ Each rule maps to an evidence class:
 | `packed-artifact` | `provenance` | `provenance` | MEDIUM | Extension contains packed archive such as `.zip`, `.asar`, `.tgz`, `.jar`, etc. |
 | `binary-without-origin` | `provenance` | `provenance` | MEDIUM | Native binary lacks companion checksum/signature and documented origin. |
 | `known-bad-artifact` | `confirmed-intelligence` | `confirmed` | CRITICAL | File/package/VSIX hash matches a configured known-bad hash feed. |
-| `source-vsix-diff-unexplained` | `provenance` | `provenance` | Currently classified, not emitted by current scanner path | Reserved for source/package mismatch evidence. |
 
 ### Code Behavior Metrics
 
@@ -333,7 +332,7 @@ blind spot without treating ordinary single-credential API clients as exfiltrati
 | `persistence-chain` | `persistence` | `correlated` | HIGH | Code modifies persistence locations and executes or communicates externally. |
 | `agent-data-exfil-chain` | `agentic` | `correlated` | HIGH | Agent-facing code combines sensitive references with outbound network behavior. |
 | `download-and-execute` | `execution` | `correlated` | HIGH | Code can download content and execute local processes from the same file. |
-| `supply-chain-dropper-chain` | `supply-chain` | `correlated` | Not emitted by current scanner path | Reserved correlated chain for package dropper behavior. |
+| `supply-chain-dropper-chain` | `supply-chain` | `correlated` | HIGH | Remote download + archive extraction + dynamic load of code from a computed path without integrity verification. |
 
 ### Webview Security Metrics
 
@@ -355,7 +354,7 @@ blind spot without treating ordinary single-credential API clients as exfiltrati
 
 ### Online Marketplace, Registry, and Repository Metrics
 
-These metrics are emitted only when online registry enrichment is enabled.
+These metrics are emitted when online registry enrichment runs (the default; disable with `--offline`).
 
 | Rule id | Category | Evidence class | Severity | Purpose |
 | --- | --- | --- | --- | --- |

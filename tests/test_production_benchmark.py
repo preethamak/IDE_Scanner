@@ -96,6 +96,39 @@ def test_invalid_production_corpus_fails_closed(mutation, message: str) -> None:
         validate_production_corpus(corpus)
 
 
+def test_production_gate_emits_rule_matrix_and_verdict_confusion(tmp_path: Path) -> None:
+    corpus = load_production_corpus(CORPUS_PATH)
+    required = [item for item in corpus["artifacts"] if item["gate_required"]]
+    extensions = [_actual_for(item) for item in required]
+    safe = next(item for item in extensions if item["extension_id"] == "trusted.trusted-formatter")
+    safe["findings"].append({"rule_id": "noisy-example-rule"})
+    malicious_missing_rule = next(
+        item for item in required
+        if item["label"] == "known_malicious" and item["expected"].get("required_rule_ids")
+    )
+    missed_rule = malicious_missing_rule["expected"]["required_rule_ids"][0]
+    actual_malicious = next(
+        item for item in extensions if item["extension_id"] == malicious_missing_rule["extension_id"]
+    )
+    actual_malicious["findings"] = [
+        finding for finding in actual_malicious["findings"] if finding["rule_id"] != missed_rule
+    ]
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"extensions": extensions}), encoding="utf-8")
+
+    result = evaluate_production_corpus(CORPUS_PATH, report)
+
+    matrix = result["rule_matrix"]
+    assert matrix["noisy-example-rule"]["fired_on_known_safe"] == 1
+    assert matrix[missed_rule]["required_misses"] >= 1
+    confusion = result["verdict_confusion"]
+    assert "known_safe" in confusion and "known_malicious" in confusion
+    assert confusion["known_safe"].get("clean", 0) >= 1
+    assert sum(confusion["known_malicious"].values()) == sum(
+        1 for item in corpus["artifacts"] if item["label"] == "known_malicious"
+    )
+
+
 def _actual_for(expected: dict) -> dict:
     constraints = expected["expected"]
     return {
