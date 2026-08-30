@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--publication-url", default=DEFAULT_PUBLICATION_URL)
     parser.add_argument("--include-published", action="store_true", help="Rescan rows that already have a valid canonical publication.")
     parser.add_argument("--require-current-build", action="store_true", help="Treat publications from earlier scanner builds as pending.")
+    parser.add_argument("--ref", default="main", help="Git ref for the deep-scan workflow; use the reviewed scanner revision being published.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -27,7 +28,7 @@ def main() -> int:
     published = {} if args.include_published else published_artifacts(args.publication_url, current_build if args.require_current_build else None)
     pending = rows_to_dispatch(rows, published)
     for row in pending:
-        command = workflow_command(row)
+        command = workflow_command(row, args.ref)
         if args.dry_run:
             print(f"Would dispatch {row['extension_id']}@{row['version']}")
         else:
@@ -60,9 +61,9 @@ def artifact_key(extension_id: object, version: object) -> str:
     return f"{str(extension_id).lower()}@{version}"
 
 
-def workflow_command(row: dict[str, Any]) -> list[str]:
+def workflow_command(row: dict[str, Any], ref: str = "main") -> list[str]:
     command = [
-        "gh", "workflow", "run", "deep-scan.yml", "--ref", "main",
+        "gh", "workflow", "run", "deep-scan.yml", "--ref", ref,
         "-f", f"extension_id={row['extension_id']}",
         "-f", f"version={row['version']}",
         "-f", "scan_purpose=public_intelligence",
