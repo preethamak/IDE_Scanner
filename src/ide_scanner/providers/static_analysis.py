@@ -461,8 +461,29 @@ def _yara_finding(
         f"YARA rule {rule_name} matched {rel}.",
         [rel],
         "Inspect the matched bytes and validate the rule provenance before taking action.",
-        {"provider": "yara", "provider_rule_id": rule_name, "evidence_class": evidence_class},
+        {
+            "provider": "yara",
+            "provider_rule_id": rule_name,
+            "evidence_class": evidence_class,
+            "context": {"file_class": "bundled-dependency" if _bundled_artifact_path(rel) else "hand-written"},
+        },
     )
+
+
+def _bundled_artifact_path(rel: str) -> bool:
+    """Path-segment classification for byte-level providers that never load
+    file text: vendored dependency directories are bundled unconditionally;
+    compiled output directories count as bundled too (weak-evidence YARA
+    markers there are library code, not the publisher's hand-written logic)."""
+    segments = {segment.lower() for segment in Path(rel).parts}
+    return bool(
+        segments & _BUNDLED_SEGMENTS
+        or segments & _COMPILED_OUTPUT_SEGMENTS
+    )
+
+
+_BUNDLED_SEGMENTS = {"node_modules", "vendor", "vendored", "third_party", "bower_components"}
+_COMPILED_OUTPUT_SEGMENTS = {"dist", "out", "build", "bundle"}
 
 
 def _provider_finding(

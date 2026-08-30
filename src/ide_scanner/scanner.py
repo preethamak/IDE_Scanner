@@ -50,7 +50,7 @@ from .module_flow import (
     remote_vsix_install_flow,
 )
 from .value_flow import credential_value_flow
-from .intent_gate import evaluate_preventive_block_veto
+from .intent_gate import ai_assistant_review, evaluate_preventive_block_veto
 from .public_outcomes import apply_public_assessment
 from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
@@ -140,7 +140,14 @@ CORRELATED_RULES = {
     "obfuscated-credential-harvesting-exfiltration",
     "supply-chain-dropper-chain",
 }
-BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {"download-and-execute"}
+# These heuristics show installer-shaped behavior, not malware by themselves.
+# They require review unless confirmed intelligence or a separate high-specificity
+# chain independently warrants a preventive block.
+REVIEW_ONLY_CORRELATED_RULES = {
+    "download-and-execute",
+    "remote-vsix-install-chain",
+}
+BLOCKING_CORRELATED_RULES = CORRELATED_RULES - REVIEW_ONLY_CORRELATED_RULES
 BLOCKING_OBSERVED_RULES = {
     "observed-destructive-behavior",
     "observed-download-execute",
@@ -671,7 +678,7 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
             0.92,
             "Import-connected modules download, write, and install a remote VSIX without visible integrity verification.",
             cross_file_vsix_flow["files"],
-            "Block silent remote extension installation or require independently trusted integrity verification and explicit approval.",
+            "Require review, explicit approval, and independently trusted integrity verification before allowing remote extension installation.",
             {
                 "evidence_class": "correlated",
                 "correlation": "cross-file-import-connected-semantic-chain",
@@ -1944,7 +1951,7 @@ def _add_code_findings(
             0.9,
             "Code downloads a VSIX, writes it locally, and invokes the IDE extension installer without visible integrity verification.",
             [rel],
-            "Block silent remote extension installation or require an independently trusted signature/hash and explicit user approval.",
+            "Require review, explicit user approval, and an independently trusted signature/hash before allowing remote extension installation.",
             {
                 "evidence_class": "correlated",
                 "correlation": "same-file-semantic-chain",
@@ -3323,6 +3330,14 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         else:
             extension.decision_reason = extension.verdict_reason
         return
+    if ai_assistant_review(extension):
+        extension.decision = "review"
+        extension.decision_basis = "ai_assistant_standing_review"
+        extension.decision_reason = (
+            "AI coding assistant surfaces (model access, prompt handling, code transmission) "
+            "warrant standing review even when the publisher is established and behavior matches intent."
+        )
+        return
     extension.decision = "allow"
     extension.decision_reason = "Analysis completed without actionable evidence or unapproved baseline changes."
 
@@ -3345,10 +3360,11 @@ def _analysis_status(extension: ExtensionReport, coverage: dict[str, Any], incom
 def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
     """Return behavior rules strong enough to prevent execution without threat intelligence.
 
-    Generic download-and-execute behavior is intentionally insufficient by itself:
-    legitimate language servers and tool installers can look similar. It becomes a
-    preventive block only when automatic activation and credential handling occur in
-    the same extension. Confirmed intelligence is handled separately by verdict.
+    Generic download-and-execute and remote-VSIX installer behavior are intentionally
+    insufficient by themselves: the former becomes a preventive block only when
+    automatic activation and credential handling occur in the same extension, while
+    the latter remains a review decision. Confirmed intelligence is handled separately
+    by verdict.
     """
     rule_ids = {finding.rule_id for finding in findings}
     blocking = rule_ids & (BLOCKING_CORRELATED_RULES | BLOCKING_OBSERVED_RULES)

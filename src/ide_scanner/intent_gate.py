@@ -222,6 +222,27 @@ def _decision_relevant(finding: Any) -> bool:
     return finding_actionability(finding) in {"review", "block"}
 
 
+def ai_assistant_review(extension: ExtensionReport) -> bool:
+    """Standing-review policy for curated AI coding assistants.
+
+    An established publisher and intent-consistent behavior earn an allow for
+    ordinary tooling, but assistants with model access and code-transmission
+    surfaces keep human oversight even when everything matches their profile —
+    the blast radius of a compromised assistant is the user's entire codebase.
+    Only explicit curated profiles qualify; unknown publishers already land on
+    review through the unexplained-behavior path."""
+    from .capability_contracts import resolve_intent
+
+    intent = resolve_intent(
+        extension_id=extension.extension_id,
+        name=getattr(extension, "name", ""),
+        description=getattr(extension, "description", ""),
+        capabilities=list(getattr(extension, "capabilities", []) or []),
+        findings=list(getattr(extension, "findings", []) or []),
+    )
+    return intent.source == "explicit_profile" and intent.class_id == "ai_assistant"
+
+
 def _install_chain_corroborated(findings: list[Any]) -> bool:
     """True when at least one mapped finding shows an install-constrained sink
     or explicit integrity verification. Emitters record ``sink`` and

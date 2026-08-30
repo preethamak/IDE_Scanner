@@ -303,3 +303,18 @@ def test_resolve_intent_strong_manifest_signals():
         findings=[_finding("mcp-server-command", severity="MEDIUM", confidence=0.7)],
     )
     assert agentic.class_id == "ai_assistant"
+
+
+def test_ai_assistant_standing_review():
+    from ide_scanner.intent_gate import ai_assistant_review
+
+    profiled_assistant = _extension(findings=[])
+    profiled_assistant.extension_id = "GitHub.copilot"
+    assert ai_assistant_review(profiled_assistant) is True
+
+    toolchain = _extension()
+    assert ai_assistant_review(toolchain) is False
+
+    unknown = _extension()
+    unknown.extension_id = "unknown.some-assistant"
+    assert ai_assistant_review(unknown) is False

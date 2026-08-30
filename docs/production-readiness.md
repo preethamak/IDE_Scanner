@@ -122,13 +122,14 @@ artifact identity, complete analysis, and no unexplained actionable evidence.
 Unknown or merely inferred classes receive context only and cannot become an
 allowlist.
 
-The semantic rule set now also blocks an unverified remote VSIX installation
-chain when the same source file downloads remote content, writes a local VSIX,
-and calls `workbench.extensions.installExtension` without visible hash or
-signature verification. This is reported as high-specificity correlated static
-evidence and remains `non_authoritative`; independently verified update flows
-are a negative control rather than being globally suppressed by publisher or
-extension class.
+The semantic rule set detects an unverified remote VSIX installation chain when
+the same source file downloads remote content, writes a local VSIX, and calls
+`workbench.extensions.installExtension` without visible hash or signature
+verification. This is high-specificity correlated static evidence, but it is
+not malware evidence on its own: the resulting decision is `review`. A block
+requires confirmed intelligence or an independent high-specificity abuse chain.
+Independently verified update flows are a negative control rather than being
+globally suppressed by publisher or extension class.
 
 The first cross-file semantic flow is also implemented for this updater chain.
 The scanner builds a bounded, directed relative-import graph and only correlates

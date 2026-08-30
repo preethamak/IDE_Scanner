@@ -277,11 +277,11 @@ class ScannerTests(unittest.TestCase):
         report = scan_targets(include_fixtures=True)
         by_id = {extension["extension_id"]: extension for extension in report["extensions"]}
 
-        # Unprofiled installer: chain evidence stands as a preventive block and
-        # carries a literal download host stamp.
+        # Remote VSIX installation remains a review until another independent
+        # high-specificity chain or confirmed intelligence warrants a block.
         installer = by_id["trusted.toolchain-installer"]
         chain = next(f for f in installer["findings"] if f["rule_id"] == "remote-vsix-install-chain")
-        self.assertEqual(installer["decision"], "block")
+        self.assertEqual(installer["decision"], "review")
         self.assertEqual(chain["evidence"]["download_host"], "marketplace.visualstudio.com")
 
         # Dynamic-host dropper: block survives; no host stamp exists so the
@@ -1900,7 +1900,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
 
-    def test_unverified_remote_vsix_install_is_blocked(self) -> None:
+    def test_unverified_remote_vsix_install_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -1917,7 +1917,7 @@ class ScannerTests(unittest.TestCase):
 
         finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
         self.assertEqual(report.verdict, "suspicious")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertEqual(report.malware_authority, "non_authoritative")
         self.assertEqual(finding.evidence["sink"], "workbench.extensions.installExtension")
         self.assertFalse(finding.evidence["integrity_verification"])
@@ -1940,7 +1940,7 @@ class ScannerTests(unittest.TestCase):
 
         self.assertNotIn("remote-vsix-install-chain", {item.rule_id for item in report.findings})
 
-    def test_cross_file_import_connected_remote_vsix_install_is_blocked(self) -> None:
+    def test_cross_file_import_connected_remote_vsix_install_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -1955,7 +1955,7 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertEqual(finding.evidence["correlation"], "cross-file-import-connected-semantic-chain")
         self.assertEqual(finding.evidence["stages"]["download"], ["network.js"])
 
