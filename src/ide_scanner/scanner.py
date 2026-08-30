@@ -182,7 +182,7 @@ CAPABILITY_RULES = {
     "webview-csp-unsafe-directive",
 }
 DEPENDENCY_RULES = {"mutable-dependency-source", "unpinned-dependency", "vulnerable-npm-dependency"}
-PROVENANCE_RULES = {"marketplace-removed-package", "packed-artifact", "source-vsix-diff-unexplained", "binary-without-origin"}
+PROVENANCE_RULES = {"marketplace-removed-package", "packed-artifact", "binary-without-origin"}
 POSTURE_RULES = {
     "dangerous-github-workflow",
     "repo-binary-artifacts",
@@ -2080,6 +2080,32 @@ def _add_code_findings(
             [rel],
             "Verify the download source, integrity checks, and execution purpose.",
         ))
+    if (
+        has_download
+        and _ARCHIVE_EXTRACT_RE.search(text)
+        and _DYNAMIC_MODULE_LOAD_RE.search(text)
+        and not has_integrity_verification
+        and not _is_generated_code_blob(rel, text)
+        and _features_nearby(text, [DOWNLOAD_RE, _ARCHIVE_EXTRACT_RE, _DYNAMIC_MODULE_LOAD_RE])
+    ):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "supply-chain-dropper-chain",
+            "supply-chain",
+            "HIGH",
+            0.84,
+            "Code downloads remote content, extracts an archive, and dynamically loads code from a computed path without visible integrity verification.",
+            [rel],
+            "Require an immutable pinned source, checksum or signature verification, and a documented reason for loading downloaded code into the extension runtime.",
+            {
+                "evidence_class": "correlated",
+                "correlation": "same-file-semantic-chain",
+                "source": "remote-download",
+                "transform": "archive-extraction",
+                "sink": "dynamic-module-load",
+            },
+        ))
     _add_cross_extension_code_findings(
         extension_id,
         version,
@@ -2099,6 +2125,21 @@ def _add_code_findings(
 # enough to reject whole-bundle co-occurrence in minified files, loose enough to keep a
 # genuinely local capture->exfil sequence. Kept in sync with the _features_nearby budget.
 CREDENTIAL_FLOW_WINDOW = 1500
+
+# Supply-chain dropper chain legs. The archive leg requires an actual extraction
+# API, and the load leg requires either a computed (non-literal) require/import
+# argument or an explicit bundler-escape loader. Plain `require('literal')` must
+# not qualify: every CommonJS file contains it.
+_ARCHIVE_EXTRACT_RE = re.compile(
+    r"(?:\bextractAllTo(?:Async)?\s*\(|\bextractEntryTo\s*\(|\btar\.(?:x|extract)\b|"
+    r"\bunzipper\.\w+|\bdecompress\s*\(|\bzlib\.(?:gunzip|gunzipSync|inflate|inflateSync|brotliDecompress)\b|"
+    r"new\s+AdmZip\b|\bloadAsync\s*\()",
+)
+_DYNAMIC_MODULE_LOAD_RE = re.compile(
+    r"(?:\b__non_webpack_require__\s*\(|\bcreateRequire\s*\(|\bModule\._load\s*\(|\bprocess\.dlopen\s*\(|"
+    r"\brequire\s*\(\s*(?:path\.|`[^`]*\$\{|[A-Za-z_$][\w$]*\s*[+.\[])|"
+    r"\bimport\s*\(\s*(?:path\.|`[^`]*\$\{|[A-Za-z_$][\w$]*\s*[+.\[]))",
+)
 
 # Obfuscation signal for the obfuscation-execution-network chain. Requires a RUN of at
 # least four consecutive \xNN hex escapes (real string-obfuscation) or an explicit base64

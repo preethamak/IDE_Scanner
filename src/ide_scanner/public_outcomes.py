@@ -61,7 +61,6 @@ _PROVENANCE_CONFLICT_RULES = {
     "marketplace-name-impersonation",
     "marketplace-removed-malware",
     "marketplace-removed-package",
-    "source-vsix-diff-unexplained",
     "trusted-threat-feed-hit",
 }
 _EXPLAINABLE_CLASSES = {"capability", "reputation", "weak"}

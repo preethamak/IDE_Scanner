@@ -122,6 +122,16 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "recommendation": "Review agent tool boundaries and approval prompts before trusting the extension.",
         "benchmark_tags": ["agentic", "credential", "network"],
     },
+    "supply-chain-dropper-chain": {
+        "title": "Supply-chain dropper chain",
+        "category": "supply-chain",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "Detects remote download, archive extraction, and dynamic loading of code from a computed path without visible integrity verification.",
+        "recommendation": "Require an immutable pinned source, checksum or signature verification, and a documented reason for loading downloaded code into the runtime.",
+        "false_positive_notes": "Legitimate tool installers may download and extract archives, but should verify integrity and should not dynamically load extracted code into the extension process.",
+        "benchmark_tags": ["download", "supply-chain", "dynamic-load"],
+    },
     "download-and-execute": {
         "title": "Download and execute",
         "category": "execution",

@@ -38,9 +38,10 @@ def main(argv: list[str] | None = None) -> int:
         choices=["user_uploaded_vsix", "installed_directory", "local_directory", "archive_artifact", "source_snapshot"],
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
-    scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles; only 'deep' additionally enables online registry checks (same as --online).")
+    scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
     scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
-    scan.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
+    scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
+    scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
     scan.add_argument("--threat-feed", help="JSON feed of known malicious or suspicious extension ids.")
     scan.add_argument("--extension-advisories", help="Versioned JSON feed of exact extension vulnerability advisories. Defaults to the bundled snapshot.")
@@ -104,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--token", help="Bearer token for the web app. Defaults to IDE_SCANNER_AGENT_TOKEN.")
     agent.add_argument("--all", action="store_true", help="Scan local VS Code-compatible extension installs.")
     agent.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
-    agent.add_argument("--online", action="store_true", help="Enable registry and dependency vulnerability checks.")
+    agent.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
+    agent.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks (on by default).")
     agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
     agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
@@ -131,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             marketplace_target_platform=args.target_platform,
             include_fixtures=args.fixtures,
             all_local=args.installed,
-            online=args.online or args.profile in {"deep"},
+            online=not args.offline,
             known_bad_hashes_file=args.known_bad_hashes,
             threat_feed_file=args.threat_feed,
             extension_advisories_file=args.extension_advisories,
@@ -243,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = build_agent_report(
             paths=[Path(item) for item in args.path],
             all_local=args.all,
-            online=args.online,
+            online=not args.offline,
             previous_report_file=args.previous_report,
             include_source=args.include_source,
         )

