@@ -21,6 +21,8 @@ TRANSIENT_UPSTREAM_MARKERS = (
     "status 520",
     "temporarily unavailable",
     "web server is returning an unknown error",
+    "statement timeout",
+    "canceling statement due to statement timeout",
 )
 
 
