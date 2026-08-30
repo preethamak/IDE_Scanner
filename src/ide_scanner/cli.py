@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent import build_agent_report, upload_agent_report
+from .alternatives import DEFAULT_REPUTATION_FLOOR, find_alternatives
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .discovery import discover_from_path, discover_local_installations
@@ -66,6 +67,21 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_normalize.add_argument("--input", required=True, help="Input dataset file.")
     benchmark_normalize.add_argument("--out", "--output", dest="output", required=True, help="Output normalized JSON file.")
     benchmark_normalize.add_argument("--source-ref", default=None, help="Dataset reference URL or local commit.")
+
+    alternatives = subparsers.add_parser(
+        "alternatives",
+        help="Rank extensions for a need by publisher reputation before recommending one.",
+    )
+    alternatives.add_argument("query", help="What the extension needs to do, for example 'plist'.")
+    alternatives.add_argument("--limit", type=int, default=10, help="Maximum candidates to assess.")
+    alternatives.add_argument(
+        "--floor",
+        type=int,
+        default=DEFAULT_REPUTATION_FLOOR,
+        help="Reputation score a candidate must reach to be recommendable.",
+    )
+    alternatives.add_argument("--offline", action="store_true", help="Skip source-repository and withdrawal lookups.")
+    alternatives.add_argument("--output", help="Write the result to this path instead of stdout.")
 
     agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
     agent.add_argument("--server", required=True, help="Base URL of the web app, for example http://127.0.0.1:8765.")
@@ -188,6 +204,16 @@ def main(argv: list[str] | None = None) -> int:
         result = _run_benchmark()
         _emit(result, args.out)
         return 0
+    if args.command == "alternatives":
+        result = find_alternatives(
+            args.query,
+            limit=args.limit,
+            reputation_floor=args.floor,
+            online=not args.offline,
+        )
+        _emit(result, args.output)
+        # Exit 3 lets a caller gate on the result without parsing JSON.
+        return 0 if result["recommendation_allowed"] else 3
     if args.command == "agent":
         if not args.all and not args.path:
             parser.error("agent requires --all or at least one --path")

@@ -344,7 +344,45 @@ def _normalize_marketplace_search_row(raw: dict[str, Any]) -> dict[str, Any] | N
         "rating_average": round(float(stats.get("averagerating") or 0), 2),
         "rating_count": int(stats.get("ratingcount") or 0),
         "icon_url": icon_url,
+        "repository": _marketplace_source_repository(latest_version),
+        "executes_code": _marketplace_executes_code(latest_version),
+        "registry": "vs-marketplace",
     }
+
+
+SOURCE_LINK_PROPERTIES = (
+    "Microsoft.VisualStudio.Services.Links.Source",
+    "Microsoft.VisualStudio.Services.Links.GitHub",
+    "Microsoft.VisualStudio.Services.Links.Getstarted",
+)
+EXECUTES_CODE_PROPERTY = "Microsoft.VisualStudio.Code.ExecutesCode"
+
+
+def _marketplace_version_properties(version: dict[str, Any]) -> dict[str, str]:
+    raw = version.get("properties") if isinstance(version.get("properties"), list) else []
+    return {
+        str(item.get("key") or ""): str(item.get("value") or "")
+        for item in raw
+        if isinstance(item, dict)
+    }
+
+
+def _marketplace_source_repository(version: dict[str, Any]) -> str:
+    properties = _marketplace_version_properties(version)
+    for key in SOURCE_LINK_PROPERTIES:
+        value = properties.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _marketplace_executes_code(version: dict[str, Any]) -> bool | None:
+    """``None`` means the Marketplace did not declare the property at all, which is
+    different from an explicit ``false`` and must not be scored as if it were."""
+    value = _marketplace_version_properties(version).get(EXECUTES_CODE_PROPERTY)
+    if value is None or value == "":
+        return None
+    return value.strip().lower() == "true"
 
 
 def _degzip_if_needed(path: Path) -> None:
@@ -637,6 +675,12 @@ def _fetch_repository_metadata_many(repo_urls: list[str]) -> tuple[dict[str, dic
             continue
         try:
             data = json.loads(_http_get_text(github, timeout=10))
+            if not isinstance(data, dict) or not data.get("full_name"):
+                # A 404 body still parses as JSON ({"message": "Not Found"}), so an
+                # absent full_name is how a deleted or private repository presents.
+                # Without this it would be recorded as a real repo with zero stars.
+                out[repo_url] = {"repository": repo_url, "found": False, "host": "github"}
+                continue
             out[repo_url] = {
                 "repository": repo_url,
                 "found": True,
@@ -698,13 +742,12 @@ def _normalize_marketplace_extension(extension_id: str, raw: dict[str, Any]) -> 
 
 
 def _marketplace_publisher_verified(publisher: dict[str, Any]) -> bool:
-    flags = str(publisher.get("flags") or "").lower().split()
-    return bool(
-        publisher.get("isDomainVerified")
-        or publisher.get("isVerified")
-        or publisher.get("verified")
-        or "verified" in flags
-    )
+    """Domain verification is the only Marketplace signal that costs the publisher
+    anything to obtain (proving DNS control). The publisher ``flags`` field is not
+    that signal: the gallery stamps ``verified`` on essentially every public
+    publisher, so treating it as trust marks anonymous single-author accounts as
+    verified. Only ``isDomainVerified`` is load-bearing here."""
+    return bool(publisher.get("isDomainVerified"))
 
 
 def _marketplace_stats(raw_stats: Any) -> dict[str, float]:
