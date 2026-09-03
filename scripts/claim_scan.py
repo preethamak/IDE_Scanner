@@ -7,6 +7,7 @@ import urllib.request
 import re
 
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+USER_AGENT = "ide-scanner-github-actions/1"
 
 
 def main() -> int:
@@ -58,6 +59,7 @@ def claim_job(claim_url: str) -> dict[str, object] | None:
         headers={
             "Authorization": f"Bearer {os.environ['SCAN_RUNNER_SECRET']}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
     )
     try:
@@ -79,7 +81,7 @@ class _PostPreservingRedirect(urllib.request.HTTPRedirectHandler):
             newurl,
             data=req.data,
             method=req.get_method(),
-            headers=dict(req.header_items()),
+            headers={**dict(req.header_items()), "User-Agent": USER_AGENT},
         )
 
 

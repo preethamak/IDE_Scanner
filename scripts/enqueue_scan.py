@@ -6,6 +6,7 @@ import urllib.request
 import re
 
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+USER_AGENT = "ide-scanner-github-actions/1"
 
 
 def main() -> int:
@@ -37,6 +38,7 @@ def main() -> int:
         headers={
             "Authorization": f"Bearer {os.environ['SCAN_RUNNER_SECRET']}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
     )
     with urllib.request.urlopen(request, timeout=60) as response:

@@ -22,6 +22,7 @@ TRANSIENT_UPSTREAM_MARKERS = (
     "temporarily unavailable",
     "web server is returning an unknown error",
 )
+USER_AGENT = "ide-scanner-github-actions/1"
 
 
 def main() -> int:
@@ -70,7 +71,7 @@ def encoded_payload(value: dict[str, object]) -> bytes:
 
 def signed_request(payload: bytes) -> urllib.request.Request:
     signature = hmac.new(os.environ["SCAN_CALLBACK_SECRET"].encode(), payload, hashlib.sha256).hexdigest()
-    return urllib.request.Request(os.environ["SCAN_CALLBACK_URL"], data=payload, method="POST", headers={"Content-Type": "application/json", "Content-Encoding": "gzip", "X-IDE-Scanner-Signature": signature})
+    return urllib.request.Request(os.environ["SCAN_CALLBACK_URL"], data=payload, method="POST", headers={"Content-Type": "application/json", "Content-Encoding": "gzip", "X-IDE-Scanner-Signature": signature, "User-Agent": USER_AGENT})
 
 
 if __name__ == "__main__":
