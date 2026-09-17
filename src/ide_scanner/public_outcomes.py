@@ -4,13 +4,14 @@ from typing import Any
 
 from .models import ExtensionReport
 from .trust_tiers import derive_trust_tier
+from .capability_contracts import class_contract, classify_extension, expected_capabilities, extension_profile
 
 
 # These profiles explain intended power; they are not allowlists. A profile can
 # only produce an expected-capability outcome when registry identity, repository
 # ownership, artifact identity, and analysis coverage all agree and no
 # unexplained decision-relevant evidence remains.
-EXPECTED_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
+LEGACY_EXPECTED_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
     "dbaeumer.vscode-eslint": {
         "id": "vscode-eslint-v1",
         "publisher": "dbaeumer",
@@ -61,14 +62,14 @@ _PROVENANCE_CONFLICT_RULES = {
     "marketplace-name-impersonation",
     "marketplace-removed-malware",
     "marketplace-removed-package",
-    "source-vsix-diff-unexplained",
     "trusted-threat-feed-hit",
 }
 _EXPLAINABLE_CLASSES = {"capability", "reputation", "weak"}
 
 
 def apply_public_assessment(extension: ExtensionReport) -> None:
-    profile = EXPECTED_CAPABILITY_PROFILES.get(extension.extension_id.lower())
+    classification = classify_extension(extension)
+    profile = extension_profile(extension.extension_id) or LEGACY_EXPECTED_CAPABILITY_PROFILES.get(extension.extension_id.lower())
     rule_ids = {finding.rule_id for finding in extension.findings}
     evidence_classes = {_evidence_class(finding) for finding in extension.findings}
     capability_ids = sorted(
@@ -93,7 +94,9 @@ def apply_public_assessment(extension: ExtensionReport) -> None:
         and coverage_complete and artifact_consistent and not conflicted
     )
     provenance_tier = "conflicted" if conflicted else "established" if established else "verified" if verified else "unknown"
-    expected = set(profile["capabilities"]) if profile else set()
+    contract_class = str(profile.get("class") or classification["primary"]) if profile else str(classification["primary"])
+    expected = expected_capabilities(profile, contract_class) if profile else set()
+    forbidden = set(class_contract(contract_class).get("forbidden", []))
     matched = sorted(set(capability_ids) & expected)
     unexpected_capabilities = sorted(set(capability_ids) - expected) if profile else capability_ids
     unexplained_findings = sorted(
@@ -117,6 +120,9 @@ def apply_public_assessment(extension: ExtensionReport) -> None:
         "matched": matched,
         "unexpected": unexpected_capabilities,
         "unexplained_findings": unexplained_findings,
+        "classification": classification,
+        "contract_class": contract_class,
+        "forbidden_observed": sorted(set(capability_ids) & forbidden),
     }
     if isinstance(behavioral_verification, dict):
         extension.capability_assessment["behavioral_verification"] = behavioral_verification

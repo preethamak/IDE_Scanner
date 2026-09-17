@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
+from .artifact_store import TARGET_PLATFORM_RE
 from .report_bundle import build_report_bundle
 from .rule_registry import RULESET_VERSION, rules_json
 from .scanner import scan_targets
@@ -49,12 +50,14 @@ class JobStore:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def create(self, extension_id: str) -> dict[str, Any]:
+    def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
         now = _now()
         job = {
             "id": f"job_{uuid.uuid4().hex}",
             "status": "queued",
             "extension_id": extension_id,
+            "version": version,
+            "target_platform": target_platform,
             "created_at": now,
             "updated_at": now,
             "error": None,
@@ -118,6 +121,7 @@ def execute_marketplace_job(
         report = scan(
             marketplace_scan_ids=[job["extension_id"]],
             marketplace_version=job.get("version"),
+            marketplace_target_platform=job.get("target_platform"),
             online=True,
             include_posture=False,
             required_providers=DEEP_REQUIRED_PROVIDERS,
@@ -279,7 +283,12 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if not MARKETPLACE_ID.fullmatch(extension_id):
             self._json(400, {"error": "extension_id must use publisher.extension format."})
             return
-        job = self.store.create(extension_id)
+        version = str(payload.get("version") or "").strip() or None
+        target_platform = str(payload.get("target_platform") or "").strip().lower() or None
+        if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
+            self._json(400, {"error": "target_platform is invalid."})
+            return
+        job = self.store.create(extension_id, version=version, target_platform=target_platform)
         if not self.pool.submit(job):
             job["status"] = "failed"
             job["stage"] = "rejected"

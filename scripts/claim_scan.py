@@ -4,6 +4,10 @@ import json
 import os
 import urllib.error
 import urllib.request
+import re
+
+TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+USER_AGENT = "ide-scanner-github-actions/1"
 
 
 def main() -> int:
@@ -15,12 +19,16 @@ def main() -> int:
         required = ("id", "extension_id", "version", "callback_url")
         if not all(job.get(key) for key in required):
             raise RuntimeError("Scan claim response is incomplete")
+        target_platform = str(job.get("target_platform") or "").strip().lower()
+        if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
+            raise RuntimeError("Scan claim target platform is invalid")
         write_outputs({
             "has_job": "true",
             "job_id": str(job["id"]),
             "extension_id": str(job["extension_id"]),
             "version": str(job["version"]),
             "callback_url": str(job["callback_url"]),
+            "target_platform": target_platform,
         })
         print(f"Claimed {job['extension_id']}@{job['version']} from {claim_url}")
         return 0
@@ -51,6 +59,7 @@ def claim_job(claim_url: str) -> dict[str, object] | None:
         headers={
             "Authorization": f"Bearer {os.environ['SCAN_RUNNER_SECRET']}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
     )
     try:
@@ -72,7 +81,7 @@ class _PostPreservingRedirect(urllib.request.HTTPRedirectHandler):
             newurl,
             data=req.data,
             method=req.get_method(),
-            headers=dict(req.header_items()),
+            headers={**dict(req.header_items()), "User-Agent": USER_AGENT},
         )
 
 

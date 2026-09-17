@@ -24,6 +24,9 @@ class ScanRequest:
     registry_snapshot_file: Path | str | None = None
     sandbox_observations_file: Path | str | None = None
     previous_report_file: Path | str | None = None
+    path_artifact_origin: str | None = None
+    artifact_url: str | None = None
+    artifact_sha256: str | None = None
     include_posture: bool = True
     required_providers: frozenset[str] = frozenset()
 
@@ -45,6 +48,9 @@ class ScanRequest:
         registry_snapshot_file: Path | str | None = None,
         sandbox_observations_file: Path | str | None = None,
         previous_report_file: Path | str | None = None,
+        path_artifact_origin: str | None = None,
+        artifact_url: str | None = None,
+        artifact_sha256: str | None = None,
         include_posture: bool = True,
         required_providers: set[str] | frozenset[str] | None = None,
     ) -> "ScanRequest":
@@ -63,6 +69,9 @@ class ScanRequest:
             registry_snapshot_file=registry_snapshot_file,
             sandbox_observations_file=sandbox_observations_file,
             previous_report_file=previous_report_file,
+            path_artifact_origin=path_artifact_origin,
+            artifact_url=artifact_url,
+            artifact_sha256=artifact_sha256,
             include_posture=include_posture,
             required_providers=frozenset(
                 str(provider).strip().lower()

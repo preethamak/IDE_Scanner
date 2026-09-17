@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from .calibration import policy_version
 from .models import Finding
 
-POLICY_VERSION = "3.0.0-calibration.3"
+POLICY_VERSION = policy_version()
 
 FindingActionability = Literal["contextual", "low", "review", "block"]
 
@@ -54,6 +55,7 @@ _CONTEXTUAL_PROVENANCE_RULES = {
 
 _REVIEW_POSTURE_RULES = {
     "entrypoint-ast-unparsed",
+    "executable-heavy-obfuscation",
 }
 
 

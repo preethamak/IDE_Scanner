@@ -175,6 +175,15 @@ Each `ExtensionReport` contains:
 | `scanned_files` | Number of readable source/config files scanned. |
 | `dependencies` | Runtime dependency map. |
 
+For Marketplace downloads, the scanner compares the decompressed VSIX bytes to
+the exact version's `Microsoft.VisualStudio.Services.VsixSha256` property before
+opening the package. A mismatch aborts the scan instead of analyzing an artifact
+under the requested identity. The report also records whether Marketplace
+declared a detached `VsixSignature` asset, but leaves `verified=false` until the
+CMS signature and signer trust chain are cryptographically verified. Integrity
+metadata is deliberately ignored for older pinned versions and platform-specific
+variants unless the registry response identifies the exact same artifact.
+
 Each finding includes:
 
 ```text
@@ -247,6 +256,14 @@ Current suppressor:
 | --- | ---: | --- |
 | `verified-publisher` | 5 | Present when `marketplace-verified-publisher` is found. Reduces reputation risk only. |
 
+Scoring thresholds are stored in the packaged, versioned
+`src/ide_scanner/calibration/scoring-v1.json` policy rather than being embedded
+throughout scanner conditionals. The loader validates the schema, required
+components, and the `0..100` score range before a scan can use the policy. The
+policy version is copied into report metadata so benchmark results remain
+comparable after calibration changes. Verdict authority gates remain in code:
+changing a numeric threshold cannot make heuristic evidence authoritative.
+
 ## Evidence Classes
 
 Each rule maps to an evidence class:
@@ -307,7 +324,6 @@ Each rule maps to an evidence class:
 | `packed-artifact` | `provenance` | `provenance` | MEDIUM | Extension contains packed archive such as `.zip`, `.asar`, `.tgz`, `.jar`, etc. |
 | `binary-without-origin` | `provenance` | `provenance` | MEDIUM evidence / LOW actionability | Native artifacts lack independent registry/vendor origin verification; emitted once with a bounded sample. |
 | `known-bad-artifact` | `confirmed-intelligence` | `confirmed` | CRITICAL | File/package/VSIX hash matches a configured known-bad hash feed. |
-| `source-vsix-diff-unexplained` | `provenance` | `provenance` | Currently classified, not emitted by current scanner path | Reserved for source/package mismatch evidence. |
 
 ### Code Behavior Metrics
 
@@ -322,6 +338,13 @@ Each rule maps to an evidence class:
 
 ### Credential and Correlated Static Chain Metrics
 
+`credential-harvesting-exfiltration` covers credential stealers that deliberately
+separate collection and transmission into helper functions. It requires at least
+three independent credential families plus home-directory collection, directory
+enumeration, file reads, serialization, and an explicit HTTP request write in
+the same source file. This stricter semantic conjunction closes a same-window
+blind spot without treating ordinary single-credential API clients as exfiltration.
+
 | Rule id | Category | Evidence class | Severity | Purpose |
 | --- | --- | --- | --- | --- |
 | `secret-reference:aws-credentials` | `credential-access` | `weak` | LOW | Code references AWS credential material. |
@@ -332,12 +355,13 @@ Each rule maps to an evidence class:
 | `secret-reference:env-file` | `credential-access` | `weak` | LOW | Code references `.env` or environment variables. |
 | `credential-file-read` | `credential-access` | `weak` | MEDIUM | Code can read local files and references sensitive material. |
 | `credential-exfiltration-chain` | `credential-access` | `correlated` | HIGH | Code combines credential references, file reads, and outbound network writes. |
+| `credential-harvesting-exfiltration` | `credential-access` | `correlated` | HIGH | Code combines systematic multi-family credential harvesting with serialized outbound writes across helper functions. |
 | `destructive-transfer-chain` | `destructive-activity` | `correlated` | HIGH | Code combines destructive file activity, archive/encoding, and network behavior. |
 | `obfuscation-execution-network` | `execution` | `correlated` | HIGH | Code combines obfuscation, dynamic execution, and network behavior. |
 | `persistence-chain` | `persistence` | `correlated` | HIGH | Code modifies persistence locations and executes or communicates externally. |
 | `agent-data-exfil-chain` | `agentic` | `correlated` | HIGH | Agent-facing code combines sensitive references with outbound network behavior. |
 | `download-and-execute` | `execution` | `correlated` | HIGH | Code can download content and execute local processes from the same file. |
-| `supply-chain-dropper-chain` | `supply-chain` | `correlated` | Not emitted by current scanner path | Reserved correlated chain for package dropper behavior. |
+| `supply-chain-dropper-chain` | `supply-chain` | `correlated` | HIGH | Remote download + archive extraction + dynamic load of code from a computed path without integrity verification. |
 
 ### Webview Security Metrics
 
@@ -359,7 +383,7 @@ Each rule maps to an evidence class:
 
 ### Online Marketplace, Registry, and Repository Metrics
 
-These metrics are emitted only when online registry enrichment is enabled.
+These metrics are emitted when online registry enrichment runs (the default; disable with `--offline`).
 
 | Rule id | Category | Evidence class | Severity | Purpose |
 | --- | --- | --- | --- | --- |
@@ -468,3 +492,17 @@ verdict rank -> severity rank -> malware_score -> risk_score -> extension_id
 | Local web + scanner repo | Full scanning happens locally; reports can be stored locally or uploaded only through explicit app flows. |
 
 The scanner is designed to be clear about evidence strength: capability and reputation findings raise review context, but `malicious` is reserved for confirmed malware intelligence.
+
+# Untrusted archive isolation
+
+VSIX extraction runs in a dedicated subprocess with a 512 MiB address-space
+limit and a three-minute timeout. The worker retains the existing file-count,
+expanded-size, compression-ratio, traversal, symlink, and special-member
+checks. A timeout, crash, malformed response, or rejected archive fails the
+artifact scan closed rather than continuing with a partial extraction.
+
+Artifact inventory hashing uses the same isolated worker boundary with a
+five-minute timeout, 768 MiB address-space limit, and a 100,000-file ceiling.
+The worker validates every relative target against the artifact root before
+reading it and returns the package identity and risky-artifact inventory over a
+structured fail-closed protocol.
