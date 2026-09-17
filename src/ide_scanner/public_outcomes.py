@@ -56,6 +56,10 @@ LEGACY_EXPECTED_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+# Compatibility name used by the trust-tier fallback for reports created
+# before capability-contract profiles were introduced.
+EXPECTED_CAPABILITY_PROFILES = LEGACY_EXPECTED_CAPABILITY_PROFILES
+
 _PROVENANCE_CONFLICT_RULES = {
     "known-bad-artifact",
     "marketplace-extension-not-found",

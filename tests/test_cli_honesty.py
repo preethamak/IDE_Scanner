@@ -26,7 +26,7 @@ class CliHonestyTests(unittest.TestCase):
             output = Path(tmp) / "report.json"
             code = cli.main(["scan", "--fixtures", "--jobs", "2", "--format", "json", "--out", str(output)])
             self.assertEqual(code, 0)
-            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["summary"]["total_extensions"], 8)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["summary"]["total_extensions"], 9)
 
     def test_terminal_separates_file_coverage_from_provider_completion(self) -> None:
         report = {
