@@ -21,6 +21,7 @@ from ide_scanner.scanner import (
     _classify_findings,
     _build_report,
     _add_ast_findings,
+    _apply_sandbox_provider,
     _find_sensitive_api_text,
     _is_generated_code_blob,
     _local_error_extension,
@@ -215,6 +216,28 @@ class ScannerTests(unittest.TestCase):
 
             sandbox.assert_not_called()
             self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
+
+    def test_executed_runtime_provider_counts_as_completed_coverage(self) -> None:
+        extension = MagicMock()
+        extension.extension_id = "publisher.extension"
+        extension.analysis_coverage = {"providers": {}}
+        _apply_sandbox_provider(
+            [extension],
+            {
+                "metadata": {
+                    "status": "executed",
+                    "mode": "executed",
+                    "execution": "controlled-bubblewrap",
+                    "executed": True,
+                    "runtime_policy": "capability-gated-v1",
+                    "runtime_required_ids": ["publisher.extension"],
+                },
+                "extensions": {"publisher.extension": []},
+            },
+        )
+        provider = extension.analysis_coverage["providers"]["dynamic_sandbox"]
+        self.assertEqual(provider["status"], "completed")
+        self.assertTrue(provider["executed"])
 
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
