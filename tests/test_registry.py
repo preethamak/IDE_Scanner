@@ -213,7 +213,7 @@ class RegistryTests(unittest.TestCase):
 
     @patch("ide_scanner.registry._fetch_openvsx_metadata", return_value=({"found": False}, None))
     @patch("ide_scanner.registry._fetch_marketplace_metadata")
-    def test_download_rejects_registry_sha256_mismatch(self, marketplace, _openvsx) -> None:
+    def test_download_records_registry_sha256_mismatch_when_explicitly_allowed(self, marketplace, _openvsx) -> None:
         marketplace.return_value = ({
             "found": True,
             "publisher": "publisher",
@@ -222,7 +222,32 @@ class RegistryTests(unittest.TestCase):
             "registry": "vs-marketplace",
             "vsix_sha256": "0" * 64,
         }, None)
-        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download:
+        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download, patch.dict(
+            "os.environ", {"IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH": "1"}, clear=False
+        ):
+            download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04tampered")
+            source = {}
+            result = download_marketplace_vsix("publisher.extension", destination_dir=Path(temp), registry_out=source)
+
+            self.assertTrue(result.exists())
+            self.assertEqual(source["sha256_verified"], "false")
+            self.assertEqual(source["integrity_mismatch"], "true")
+            self.assertEqual(source["actual_sha256"], hashlib.sha256(b"PK\x03\x04tampered").hexdigest())
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata", return_value=({"found": False}, None))
+    @patch("ide_scanner.registry._fetch_marketplace_metadata")
+    def test_download_still_rejects_registry_sha256_mismatch_by_default(self, marketplace, _openvsx) -> None:
+        marketplace.return_value = ({
+            "found": True,
+            "publisher": "publisher",
+            "extension_name": "extension",
+            "version": "1.2.3",
+            "registry": "vs-marketplace",
+            "vsix_sha256": "0" * 64,
+        }, None)
+        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download, patch.dict(
+            "os.environ", {"IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH": ""}, clear=False
+        ):
             download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04tampered")
             with self.assertRaisesRegex(MarketplaceDownloadError, "SHA-256 check"):
                 download_marketplace_vsix("publisher.extension", destination_dir=Path(temp))
