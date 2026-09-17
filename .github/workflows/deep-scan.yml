@@ -41,6 +41,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install runtime isolation backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          bwrap --version
       - name: Enqueue canonical maintenance scan
         id: enqueue
         env:
@@ -91,6 +96,8 @@ jobs:
             "${target_platform_args[@]}" \
             --profile deep \
             --online \
+            --runtime \
+            --runtime-timeout 20 \
             --format bundle.json \
             --include-raw-evidence \
             --output scan-bundle.json

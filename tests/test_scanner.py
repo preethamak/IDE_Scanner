@@ -142,6 +142,80 @@ class ScannerTests(unittest.TestCase):
             self.assertTrue(result.artifact_inventory["scan_incomplete"])
             self.assertIn("could not be preserved", result.artifact_inventory["skipped_reason"])
 
+    def test_marketplace_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
+        with TemporaryDirectory() as tmp:
+            downloaded = Path(tmp) / "download.vsix"
+            downloaded.write_bytes(b"PK\x03\x04exact")
+            digest = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+            report = MagicMock()
+            report.extension_id = "publisher.extension"
+            report.version = "1.2.3"
+            report.artifact_hash = digest
+            report.capabilities = [{"id": "agentic", "evidence": ["package.json"]}]
+            report.artifact_identity = {"sha256": digest}
+            report.artifact_inventory = {}
+            metadata = {
+                "extension_id": "publisher.extension", "version": "1.2.3",
+                "registry": "vs-marketplace", "target_platform": "",
+                "expected_sha256": digest, "sha256_verified": "true",
+                "signature_asset_declared": "false",
+                "integrity_metadata_matches_artifact": "true",
+            }
+            runtime_bundle: dict[str, object] = {
+                "extensions": {}, "runs": [], "required_extension_ids": [],
+            }
+
+            def download(*_args, registry_out, **_kwargs):
+                registry_out.update(metadata)
+                return downloaded
+
+            runtime = {"mode": "executed", "extensions": {"publisher.extension": [{"kind": "process_exec"}]}}
+            with patch("ide_scanner.scanner.download_marketplace_vsix", side_effect=download), patch(
+                "ide_scanner.scanner.scan_vsix", return_value=report
+            ), patch("ide_scanner.scanner.run_sandbox", return_value=runtime) as sandbox:
+                result = scan_marketplace_extension(
+                    "publisher.extension", version="1.2.3", dynamic_runtime=True,
+                    runtime_timeout_seconds=7, runtime_bundle=runtime_bundle,
+                )
+
+            sandbox.assert_called_once_with(downloaded, allow_execute=True, timeout_seconds=7)
+            self.assertEqual(result.extension_id, "publisher.extension")
+            self.assertEqual(runtime_bundle["required_extension_ids"], ["publisher.extension"])
+            self.assertEqual(runtime_bundle["extensions"]["publisher.extension"][0]["kind"], "process_exec")
+
+    def test_marketplace_runtime_skips_non_executable_package(self) -> None:
+        with TemporaryDirectory() as tmp:
+            downloaded = Path(tmp) / "theme.vsix"
+            downloaded.write_bytes(b"PK\x03\x04theme")
+            digest = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+            report = MagicMock()
+            report.extension_id = "publisher.theme"
+            report.version = "1.0.0"
+            report.artifact_hash = digest
+            report.capabilities = [{"id": "themes", "evidence": ["package.json"]}]
+            report.artifact_identity = {"sha256": digest}
+            report.artifact_inventory = {}
+            metadata = {
+                "extension_id": "publisher.theme", "version": "1.0.0", "registry": "vs-marketplace",
+                "target_platform": "", "expected_sha256": digest, "sha256_verified": "true",
+                "signature_asset_declared": "false", "integrity_metadata_matches_artifact": "true",
+            }
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+
+            def download(*_args, registry_out, **_kwargs):
+                registry_out.update(metadata)
+                return downloaded
+
+            with patch("ide_scanner.scanner.download_marketplace_vsix", side_effect=download), patch(
+                "ide_scanner.scanner.scan_vsix", return_value=report
+            ), patch("ide_scanner.scanner.run_sandbox") as sandbox:
+                scan_marketplace_extension(
+                    "publisher.theme", version="1.0.0", dynamic_runtime=True, runtime_bundle=runtime_bundle,
+                )
+
+            sandbox.assert_not_called()
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
+
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
             finding_id="range-advisory",

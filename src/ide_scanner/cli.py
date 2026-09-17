@@ -50,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-advisories", help="Versioned JSON feed of exact extension vulnerability advisories. Defaults to the bundled snapshot.")
     scan.add_argument("--registry-snapshot", help="Replay registry and dependency intelligence captured in an earlier JSON report.")
     scan.add_argument("--sandbox-observations", help="JSON observations from an external sandbox run. The scanner imports this evidence but does not execute extensions.")
+    scan.add_argument("--runtime", action="store_true", help="Run a capability-gated dynamic pass for marketplace artifacts inside Bubblewrap; non-executable packages are recorded as not applicable.")
+    scan.add_argument("--runtime-timeout", type=int, default=15, help="Maximum seconds per controlled runtime action (1-300).")
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     scan.add_argument("--skip-posture", action="store_true", help="Skip local IDE/client posture checks; useful for portable extension corpus scans.")
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
@@ -130,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --target-platform requires exactly one --extension-id")
         if bool(args.artifact_url) != bool(args.artifact_sha256):
             parser.error("scan --artifact-url and --artifact-sha256 must be provided together")
+        if not 1 <= args.runtime_timeout <= 300:
+            parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             marketplace_scan_ids=args.extension_id,
@@ -151,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             path_artifact_origin=args.artifact_origin,
             artifact_url=args.artifact_url,
             artifact_sha256=args.artifact_sha256,
+            dynamic_runtime=args.runtime,
+            runtime_timeout_seconds=args.runtime_timeout,
         )
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)

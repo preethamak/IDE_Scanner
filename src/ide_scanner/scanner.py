@@ -57,6 +57,7 @@ from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
 from .providers import run_static_providers
 from .providers.runtime import SEMGREP_MAX_TARGET_BYTES, run_bounded_process
+from .sandbox_runner import run_sandbox
 from .registry import (
     MarketplaceDownloadError,
     _degzip_if_needed,
@@ -276,9 +277,13 @@ def scan_targets(
     path_artifact_origin: str | None = None,
     artifact_url: str | None = None,
     artifact_sha256: str | None = None,
+    dynamic_runtime: bool = False,
+    runtime_timeout_seconds: int = 15,
 ) -> dict[str, Any]:
     if not 1 <= jobs <= 32:
         raise ValueError("jobs must be between 1 and 32")
+    if not 1 <= runtime_timeout_seconds <= 300:
+        raise ValueError("runtime_timeout_seconds must be between 1 and 300")
     request = ScanRequest.create(
         paths=paths,
         extension_ids=extension_ids,
@@ -297,6 +302,8 @@ def scan_targets(
         path_artifact_origin=path_artifact_origin,
         artifact_url=artifact_url,
         artifact_sha256=artifact_sha256,
+        dynamic_runtime=dynamic_runtime,
+        runtime_timeout_seconds=runtime_timeout_seconds,
         include_posture=include_posture,
         required_providers=required_providers,
     )
@@ -341,16 +348,24 @@ def _scan_request(
     known_bad_hashes = _load_known_bad_hashes(request.known_bad_hashes_file)
     extensions = _scan_discovered_targets(list(unique.values()), known_bad_hashes, jobs=jobs)
     extensions.extend(_registry_only_extension(extension_id) for extension_id in request.extension_ids)
-    extensions.extend(
-        scan_marketplace_extension(
+    runtime_bundle: dict[str, Any] = {
+        "schema_version": "0.1.0",
+        "mode": "executed",
+        "extensions": {},
+        "runs": [],
+        "required_extension_ids": [],
+    }
+    for identifier in request.marketplace_scan_ids:
+        extensions.append(scan_marketplace_extension(
             identifier,
             version=request.marketplace_version,
             target_platform=request.marketplace_target_platform,
             known_bad_hashes=known_bad_hashes,
             artifact_store=marketplace_artifact_store,
-        )
-        for identifier in request.marketplace_scan_ids
-    )
+            dynamic_runtime=request.dynamic_runtime,
+            runtime_timeout_seconds=request.runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle if request.dynamic_runtime else None,
+        ))
     _apply_threat_feed(extensions, _load_threat_feed(request.threat_feed_file))
     advisory_bundle = _load_extension_advisories(request.extension_advisories_file)
     if request.artifact_url or request.artifact_sha256:
@@ -359,6 +374,8 @@ def _scan_request(
         extensions.append(scan_remote_artifact(request.artifact_url, request.artifact_sha256, known_bad_hashes))
     _apply_extension_advisories(extensions, advisory_bundle)
     sandbox_bundle = _load_sandbox_observation_bundle(request.sandbox_observations_file)
+    if request.dynamic_runtime:
+        sandbox_bundle = _merge_dynamic_runtime_bundle(sandbox_bundle, runtime_bundle)
     _apply_sandbox_observations(extensions, sandbox_bundle["extensions"])
     _apply_sandbox_provider(extensions, sandbox_bundle)
     registry = (
@@ -987,17 +1004,49 @@ def _local_error_extension(path: Path, source: str, message: str) -> ExtensionRe
     )
 
 
+_DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
+    "activation",
+    "agentic",
+    "credential_commands",
+    "credential_configuration",
+    "credential_input",
+    "dynamic_code",
+    "filesystem",
+    "ide_contributions",
+    "lifecycle_scripts",
+    "network",
+    "process_execution",
+})
+
+
+def _runtime_required_for_report(report: ExtensionReport) -> bool:
+    """Apply the runtime policy without treating themes as executable code."""
+    capability_ids = {
+        str(item.get("id") or "")
+        for item in report.capabilities
+        if isinstance(item, dict)
+    }
+    return bool(capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES)
+
+
 def scan_marketplace_extension(
     identifier: str,
     version: str | None = None,
     target_platform: str | None = None,
     known_bad_hashes: dict[str, dict[str, Any]] | None = None,
     artifact_store: ArtifactStore | None = None,
+    dynamic_runtime: bool = False,
+    runtime_timeout_seconds: int = 15,
+    runtime_bundle: dict[str, Any] | None = None,
 ) -> ExtensionReport:
-    """Download a VSIX from the VS Marketplace gallery and run the normal
-    quarantine-extraction static scan on it (scan_vsix). This is a hosted,
-    static-only path: it must never invoke sandbox_runner.run_sandbox(...,
-    allow_execute=True) against attacker-controlled marketplace content."""
+    """Acquire an exact marketplace artifact and analyze it.
+
+    Static analysis is always performed. When ``dynamic_runtime`` is explicit,
+    executable-capability artifacts also receive a bounded Bubblewrap pass over
+    the preserved exact bytes. Themes and other non-executable packages are
+    recorded as policy-gated/not-applicable instead of being forced through a
+    meaningless default entrypoint.
+    """
     try:
         resolved_id = parse_marketplace_reference(identifier)
     except MarketplaceDownloadError as exc:
@@ -1028,6 +1077,43 @@ def scan_marketplace_extension(
             )
             scan_path = stored.path
         report = scan_vsix(scan_path, known_bad_hashes=known_bad_hashes, artifact_origin="archive_artifact")
+        if dynamic_runtime and runtime_bundle is not None:
+            runtime_required = _runtime_required_for_report(report)
+            run_record: dict[str, Any] = {
+                "extension_id": report.extension_id,
+                "version": report.version,
+                "required": runtime_required,
+                "artifact_sha256": report.artifact_hash,
+                "status": "not-applicable" if not runtime_required else "failed",
+            }
+            if runtime_required:
+                runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
+                try:
+                    runtime = run_sandbox(
+                        scan_path,
+                        allow_execute=True,
+                        timeout_seconds=runtime_timeout_seconds,
+                    )
+                    observed = runtime.get("extensions", {}) if isinstance(runtime, dict) else {}
+                    items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
+                    if not isinstance(items, list):
+                        items = []
+                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                        item for item in items if isinstance(item, dict)
+                    ]
+                    run_record.update({
+                        "status": "completed",
+                        "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
+                        "observation_count": len(items),
+                    })
+                except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
+                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
+                        "kind": "sandbox_error",
+                        "phase": "runtime",
+                        "evidence": str(exc)[:500],
+                    }]
+                    run_record["error"] = str(exc)[:500]
+            runtime_bundle.setdefault("runs", []).append(run_record)
     except ArtifactStoreError as exc:
         return _marketplace_error_extension(resolved_id, f"Downloaded VSIX could not be preserved: {exc}")
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
@@ -3094,24 +3180,68 @@ def _load_sandbox_observations(path: Path | str | None = None) -> dict[str, list
     return bundle["extensions"]
 
 
+def _merge_dynamic_runtime_bundle(
+    sandbox_bundle: dict[str, Any],
+    runtime_bundle: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine explicit external evidence with the in-process runtime pass."""
+    merged_extensions = {
+        key: list(value)
+        for key, value in (sandbox_bundle.get("extensions") or {}).items()
+        if isinstance(key, str) and isinstance(value, list)
+    }
+    for key, value in (runtime_bundle.get("extensions") or {}).items():
+        if isinstance(key, str) and isinstance(value, list):
+            merged_extensions.setdefault(key, []).extend(item for item in value if isinstance(item, dict))
+    base_metadata = sandbox_bundle.get("metadata") if isinstance(sandbox_bundle.get("metadata"), dict) else {}
+    runs = runtime_bundle.get("runs") if isinstance(runtime_bundle.get("runs"), list) else []
+    required_ids = runtime_bundle.get("required_extension_ids") if isinstance(runtime_bundle.get("required_extension_ids"), list) else []
+    metadata = dict(base_metadata)
+    metadata.update({
+        "status": "executed",
+        "mode": "executed",
+        "execution": "controlled-bubblewrap",
+        "executed": True,
+        "backend": "bubblewrap",
+        "runtime_policy": "capability-gated-v1",
+        "runtime_runs": runs,
+        "runtime_required_ids": sorted({str(item) for item in required_ids if str(item)}),
+        "observation_count": sum(len(value) for value in merged_extensions.values()),
+    })
+    return {"extensions": merged_extensions, "metadata": metadata}
+
+
 def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:
     metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
     observations = bundle.get("extensions") if isinstance(bundle.get("extensions"), dict) else {}
     status = str(metadata.get("status") or "not-requested")
+    required_ids = {str(item).lower() for item in metadata.get("runtime_required_ids", []) if str(item)}
     for extension in extensions:
         items = observations.get(extension.extension_id, [])
+        required = extension.extension_id.lower() in required_ids
+        provider_status = status
+        execution = str(metadata.get("execution") or "not-run")
+        executed = bool(metadata.get("executed"))
+        if metadata.get("runtime_policy") == "capability-gated-v1" and not required:
+            provider_status = "not-applicable"
+            execution = "policy-gated"
+            executed = False
+        error_count = sum(
+            1 for item in items
+            if isinstance(item, dict) and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+        ) if isinstance(items, list) else 0
+        if required and error_count:
+            provider_status = "failed"
         provider = {
             "provider": "dynamic_sandbox",
-            "status": status,
+            "status": provider_status,
             "mode": str(metadata.get("mode") or "static-only"),
-            "execution": str(metadata.get("execution") or "not-run"),
-            "executed": bool(metadata.get("executed")),
+            "execution": execution,
+            "executed": executed,
             "observation_count": len(items) if isinstance(items, list) else 0,
-            "error_count": sum(
-                1 for item in items
-                if isinstance(item, dict) and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
-            ) if isinstance(items, list) else 0,
-            "required": False,
+            "error_count": error_count,
+            "required": required,
+            "policy": str(metadata.get("runtime_policy") or "external-evidence"),
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
 

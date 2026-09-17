@@ -125,6 +125,8 @@ def execute_marketplace_job(
             online=True,
             include_posture=False,
             required_providers=DEEP_REQUIRED_PROVIDERS,
+            dynamic_runtime=True,
+            runtime_timeout_seconds=20,
         )
         bundle = build_report_bundle(report, profile="deep", source="marketplace")
         extension_rows = bundle.get("leaderboard", {}).get("extensions", [])
