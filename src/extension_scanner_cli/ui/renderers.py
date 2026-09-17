@@ -1,171 +1,150 @@
 from __future__ import annotations
 
-import textwrap
 from typing import Any
 
+from extension_scanner_cli import __version__
+
 from .panels import banner, panel, section
-from .tables import count_bar, key_values, score_bar, table, terminal_width, truncate, visible_len
+from .tables import key_values, score_bar, table, terminal_width, truncate
 from .theme import color, severity_label, severity_style, verdict_style
 
 
-def render_scan_report(report: dict[str, Any]) -> str:
-    extensions = list(report.get("extensions") or [])
+DECISION_RANK = {"block": 4, "incomplete": 3, "review": 2, "allow": 1}
+SEVERITY_RANK = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+
+
+def render_scan_report(report: dict[str, Any], *, show_all: bool = False) -> str:
+    extensions = [item for item in report.get("extensions", []) if isinstance(item, dict)]
     summary = dict(report.get("summary") or {})
+    metadata = dict(report.get("metadata") or {})
+    counts = _decision_counts(summary, extensions)
+    completed = len(extensions) - counts["incomplete"]
     lines = [
-        banner("Security Report"),
+        banner("Local IDE extension scanner"),
         panel(
-            "Scan Metadata",
+            "Scan result",
             key_values([
-                ("Scan ID", report.get("scan_id", "unknown")),
-                ("Extensions", summary.get("total_extensions", len(extensions))),
-                ("Max risk", summary.get("max_risk_score", 0)),
-                ("Max malware", summary.get("max_malware_score", 0)),
-                ("Created", report.get("created_at", "n/a") or "n/a"),
+                ("Scan ID", metadata.get("scan_id") or report.get("scan_id", "unknown")),
+                ("Extensions", len(extensions)),
+                ("Complete", completed),
+                ("Incomplete", counts["incomplete"]),
+                ("Created", metadata.get("created_at") or report.get("created_at", "n/a") or "n/a"),
             ]),
-            subtitle="complete",
-        )
+            subtitle="local report",
+        ),
+        render_decision_summary(counts, summary),
     ]
-    lines.append(render_security_score(summary, extensions))
-    lines.append(render_severity_breakdown(extensions))
     if len(extensions) > 1:
-        lines.append(render_extension_summary_table(extensions))
-    for extension in extensions:
-        lines.append(render_extension_detail(extension))
-    lines.append(render_rules_run(extensions))
-    lines.append(color(truncate("─ Extension Scanner v0.1.0 | local scan report ─", terminal_width()), "violet"))
-    return "\n".join(lines)
+        lines.append(render_extension_summary_table(extensions, show_all=show_all))
+        if not show_all and len(extensions) > 15:
+            lines.append(color(f"Showing the 15 highest-priority installations. Use --all to print every row.", "gray"))
+    elif extensions:
+        lines.append(render_extension_detail(extensions[0]))
+    else:
+        lines.append(panel("No extensions", "The report does not contain an extension result.", subtitle="incomplete"))
+    lines.append(color(truncate(f"Guardrails v{__version__} · files remain local unless you explicitly export or upload", terminal_width()), "gray"))
+    return "\n".join(line for line in lines if line)
 
 
-def render_security_score(summary: dict[str, Any], extensions: list[dict[str, Any]]) -> str:
-    max_risk = int(summary.get("max_risk_score") or 0)
-    max_malware = int(summary.get("max_malware_score") or 0)
-    max_context = max((int(item.get("context_score") or 0) for item in extensions), default=0)
-    score = max(max_risk, max_malware)
-    grade = _overall_grade(extensions, score)
-    verdict = _overall_verdict(extensions)
-    style = verdict_style(verdict)
-    body = "\n".join([
-        f"   {color(grade, style)}  {score} / 100",
-        f"   {color(_score_phrase(score, verdict), style)}",
-        "",
-        f"   Risk     {score_bar(max_risk, width=30)}",
-        f"   Malware  {score_bar(max_malware, width=30)}",
-        f"   Context  {score_bar(max_context, width=30)}",
+def render_decision_summary(counts: dict[str, int], summary: dict[str, Any]) -> str:
+    rows = []
+    for decision in ("block", "review", "incomplete", "allow"):
+        rows.append([color(decision.upper(), verdict_style(decision)), counts[decision]])
+    risk = int(summary.get("max_risk_score") or 0)
+    malware = int(summary.get("max_malware_score") or 0)
+    body = table(["Decision", "Installations"], rows, max_widths=[18, 14])
+    body += "\n\n" + key_values([
+        ("Highest risk", score_bar(risk, width=24)),
+        ("Malware evidence", score_bar(malware, width=24)),
     ])
-    return panel("Security Score", body)
+    return panel("Overview", body)
 
 
-def render_severity_breakdown(extensions: list[dict[str, Any]]) -> str:
-    counts = {severity: 0 for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]}
-    for extension in extensions:
-        for finding in extension.get("findings") or []:
-            severity = str(finding.get("severity") or "INFO").upper()
-            counts[severity] = counts.get(severity, 0) + 1
-    maximum = max(counts.values(), default=1)
+def render_extension_summary_table(extensions: list[dict[str, Any]], *, show_all: bool = False) -> str:
+    ranked = _rank_extensions(extensions)
+    visible = ranked if show_all else ranked[:15]
     rows = []
-    for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
-        label = _severity_text(severity)
-        rows.append(f"  {label}{' ' * max(16 - visible_len(label), 1)}{counts.get(severity, 0):>3}   {count_bar(counts.get(severity, 0), maximum)}")
-    return panel("Severity Breakdown", "\n".join(rows))
-
-
-def render_extension_summary_table(extensions: list[dict[str, Any]]) -> str:
-    rows = []
-    for index, ext in enumerate(_rank_extensions(extensions), start=1):
-        state = str(ext.get("verdict_label") or ext.get("verdict") or "")
+    for index, extension in enumerate(visible, start=1):
+        decision = _decision(extension)
         rows.append([
             index,
-            ext.get("extension_id", ""),
-            color(state, verdict_style(str(ext.get("verdict") or ""), str(ext.get("verdict_state") or ""))),
-            _severity_text(str(ext.get("severity") or "")),
-            ext.get("risk_score", 0),
-            ext.get("malware_score", 0),
-            ext.get("finding_count", len(ext.get("findings") or [])),
+            _client(extension),
+            f"{extension.get('extension_id', 'unknown')}@{extension.get('version', 'unknown')}",
+            color(decision.upper(), verdict_style(decision)),
+            _coverage(extension),
+            extension.get("risk_score", 0),
+            len(extension.get("findings") or []),
         ])
-    return section("Extensions") + "\n" + table(
-        ["#", "Extension", "Verdict", "Severity", "Risk", "Malware", "Findings"],
+    return section("Installed extensions") + "\n" + table(
+        ["#", "IDE", "Extension", "Decision", "Coverage", "Risk", "Findings"],
         rows,
-        max_widths=[4, 36, 18, 10, 7, 8, 9],
+        max_widths=[4, 14, 42, 12, 10, 7, 9],
     )
 
 
 def render_extension_detail(extension: dict[str, Any]) -> str:
-    label = str(extension.get("verdict_label") or extension.get("verdict") or "unknown")
-    verdict = color(label.upper(), verdict_style(str(extension.get("verdict") or ""), str(extension.get("verdict_state") or "")))
-    severity = _severity_text(str(extension.get("severity") or "UNKNOWN"))
-    header = key_values([
+    decision = _decision(extension)
+    artifact_identity = extension.get("artifact_identity") if isinstance(extension.get("artifact_identity"), dict) else {}
+    artifact_sha = str(extension.get("artifact_sha256") or artifact_identity.get("sha256") or extension.get("artifact_hash") or "unavailable")
+    reason = str(extension.get("decision_reason") or extension.get("verdict_reason") or "No decision explanation was recorded.")
+    body = key_values([
         ("Extension", extension.get("extension_id", "unknown")),
         ("Version", extension.get("version", "unknown")),
-        ("Publisher", extension.get("publisher", "unknown")),
-        ("Verdict", verdict),
-        ("Grade", extension.get("grade", "")),
-        ("Severity", severity),
+        ("IDE", _client(extension)),
+        ("Decision", color(decision.upper(), verdict_style(decision))),
+        ("Severity", _severity_text(str(extension.get("severity") or "INFO"))),
+        ("Coverage", f"{_coverage(extension)}%"),
+        ("Artifact SHA", artifact_sha),
+        ("Risk", score_bar(int(extension.get("risk_score") or 0), width=24)),
+        ("Malware evidence", score_bar(int(extension.get("malware_score") or 0), width=24)),
     ])
-    scores = key_values([
-        ("Risk", score_bar(int(extension.get("risk_score") or 0), width=30)),
-        ("Malware", score_bar(int(extension.get("malware_score") or 0), width=30)),
-        ("Context", score_bar(int(extension.get("context_score") or 0), width=30)),
-    ])
-    findings = list(extension.get("findings") or [])
-    finding_rows = []
-    for finding in findings[:12]:
-        severity_text = _severity_text(str(finding.get("severity") or ""))
-        finding_rows.append([
-            severity_text,
+    lines = [section(str(extension.get("name") or extension.get("extension_id") or "Extension")), body]
+    lines.append(panel("Why this result", reason, subtitle=decision.upper()))
+    lines.append(render_provider_coverage(extension))
+    findings = [item for item in extension.get("findings", []) if isinstance(item, dict)]
+    if findings:
+        lines.append(render_findings(findings))
+    else:
+        lines.append(color("No findings were reported.", "green"))
+    return "\n".join(line for line in lines if line)
+
+
+def render_provider_coverage(extension: dict[str, Any]) -> str:
+    coverage = extension.get("analysis_coverage") if isinstance(extension.get("analysis_coverage"), dict) else {}
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    if not providers:
+        return panel("Analysis coverage", f"Coverage {_coverage(extension)}% · provider detail unavailable", subtitle="recorded result")
+    rows = []
+    for provider, detail in providers.items():
+        item = detail if isinstance(detail, dict) else {}
+        status = str(item.get("status") or "unknown")
+        required = "required" if item.get("required") else "optional"
+        style = "green" if status == "completed" else "red" if required == "required" else "yellow"
+        label = {
+            "dependency_intelligence": "dependency advisories",
+            "javascript_ast": "javascript ast",
+            "native_static": "native static",
+        }.get(provider, provider.replace("_", " "))
+        rows.append([label, color(status, style), required])
+    return panel("Analysis coverage", table(["Provider", "Status", "Policy"], rows, max_widths=[30, 16, 12]), subtitle=f"{_coverage(extension)}%")
+
+
+def render_findings(findings: list[dict[str, Any]]) -> str:
+    ranked = sorted(findings, key=lambda item: (SEVERITY_RANK.get(str(item.get("severity") or "INFO").upper(), 0), _confidence(item.get("confidence"))), reverse=True)
+    rows = []
+    for finding in ranked[:10]:
+        rows.append([
+            _severity_text(str(finding.get("severity") or "INFO")),
             finding.get("rule_id", ""),
-            finding.get("evidence_class") or _class_from_evidence(finding),
-            finding.get("actionability") or _action_from_severity(str(finding.get("severity") or "")),
+            finding.get("evidence_class") or _evidence_class(finding),
             finding.get("evidence_summary", ""),
         ])
-    body = header + "\n\nScores\n" + scores
-    if extension.get("verdict_reason"):
-        body += "\n\nReason\n" + _wrap_text(str(extension.get("verdict_reason") or ""))
-    lines = [section(str(extension.get("name") or extension.get("extension_id") or "Extension")), body]
-    if finding_rows:
-        lines.append("\nFindings\n" + table(
-            ["Sev", "Rule", "Class", "Action", "Summary"],
-            finding_rows,
-            max_widths=[9, 32, 14, 13, 56],
-        ))
-        lines.append(render_detailed_findings(findings))
-    else:
-        lines.append(color("\nNo findings reported.", "green"))
-    return "\n".join(lines)
-
-
-def render_detailed_findings(findings: list[dict[str, Any]]) -> str:
-    lines = [section("Detailed Findings")]
-    for index, finding in enumerate(findings[:8], start=1):
-        severity = str(finding.get("severity") or "INFO").upper()
-        title = str(finding.get("rule_id") or "finding")
-        body = key_values([
-            ("Description", finding.get("evidence_summary", "")),
-            ("Location", ", ".join(finding.get("file_refs") or []) or "n/a"),
-            ("Detector", finding.get("rule_id", "")),
-            ("Category", finding.get("category", "")),
-            ("Evidence", finding.get("evidence_class") or _class_from_evidence(finding) or "n/a"),
-            ("Fix", finding.get("recommendation") or "Review the finding and confirm expected extension behavior."),
-        ], key_width=14)
-        lines.append(panel(f"#{index} {severity_label(severity)} {title}", body, subtitle=f"{severity} | confidence {finding.get('confidence', 'n/a')}"))
-    return "\n".join(lines)
-
-
-def render_rules_run(extensions: list[dict[str, Any]]) -> str:
-    rule_ids = []
-    seen: set[str] = set()
-    for extension in extensions:
-        for finding in extension.get("findings") or []:
-            rule_id = str(finding.get("rule_id") or "")
-            if rule_id and rule_id not in seen:
-                seen.add(rule_id)
-                rule_ids.append(rule_id)
-    if not rule_ids:
-        return ""
-    lines = [section("Rules Triggered")]
-    for index, rule_id in enumerate(rule_ids[:18]):
-        branch = "└──" if index == len(rule_ids[:18]) - 1 else "├──"
-        lines.append(truncate(f"{branch} {rule_id}", terminal_width()))
-    return "\n".join(lines)
+    output = section("Highest-priority evidence") + "\n" + table(
+        ["Severity", "Rule", "Class", "Summary"], rows, max_widths=[10, 34, 14, 58]
+    )
+    if len(ranked) > 10:
+        output += "\n" + color(f"{len(ranked) - 10} more finding(s) are available in the full report.", "gray")
+    return output
 
 
 def render_rules(rules: list[dict[str, Any]], *, limit: int = 40) -> str:
@@ -181,70 +160,66 @@ def render_rules(rules: list[dict[str, Any]], *, limit: int = 40) -> str:
     return table(["Rule", "Category", "Severity", "Class", "Title"], rows, max_widths=[34, 22, 10, 14, 42])
 
 
-def _severity_text(severity: str) -> str:
-    return color(severity_label(severity), severity_style(severity))
+def _decision_counts(summary: dict[str, Any], extensions: list[dict[str, Any]]) -> dict[str, int]:
+    recorded = summary.get("decision_counts") if isinstance(summary.get("decision_counts"), dict) else None
+    if recorded:
+        return {decision: int(recorded.get(decision) or 0) for decision in DECISION_RANK}
+    counts = {decision: 0 for decision in DECISION_RANK}
+    for extension in extensions:
+        counts[_decision(extension)] += 1
+    return counts
 
 
-def _wrap_text(value: str) -> str:
-    width = max(24, terminal_width())
-    lines: list[str] = []
-    for line in value.splitlines() or [""]:
-        lines.extend(textwrap.wrap(line, width=width, break_long_words=True, break_on_hyphens=False) or [""])
-    return "\n".join(lines)
+def _decision(extension: dict[str, Any]) -> str:
+    value = str(extension.get("decision") or "").lower()
+    if value in DECISION_RANK:
+        return value
+    verdict = str(extension.get("verdict") or "").lower()
+    return {"clean": "allow", "review": "review", "suspicious": "review", "malicious": "block"}.get(verdict, "incomplete")
+
+
+def _coverage(extension: dict[str, Any]) -> int:
+    if extension.get("coverage_percent") is not None:
+        return int(extension.get("coverage_percent") or 0)
+    coverage = extension.get("analysis_coverage") if isinstance(extension.get("analysis_coverage"), dict) else {}
+    return int(coverage.get("coverage_percent") or 0)
+
+
+def _client(extension: dict[str, Any]) -> str:
+    value = str(extension.get("client") or extension.get("ide") or extension.get("source") or "local")
+    return {
+        "vscode": "VS Code",
+        "vscode-insiders": "VS Code Insiders",
+        "cursor": "Cursor",
+        "windsurf": "Windsurf",
+        "vscodium": "VSCodium",
+    }.get(value.lower(), value)
 
 
 def _rank_extensions(extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
         extensions,
-        key=lambda item: (int(item.get("malware_score") or 0), int(item.get("risk_score") or 0), int(item.get("context_score") or 0)),
+        key=lambda item: (
+            DECISION_RANK.get(_decision(item), 0),
+            int(item.get("malware_score") or 0),
+            int(item.get("risk_score") or 0),
+            str(item.get("extension_id") or ""),
+        ),
         reverse=True,
     )
 
 
-def _class_from_evidence(finding: dict[str, Any]) -> str:
-    evidence = finding.get("evidence")
-    if isinstance(evidence, dict):
-        return str(evidence.get("evidence_class") or "")
-    return ""
+def _severity_text(severity: str) -> str:
+    return color(severity_label(severity), severity_style(severity))
 
 
-def _action_from_severity(severity: str) -> str:
-    if severity.upper() in {"CRITICAL", "HIGH"}:
-        return "investigate"
-    if severity.upper() == "MEDIUM":
-        return "review"
-    return "contextual"
+def _evidence_class(finding: dict[str, Any]) -> str:
+    evidence = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    return str(evidence.get("evidence_class") or "unknown")
 
 
-def _overall_grade(extensions: list[dict[str, Any]], score: int) -> str:
-    grades = [str(item.get("grade") or "") for item in extensions if item.get("grade")]
-    if grades:
-        order = {"F": 0, "D": 1, "C": 2, "B": 3, "A": 4}
-        return min(grades, key=lambda grade: order.get(grade[:1], 99))
-    if score >= 90:
-        return "F"
-    if score >= 70:
-        return "D"
-    if score >= 45:
-        return "C"
-    if score >= 20:
-        return "B"
-    return "A"
-
-
-def _overall_verdict(extensions: list[dict[str, Any]]) -> str:
-    ranks = {"malicious": 4, "suspicious": 3, "review": 2, "clean": 1}
-    verdicts = [str(item.get("verdict") or "clean") for item in extensions]
-    return max(verdicts, key=lambda verdict: ranks.get(verdict, 0), default="clean")
-
-
-def _score_phrase(score: int, verdict: str) -> str:
-    if verdict == "malicious":
-        return "Confirmed malicious - remove immediately"
-    if verdict == "suspicious":
-        return "Suspicious - investigate before use"
-    if verdict == "review":
-        return "Needs review - non-confirmed risk evidence"
-    if score == 0:
-        return "Safe with notes - no actionable risk"
-    return "Low risk - contextual findings present"
+def _confidence(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return {"low": 0.3, "medium": 0.6, "high": 0.9}.get(str(value).lower(), 0)

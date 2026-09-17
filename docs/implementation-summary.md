@@ -84,6 +84,28 @@ scan_targets()
   -> build report with posture summary and version deltas
 ```
 
+For bounded local batches, the CLI accepts `--jobs 1..32`. For a production
+corpus, use the isolated runner so one pathological bundle cannot hold the
+whole inventory open:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --all --jobs 4 --timeout 45 --out corpus-report.json
+PYTHONPATH=src python scripts/audit_report.py \
+  --report corpus-report.json --out corpus-audit.json
+```
+
+The corpus runner launches one scanner subprocess per artifact, kills workers
+that exceed the wall-clock budget, preserves discovery order, and records those
+artifacts as `decision=incomplete`; they are never counted as clean. Use
+`--with-posture` only when the local IDE/client posture is part of the intended
+report scope.
+
+AST computed-call findings are also aggregated to one contextual finding per
+file with a count and representative examples. This keeps generated or
+dispatch-heavy bundles auditable without presenting hundreds of structurally
+identical lines as separate security alarms.
+
 For each extension directory, `scan_extension()` performs:
 
 ```text
@@ -120,9 +142,12 @@ Top-level report fields:
 | `schema_version` | Report schema version. |
 | `scan_id` | Timestamp-based scan identifier. |
 | `created_at` | UTC creation time. |
-| `privacy_mode` | Indicates local metadata/static feature mode. |
+| `privacy_mode` | Indicates local metadata/static feature mode, or that controlled runtime evidence was imported. |
 | `registry_checks` | Online registry results and errors. |
+| `intelligence.dynamic_sandbox` | Whether runtime evidence was not requested, planned, executed in Bubblewrap, or externally imported. |
 | `summary` | Counts, max scores, and posture status. |
+| `summary.by_analysis_status` | Complete, incomplete, and failed coverage counts. |
+| `corpus_execution` | Isolation mode, worker count, timeout, and incomplete count for corpus runs. |
 | `human_summary` | Short text summary for dashboards/reports. |
 | `version_deltas` | Changes compared with a previous report. |
 | `posture_summary` | Aggregated IDE/client posture score. |
@@ -168,6 +193,10 @@ Verdicts are intentionally conservative:
 | `suspicious` | High correlated static behavior chain, suspicious marketplace removal, or high/critical observed sandbox behavior. |
 | `review` | Actionable non-confirmed evidence such as dependency, provenance, posture, observed behavior, or sensitive capability findings. |
 | `clean` | No actionable malware, abuse-chain, dependency, provenance, posture, or sensitive-capability evidence. Weak-only or reputation-only evidence is kept contextual. |
+
+`decision=incomplete` and `analysis_status!=complete` override any provisional
+`verdict` value for routing. An artifact with incomplete coverage is unresolved,
+not clean, and must be rescanned or manually reviewed before being allowed.
 
 `startup-activation` alone is not actionable review evidence. It can appear as context but should not turn an extension into `review` by itself.
 
@@ -276,7 +305,7 @@ Each rule maps to an evidence class:
 | --- | --- | --- | --- | --- |
 | `native-or-packed-artifact` | `artifact` | `capability` | MEDIUM | Extension contains native executable artifact such as `.node`, `.dll`, `.so`, `.dylib`, `.exe`. |
 | `packed-artifact` | `provenance` | `provenance` | MEDIUM | Extension contains packed archive such as `.zip`, `.asar`, `.tgz`, `.jar`, etc. |
-| `binary-without-origin` | `provenance` | `provenance` | MEDIUM | Native binary lacks companion checksum/signature and documented origin. |
+| `binary-without-origin` | `provenance` | `provenance` | MEDIUM evidence / LOW actionability | Native artifacts lack independent registry/vendor origin verification; emitted once with a bounded sample. |
 | `known-bad-artifact` | `confirmed-intelligence` | `confirmed` | CRITICAL | File/package/VSIX hash matches a configured known-bad hash feed. |
 | `source-vsix-diff-unexplained` | `provenance` | `provenance` | Currently classified, not emitted by current scanner path | Reserved for source/package mismatch evidence. |
 
@@ -287,7 +316,7 @@ Each rule maps to an evidence class:
 | `process-execution` | `execution` | `weak` | LOW | Code can spawn local processes. |
 | `network-access` | `network` | `weak` | LOW | Code performs network requests. |
 | `filesystem-access` | `filesystem` | `weak` | LOW | Code reads or writes local files. |
-| `dynamic-code-loading` | `code` | `weak` | MEDIUM | Code uses eval, dynamic import, VM execution, or dynamic class loading. |
+| `dynamic-code-loading` | `code` | `weak` | MEDIUM | Code evaluates code, loads a remote module dynamically, or uses dynamic class loading. Ordinary local `import()` is not a finding. |
 | `obfuscation` | `code` | `weak` | LOW | Code contains obfuscation indicators. |
 | `destructive-file-pattern` | `filesystem` | `weak` | MEDIUM | Code contains destructive file operation patterns. |
 
@@ -357,7 +386,9 @@ These metrics are emitted only when online registry enrichment is enabled.
 
 ### Sandbox Observation Metrics
 
-These are consumed from a sandbox observation JSON file, not generated directly by the static scanner.
+These are consumed from a sandbox observation JSON file. The canonical CLI can
+also generate that file through an explicit Bubblewrap execution pass; the
+static scan path never executes extension code.
 
 | Observation kind | Rule id | Category | Evidence class | Severity | Purpose |
 | --- | --- | --- | --- | --- | --- |
@@ -366,9 +397,13 @@ These are consumed from a sandbox observation JSON file, not generated directly 
 | `download_execute` | `observed-download-execute` | `dynamic-sandbox` | `observed` | HIGH | Sandbox saw downloaded content executed or loaded. |
 | `persistence` | `observed-persistence` | `dynamic-sandbox` | `observed` | HIGH | Sandbox saw persistence or autorun behavior. |
 | `destructive` | `observed-destructive-behavior` | `dynamic-sandbox` | `observed` | HIGH | Sandbox saw destructive file behavior. |
-| `unexpected_network` | `observed-unexpected-network` | `dynamic-sandbox` | `observed` | MEDIUM | Sandbox saw network traffic to unexpected destination. |
-| `process_exec` | `observed-process-exec` | `dynamic-sandbox` | `observed` | MEDIUM | Sandbox saw process execution. |
-| `filesystem_write` | `observed-filesystem-write` | `dynamic-sandbox` | `observed` | LOW | Sandbox saw filesystem writes. |
+| `network_attempt` | `runtime-network-attempt` | `dynamic-sandbox` | `weak` | INFO | Sandbox saw an attempted network request; the isolated harness does not claim the request completed or that it was abusive. |
+| `process_exec` | `runtime-process-execution` | `dynamic-sandbox` | `weak` | INFO | Sandbox saw process execution; this confirms capability, not malicious intent. |
+| `filesystem_write` | `runtime-filesystem-write` | `dynamic-sandbox` | `weak` | INFO | Sandbox saw a filesystem write; this confirms capability, not malicious intent. |
+| `runtime_command_probe` | telemetry only | `dynamic-sandbox` | `observed` | INFO | Sandbox invoked a registered IDE command with a synthetic canary argument; the command surface is evidence, not a verdict by itself. |
+| `runtime_webview_message_probe` | telemetry only | `dynamic-sandbox` | `observed` | INFO | Sandbox delivered one synthetic message to a registered webview handler; downstream file/network/process observations remain authoritative. |
+| `runtime_timeout` | `sandbox-runtime-timeout` | `dynamic-sandbox` | `weak` | INFO | A lifecycle or activation action timed out; this is a coverage limitation and does not change the verdict by itself. |
+| `sandbox_error` | `sandbox-runtime-error` | `dynamic-sandbox` | `weak` | INFO | Runtime instrumentation could not complete; this is a coverage limitation and does not change the verdict by itself. |
 
 ## IDE/Client Posture Metrics
 

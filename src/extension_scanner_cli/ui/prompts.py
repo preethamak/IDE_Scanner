@@ -29,3 +29,27 @@ def confirm(label: str, *, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in {"y", "yes"}
+
+
+def prompt_indices(label: str, choices: Sequence[str]) -> list[int]:
+    """Select one or more rows with values such as 1,3-5 or all."""
+    while True:
+        raw = input(color(f"{label} [1]: ", "brand_cyan")).strip().lower()
+        if not raw:
+            return [0]
+        if raw in {"all", "a"}:
+            return list(range(len(choices)))
+        selected: set[int] = set()
+        try:
+            for token in raw.split(","):
+                token = token.strip()
+                if "-" in token:
+                    start, end = (int(value) for value in token.split("-", 1))
+                    selected.update(range(start - 1, end))
+                else:
+                    selected.add(int(token) - 1)
+        except ValueError:
+            selected.clear()
+        if selected and min(selected) >= 0 and max(selected) < len(choices):
+            return sorted(selected)
+        print(color(f"Choose 1-{len(choices)}, a comma-separated list, a range, or all.", "yellow"))

@@ -91,12 +91,14 @@ class CliUiTests(unittest.TestCase):
                 "version": "1.0.0",
                 "publisher": "example",
                 "verdict": "review",
+                "decision": "review",
                 "verdict_label": "Review",
                 "severity": "MEDIUM",
                 "grade": "C",
                 "risk_score": 40,
                 "malware_score": 0,
                 "context_score": 10,
+                "analysis_coverage": {"coverage_percent": 100, "providers": {"native_static": {"status": "completed", "required": True}}},
                 "findings": [{
                     "severity": "MEDIUM",
                     "rule_id": "credential-inputbox-prompt",
@@ -116,7 +118,9 @@ class CliUiTests(unittest.TestCase):
 
         self.assertTrue(emojis <= ALLOWED_SEVERITY_EMOJI)
         self.assertIn("Scan ID", output)
-        self.assertIn("Fix", output)
+        self.assertIn("GUARDRAILS", output)
+        self.assertIn("REVIEW", output)
+        self.assertIn("Analysis coverage", output)
 
     def test_rendered_report_respects_narrow_terminal_width(self) -> None:
         report = {
@@ -170,8 +174,9 @@ class CliUiTests(unittest.TestCase):
             output = render_scan_report(report)
 
         self.assertTrue(all(visible_len(line) <= 40 for line in output.splitlines()))
-        self.assertIn("🟠 HIGH", output)
-        self.assertIn("LOW", output)
+        self.assertIn("Installed extensions", output)
+        self.assertIn("REVIEW", output)
+        self.assertIn("publisher.extremely", output)
 
 
 if __name__ == "__main__":

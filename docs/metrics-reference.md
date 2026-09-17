@@ -14,7 +14,7 @@ The scanner should answer four different questions:
 | --- | --- | --- |
 | Is this known malware? | `verdict=malicious` | Confirmed source, known-bad hash, marketplace malware removal, OSV `MAL-*`, trusted feed. |
 | Does this behave like malware? | `verdict=suspicious` | Dynamic observation or static behavior chain such as credential read + exfiltration. |
-| Does this create security risk? | `verdict=review` | Sensitive IDE capability, vulnerable dependency, lifecycle script, native binary, provenance gap. |
+| Does this create security risk? | `verdict=review` | Sensitive IDE capability, vulnerable dependency, lifecycle script, or an unexplained provenance gap. |
 | Is there no actionable evidence? | `verdict=clean` | No confirmed, observed, correlated, capability, or provenance finding. |
 
 ## Enough or Not Enough?
@@ -45,7 +45,7 @@ Examples:
 
 - broad startup activation
 - lifecycle install script
-- native binary
+- native binary with an unexplained provenance or integrity gap
 - debugger/task/terminal contribution
 - agentic tool or MCP server
 - vulnerable runtime dependency
@@ -231,7 +231,8 @@ Metrics:
 
 Product behavior:
 
-- Most provenance issues are `review`.
+- A native binary is recorded as a bounded low-severity governance note unless independent evidence shows an origin mismatch, tampering, or an abuse chain.
+- Most other provenance issues are `review`.
 - Attestation violation or unexplained sensitive artifact additions can become `suspicious`.
 
 ### Dynamic Sandbox Metrics
@@ -245,11 +246,14 @@ Metrics:
 - `observed_download_execute`
 - `observed_persistence`
 - `observed_destructive_behavior`
-- `observed_unexpected_network`
+- `runtime_network_attempt`
 
 Product behavior:
 
 - Dynamic findings are stronger than static findings.
+- Network attempts, process execution, and ordinary filesystem writes are
+  capability evidence and remain contextual until a higher-signal abuse chain
+  is observed.
 - Dynamic malicious behavior should usually be `suspicious`.
 - It becomes `malicious` only with confirmed intelligence, known-bad hash, or trusted analyst verdict.
 
@@ -314,11 +318,11 @@ Implemented now:
 - unpinned runtime dependency detection for `latest`, `*`, and `x` specs
 - native binary and packed archive artifact findings
 - repository/maintainer posture findings for missing repository metadata, missing security policy, missing license, dangerous GitHub workflows, broad GitHub Actions token permissions, and committed native binary artifacts
-- provenance findings for native artifacts shipped without a companion checksum/signature or documented origin
+- low-severity provenance notes for native artifacts without independent registry/vendor origin verification
 - webview capability findings for missing or unsafe Content-Security-Policy directives
 - marketplace install-count/rating mismatch reputation findings
 - agent-specific tool surface findings for shell, filesystem, network, MCP server, and prompt-injection sink risk
-- dynamic sandbox observation import through `--sandbox-observations` or `IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE`
+- dynamic sandbox observations from `sandbox --allow-execute` through Bubblewrap, including lifecycle scripts, activation, registered command probes, and webview message probes; observations can also be imported through `--sandbox-observations` / `IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE`
 - known-bad SHA-256 hash feed matching through `--known-bad-hashes` or `IDE_SCANNER_KNOWN_BAD_HASHES_FILE`
 - Microsoft removed package check when online mode is enabled
 - marketplace removal type splitting, so `Malware`, `Suspicious`, and non-malware removals are not treated the same
@@ -331,6 +335,62 @@ Implemented now:
 - current `score_details`
 - `malware_authority`
 
+### Repeatable Corpus Audit
+
+After every corpus scan, produce a rule-volume and routing audit before changing thresholds:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --all --jobs 4 --timeout 45 --out /path/to/static-scan.json
+PYTHONPATH=src python scripts/audit_report.py \
+  --report /path/to/static-scan.json \
+  --labels benchmarks/website-corpus/v1/frozen-input.json \
+  --corrections benchmarks/website-corpus/v1/label-corrections.json \
+  --out /path/to/report-audit.json
+```
+
+When labels include versions, the audit resolves them by exact
+`extension_id@version` before falling back to an extension-level label. Apply
+documented corrections explicitly; the auditor never silently rewrites frozen
+labels.
+
+For a reproducible release corpus, use an exact-artifact manifest instead of
+an ambient install directory:
+
+```json
+{
+  "schema_version": "guardrails.corpus-manifest.v1",
+  "artifacts": [
+    {
+      "path": "artifacts/publisher.extension-1.2.3.vsix",
+      "extension_id": "publisher.extension",
+      "version": "1.2.3",
+      "sha256": "<canonical scanner artifact SHA-256>"
+    }
+  ]
+}
+```
+
+Run it with `scan_corpus.py --manifest corpus.json`. Manifest paths must be
+files. The SHA-256 is the canonical scanner artifact identity: for a gzip-
+wrapped VSIX it is the hash of the unwrapped VSIX bytes, matching
+`artifact_identity.sha256` and `artifact_inventory.vsix_hash`. Every manifest
+row is checked against the scanned extension identity and canonical artifact
+hash; a mismatch is an explicit incomplete result and is never routed as clean.
+
+The corpus runner isolates each artifact in a killable subprocess. A timeout is
+recorded as `decision=incomplete`, never as clean. The audit reports findings,
+affected extensions, completed-versus-incomplete routing, evidence classes,
+actionability, and labeled routing mismatches. A mixed-outcome rule is a
+calibration candidate, not proof of a false positive; adjudicate the cited
+artifact before changing policy. Computed-call AST noise is aggregated to one
+contextual finding per file with a count and representative examples.
+
+Credential proximity is also deliberately separated from proven data flow:
+`credential-source-near-network` is a LOW hardening note because character
+proximity does not prove that a secret reaches a network sink. The correlated
+`credential-dataflow-to-network` rule remains review-level evidence.
+
 Implemented benchmark support:
 
 - normalized Protect Your Secrets public CSV adapter
@@ -338,18 +398,18 @@ Implemented benchmark support:
 - dashboard-ready `benchmark.zip`
 - `not_scanned` accounting for dataset entries absent from partial reports
 
-Not implemented yet:
+Still pending for broader production coverage:
 
 - verified publisher/signature scoring
 - source-to-VSIX provenance comparison
 - full calibration corpus beyond bundled fixtures and the public credential-exposure labels
-- full dynamic sandbox runner execution
+- client-specific runtime coverage for language-server startup and uninstall across all supported clients
 
 ## Recommended Next Build Order
 
 1. Add marketplace signature state and VSIX signature verification.
 2. Add source-to-VSIX provenance comparison.
-3. Add dynamic sandbox runner with fake credential canaries.
+3. Expand the Bubblewrap runner to client-specific language-server startup and uninstall scenarios, while keeping command and webview probes bounded and synthetic.
 4. Expand benchmark corpora and publish precision/recall for each verdict and exposure vector.
 
 ## User-Facing Explanation Template

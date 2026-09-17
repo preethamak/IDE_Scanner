@@ -48,6 +48,11 @@ Evidence severity is the maximum normalized severity among `low`, `review`, and
 finding may coexist with `allow`; it remains visible as a non-blocking hardening
 note.
 
+Credential-to-network character proximity is intentionally low actionability:
+`credential-source-near-network` is a triage hint, not proof that a secret
+reaches a network sink. A correlated source-to-sink rule such as
+`credential-dataflow-to-network` remains review-worthy.
+
 For incomplete or failed analysis, decision is absent and the UI displays
 `No decision`. Compatibility serializers may retain the legacy `incomplete`
 decision value, but consumers must use analysis status first.

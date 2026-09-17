@@ -5,15 +5,15 @@ import importlib.util
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .exporters.html import export_html
 from .exporters.json_export import export_json
 from .exporters.markdown import export_markdown
-from .report_reader import read_report, validate_report
+from .report_reader import read_report, report_view, validate_report
 from .scanner_adapter import (
     discover_paths,
     display_report,
@@ -24,438 +24,489 @@ from .scanner_adapter import (
     search_extensions,
     write_bundle,
 )
+from .snapshot import snapshot_installations
 from .ui.panels import banner, panel, section
-from .ui.prompts import confirm, prompt_choice, prompt_text
+from .ui.prompts import confirm, prompt_choice, prompt_indices, prompt_text
 from .ui.renderers import render_rules, render_scan_report
 from .ui.tables import key_values, table
 from .ui.theme import color, severity_label, severity_style, supports_color
 
 
-APP_NAME = "Extension Scanner"
-EXPORT_FORMATS = {"zip", "md", "html", "json", "none"}
+EXPORT_FORMATS = ("terminal", "zip", "html", "md", "json")
+IDE_CHOICES = ("vscode", "cursor", "windsurf", "vscodium", "insiders")
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv:
-        return interactive_home()
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    try:
+        if not arguments:
+            if not sys.stdin.isatty():
+                build_parser().print_help()
+                return 0
+            return interactive_home()
+        parser = build_parser()
+        args = parser.parse_args(arguments)
+        if args.command == "scan":
+            return cmd_scan(args)
+        if args.command == "report":
+            return cmd_report(args)
+        if args.command == "rules":
+            return cmd_rules(args)
+        if args.command == "metrics":
+            return cmd_metrics(args)
+        if args.command == "doctor":
+            return cmd_doctor(args)
+        if args.command == "version":
+            print(f"Guardrails {__version__}")
+            return 0
+        parser.print_help()
+        return 0
+    except (EOFError, KeyboardInterrupt):
+        print("\n" + color("Cancelled.", "yellow"), file=sys.stderr)
+        return 130
+    except (OSError, ValueError) as exc:
+        print(color(f"Guardrails could not complete the command: {exc}", "red"), file=sys.stderr)
+        return 1
 
-    command = argv[0]
-    rest = argv[1:]
-    if command in {"-h", "--help", "help"}:
-        return cmd_help(rest)
-    if command == "search":
-        return cmd_search(rest)
-    if command == "local":
-        return cmd_local(rest)
-    if command == "file":
-        return cmd_file(rest)
-    if command == "report":
-        return cmd_report(rest)
-    if command == "rules":
-        return cmd_rules(rest)
-    if command == "metrics":
-        return cmd_metrics(rest)
-    if command == "doctor":
-        return cmd_doctor(rest)
-    if command == "test":
-        return cmd_test(rest)
-    print(color(f"Unknown command: {command}", "red"))
-    return cmd_help([])
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="guardrails",
+        description="Scan extensions installed in VS Code, Cursor, Windsurf, and VSCodium.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    scan = subparsers.add_parser("scan", help="Scan locally installed extensions (default source).")
+    source = scan.add_mutually_exclusive_group()
+    source.add_argument("--file", metavar="PATH", help="Scan a VSIX, ZIP, or unpacked extension folder.")
+    source.add_argument("--marketplace", metavar="ID[@VERSION]", help="Scan one exact Marketplace extension.")
+    source.add_argument("--marketplace-search", metavar="QUERY", help="Search Marketplace, select, and scan an extension.")
+    scan.add_argument("--all", action="store_true", help="Scan every installed extension matching the filters.")
+    scan.add_argument("--ide", choices=IDE_CHOICES, help="Limit installed extensions to one IDE client.")
+    scan.add_argument("--search", "--filter", dest="search", default="", help="Search installed extension names, publishers, and IDs.")
+    scan.add_argument("--extension", action="append", default=[], help="Scan this installed extension ID; repeat for more than one.")
+    scan.add_argument("--select", help="Select displayed rows, for example 1,3-5 or all.")
+    scan.add_argument("--version", help="Exact Marketplace version; may also be supplied as ID@VERSION.")
+    scan.add_argument(
+        "--profile",
+        choices=("offline", "standard", "deep"),
+        default="standard",
+        help="Analysis boundary. Deep matches the website Deep Scan when its required providers are available.",
+    )
+    scan.add_argument("--online", action="store_true", help="Enable registry and dependency checks for local/file scans.")
+    scan.add_argument("--format", choices=EXPORT_FORMATS, default="terminal", help="Output or saved-report format.")
+    scan.add_argument("--output", "--out", dest="output", help="Write the selected report format to this path.")
+    scan.add_argument("--show-all", action="store_true", help="Print every installation in a multi-extension terminal report.")
+    scan.add_argument("--yes", action="store_true", help="Skip confirmation before scanning all matching installations.")
+
+    report = subparsers.add_parser("report", help="Open, verify, view, or export a saved report.")
+    report_subparsers = report.add_subparsers(dest="report_command", required=True)
+    view = report_subparsers.add_parser("view", help="Show a saved report in the terminal.")
+    view.add_argument("path")
+    view.add_argument("--all", action="store_true", help="Print every installation row.")
+    verify = report_subparsers.add_parser("verify", aliases=["validate"], help="Verify report structure and identities.")
+    verify.add_argument("path")
+    export = report_subparsers.add_parser("export", help="Export without recalculating scanner evidence.")
+    export.add_argument("path")
+    export.add_argument("--format", choices=("zip", "html", "md", "json"), required=True)
+    export.add_argument("--output", "--out", dest="output", required=True)
+
+    rules = subparsers.add_parser("rules", help="Browse the scanner rule catalog.")
+    rules.add_argument("action", nargs="?", choices=("list", "search", "show"), default="list")
+    rules.add_argument("query", nargs="*")
+
+    metrics = subparsers.add_parser("metrics", help="Explain decisions, scores, evidence, and coverage.")
+    metrics.add_argument("topic", nargs="?", choices=("decisions", "scores", "evidence", "coverage", "all"), default="all")
+    subparsers.add_parser("doctor", help="Check local scan dependencies and detected IDE clients.")
+    subparsers.add_parser("version", help="Print the Guardrails version.")
+    return parser
 
 
 def interactive_home() -> int:
-    print(banner("IDE extension security toolkit"))
-    print(panel(APP_NAME, "Search, select, scan, and export IDE extension security reports.", subtitle="terminal UI"))
+    rows = installed_extensions()
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["client"]] = counts.get(row["client"], 0) + 1
+    detected = "\n".join(f"{client:<18} {count:>4} installed" for client, count in sorted(counts.items())) or "No supported IDE extensions detected."
+    print(banner("Local IDE extension scanner"))
+    print(panel("Installed extensions", detected, subtitle=f"{len(rows)} detected"))
     choices = [
-        "Search marketplace extension",
-        "Scan installed extension",
-        "Scan VSIX / ZIP / folder",
-        "View or export report",
-        "Rules",
-        "Metrics",
-        "Doctor",
+        "Scan installed extensions",
+        "Search installed extensions",
+        "Scan a VSIX, ZIP, or folder",
+        "Scan a Marketplace extension",
+        "View or verify a report",
+        "Detection rules",
+        "Environment doctor",
         "Help",
     ]
-    print(table(["#", "Action"], [[index, label] for index, label in enumerate(choices, start=1)], max_widths=[4, 42]))
+    print(table(["#", "Action"], [[index, label] for index, label in enumerate(choices, start=1)], max_widths=[4, 48]))
     selected = prompt_choice("Select action", choices)
     if selected == 0:
-        return cmd_search([])
+        return cmd_scan(_scan_namespace())
     if selected == 1:
-        return cmd_local([])
+        return cmd_scan(_scan_namespace(search=prompt_text("Search installed extensions")))
     if selected == 2:
-        return cmd_file([])
+        return cmd_scan(_scan_namespace(file=prompt_text("VSIX, ZIP, or extension folder")))
     if selected == 3:
-        return cmd_report([])
+        return cmd_scan(_scan_namespace(marketplace_search=prompt_text("Marketplace search")))
     if selected == 4:
-        return cmd_rules([])
+        path = prompt_text("Report path")
+        return _view_report(path, show_all=False)
     if selected == 5:
-        return cmd_metrics([])
+        return cmd_rules(argparse.Namespace(action="list", query=[]))
     if selected == 6:
-        return cmd_doctor([])
-    return cmd_help([])
-
-
-def cmd_help(args: list[str]) -> int:
-    topic = args[0] if args else "main"
-    workflows = [
-        ("Explore", "search, local, file"),
-        ("Review reports", "report view, report validate, report export"),
-        ("Reference", "rules, metrics, doctor"),
-        ("Verification", "test"),
-    ]
-    examples = [
-        ("1", "scan search prettier"),
-        ("2", "scan local --filter python"),
-        ("3", "scan file extension.vsix"),
-        ("4", "scan report view report.zip"),
-        ("5", "scan rules search credential"),
-        ("6", "scan doctor"),
-    ]
-    topics = {
-        "main": [
-            ("search", "Search the marketplace and scan a selected extension"),
-            ("local", "List installed IDE extensions and scan one"),
-            ("file", "Scan a VSIX, ZIP, or unpacked extension folder"),
-            ("report", "View, validate, or export saved reports"),
-            ("rules", "List rules or inspect one rule in detail"),
-            ("metrics", "Explain scores, evidence classes, and verdicts"),
-            ("doctor", "Check the local scanner environment"),
-            ("test", "Run scanner verification tests"),
-        ],
-        "search": [
-            ("scan search prettier", "Search marketplace for matching extensions"),
-            ("scan search", "Prompt for query, then show selectable results"),
-        ],
-        "local": [
-            ("scan local", "Show installed extensions from VS Code, Cursor, Windsurf, VSCodium"),
-            ("scan local --filter vyper", "Filter installed extensions before selection"),
-        ],
-        "file": [
-            ("scan file extension.vsix", "Scan a VSIX package"),
-            ("scan file ./extension-folder", "Scan an unpacked extension folder"),
-        ],
-        "report": [
-            ("scan report validate report.zip", "Check report.zip structure"),
-            ("scan report view report.zip", "Display report summary"),
-            ("scan report export report.zip --format md --output report.md", "Export Markdown"),
-        ],
-        "rules": [
-            ("scan rules", "List rules"),
-            ("scan rules search credential", "Search rules"),
-            ("scan rules show credential-exfiltration-chain", "Show one rule"),
-        ],
-        "metrics": [
-            ("scan metrics", "Explain all metrics"),
-            ("scan metrics scores", "Explain risk, malware, context, grade"),
-            ("scan metrics evidence", "Explain evidence classes"),
-        ],
-    }
-    rows = topics.get(topic, topics["main"])
-    print(banner("Command Map"))
-    print(panel(APP_NAME, "Local terminal workflow for searching, scanning, reviewing, and exporting IDE extension security reports.", subtitle="help"))
-    if topic == "main":
-        print(section("Grouped Workflows"))
-        print(table(["Workflow", "Commands"], workflows, max_widths=[18, 58]))
-        print(section("Examples"))
-        print(table(["#", "Command"], examples, max_widths=[4, 72]))
-        print(section("Command Catalog"))
-    print(table(["Command", "Use"], rows, max_widths=[24, 74]))
+        return cmd_doctor(argparse.Namespace())
+    build_parser().print_help()
     return 0
 
 
-def cmd_search(args: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="scan search", add_help=False)
-    parser.add_argument("query", nargs="*")
-    parser.add_argument("--limit", type=int, default=15)
-    ns = parser.parse_args(args)
-    query = " ".join(ns.query).strip() or prompt_text("Search marketplace")
-    if not query:
-        print(color("Search query is required.", "red"))
-        return 2
+def cmd_scan(args: argparse.Namespace) -> int:
+    if args.profile == "offline" and args.online:
+        raise ValueError("--profile offline cannot be combined with --online.")
+    if args.profile == "offline" and (args.marketplace or args.marketplace_search):
+        raise ValueError("Marketplace acquisition requires a network connection and cannot use the offline profile.")
+    source = "installed"
+    selected_rows: list[dict[str, Any]] = []
+    if args.marketplace or args.marketplace_search:
+        extension_id, version = _marketplace_target(args)
+        print(color(f"Acquiring exact Marketplace artifact {extension_id}{f'@{version}' if version else ''}…", "brand_cyan"))
+        report = _run_with_profile(args.profile, lambda: scan_marketplace(extension_id, version=version))
+        source = "marketplace"
+    elif args.file:
+        targets = discover_paths(args.file)
+        if not targets:
+            raise ValueError(f"No extension target was found at {args.file}")
+        print(section("Local file target"))
+        print(table(["Type", "Path"], [[item.get("type"), item.get("path")] for item in targets], max_widths=[12, 88]))
+        print(color("Scanning the selected local artifact without executing extension code…", "brand_cyan"))
+        report = _run_with_profile(
+            args.profile,
+            lambda: scan_paths([item["path"] for item in targets], online=args.online or args.profile == "deep"),
+        )
+        source = "file"
+    else:
+        selected_rows = _select_installed(args)
+        if len(selected_rows) > 1 and not args.yes and sys.stdin.isatty():
+            if not confirm(f"Scan {len(selected_rows)} installed extensions", default=True):
+                return 130
+        print(color(f"Creating a stable local snapshot of {len(selected_rows)} installed extension(s)…", "brand_cyan"))
+        with snapshot_installations(selected_rows) as snapshot_rows:
+            print(color("Scanning the snapshots without executing extension code…", "brand_cyan"))
+            report = _run_with_profile(
+                args.profile,
+                lambda: scan_paths([row["path"] for row in snapshot_rows], online=args.online or args.profile == "deep"),
+            )
+            _attach_installation_context(report, snapshot_rows)
 
-    print(color(f"Searching marketplace for: {query}", "cyan"))
-    try:
-        results = search_extensions(query, limit=ns.limit)
-    except Exception as exc:  # noqa: BLE001
-        print(color(f"Marketplace search failed: {exc}", "red"))
-        return 1
-    if not results:
-        print(color("No marketplace results found.", "yellow"))
-        return 1
-
-    print(banner("Marketplace Search"))
-    print(_marketplace_table(results))
-    selected = prompt_choice("Select extension to scan", [str(item.get("extension_id", "")) for item in results])
-    extension_id = str(results[selected].get("extension_id") or "")
-    print(color(f"Scanning {extension_id}...", "cyan"))
-    report = scan_marketplace(extension_id)
-    print(render_scan_report(display_report(report, source="marketplace")))
-    return maybe_export(report, default_base=_safe_name(extension_id), source="marketplace")
+    view = display_report(report, source=source, profile=args.profile)
+    if args.format == "terminal":
+        print(render_scan_report(view, show_all=args.show_all))
+        if args.output:
+            raise ValueError("Terminal output cannot be saved with --output; choose zip, html, md, or json.")
+        if sys.stdin.isatty() and confirm("Export this report", default=False):
+            fmt = ("zip", "html", "md", "json")[prompt_choice("Format", ("zip", "html", "md", "json"))]
+            output = prompt_text("Output path", default=f"guardrails-report.{fmt}")
+            _export_fresh(report, view, fmt, output, source=source, profile=args.profile)
+            print(color(f"Saved {output}", "green"))
+    else:
+        output = args.output or f"guardrails-report.{args.format}"
+        _export_fresh(report, view, args.format, output, source=source, profile=args.profile)
+        print(color(f"Saved {output}", "green"))
+    return 3 if any(_decision(item) == "incomplete" for item in view.get("extensions", [])) else 0
 
 
-def cmd_local(args: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="scan local", add_help=False)
-    parser.add_argument("--filter", default="")
-    ns = parser.parse_args(args)
+def _select_installed(args: argparse.Namespace) -> list[dict[str, Any]]:
     rows = installed_extensions()
-    if ns.filter:
-        needle = ns.filter.lower()
-        rows = [item for item in rows if needle in item["extension_id"].lower() or needle in item["display_name"].lower()]
+    if args.ide:
+        rows = [row for row in rows if _ide_key(row["client"]) == args.ide]
+    if args.search:
+        needle = args.search.lower()
+        rows = [row for row in rows if needle in json.dumps(row, sort_keys=True).lower()]
+    if args.extension:
+        requested = {value.lower() for value in args.extension}
+        rows = [row for row in rows if row["extension_id"].lower() in requested]
     if not rows:
-        print(color("No installed extensions found.", "yellow"))
-        return 1
-    print(banner("Installed Extensions"))
+        raise ValueError("No installed extension matches the selected filters.")
+    print(section("Installed extensions"))
     print(_installed_table(rows))
-    selected = prompt_choice("Select extension to scan", [item["extension_id"] for item in rows])
-    target = rows[selected]
-    print(color(f"Scanning {target['extension_id']}...", "cyan"))
-    report = scan_paths([target["path"]])
-    print(render_scan_report(display_report(report, source="local")))
-    return maybe_export(report, default_base=_safe_name(target["extension_id"]), source="local")
+    if args.all or args.extension:
+        return rows
+    if args.select:
+        indices = _parse_selection(args.select, len(rows))
+    elif sys.stdin.isatty():
+        indices = prompt_indices("Select extensions (1,3-5 or all)", [row["extension_id"] for row in rows])
+    else:
+        raise ValueError("Use --all, --extension, or --select when input is not interactive.")
+    return [rows[index] for index in indices]
 
 
-def cmd_file(args: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="scan file", add_help=False)
-    parser.add_argument("path", nargs="?")
-    ns = parser.parse_args(args)
-    path = ns.path or prompt_text("VSIX, ZIP, or extension folder")
-    if not path:
-        print(color("Path is required.", "red"))
-        return 2
-    targets = discover_paths(path)
-    if not targets:
-        print(color(f"No extension target found at {path}", "red"))
-        return 1
-    print(banner("File Scan"))
-    print(table(["Type", "Path"], [[item.get("type"), item.get("path")] for item in targets], max_widths=[10, 86]))
-    report = scan_paths([item["path"] for item in targets])
-    print(render_scan_report(display_report(report, source="file")))
-    return maybe_export(report, default_base=_safe_name(Path(path).stem or "report"), source="file")
+def _marketplace_target(args: argparse.Namespace) -> tuple[str, str | None]:
+    if args.marketplace_search:
+        results = search_extensions(args.marketplace_search, limit=15)
+        if not results:
+            raise ValueError("No Marketplace extension matched the search.")
+        print(_marketplace_table(results))
+        if not sys.stdin.isatty():
+            raise ValueError("Marketplace search selection requires an interactive terminal; use --marketplace with an exact ID.")
+        index = prompt_choice("Select extension", [str(item.get("extension_id") or "") for item in results])
+        return str(results[index].get("extension_id") or ""), args.version
+    value = str(args.marketplace or "")
+    if "@" in value:
+        extension_id, embedded_version = value.rsplit("@", 1)
+        return extension_id, args.version or embedded_version
+    return value, args.version
 
 
-def cmd_report(args: list[str]) -> int:
-    if not args:
-        print(panel("Report", "Commands: view, validate, export", subtitle="help"))
-        print(table(["Command", "Use"], [
-            ("scan report view report.zip", "Display report summary"),
-            ("scan report validate report.zip", "Validate report structure"),
-            ("scan report export report.zip --format md --output report.md", "Export report"),
-        ], max_widths=[58, 72]))
-        return 0
-    action = args[0]
-    if action == "validate":
-        path = _arg_or_prompt(args[1:], "Report path")
-        ok, errors = validate_report(path)
-        status = color("OK", "green") if ok else color("FAILED", "red")
-        print(table(["Report", "Status"], [[path, status]], max_widths=[72, 12]))
-        for error in errors:
+def cmd_report(args: argparse.Namespace) -> int:
+    if args.report_command == "view":
+        return _view_report(args.path, show_all=args.all)
+    if args.report_command in {"verify", "validate"}:
+        ok, errors = validate_report(args.path)
+        print(panel("Report verification", f"{args.path}\n\n{'VERIFIED' if ok else 'FAILED'}", subtitle="Guardrails"))
+        for error in errors[:20]:
             print(color(f"- {error}", "red"))
+        if len(errors) > 20:
+            print(color(f"- {len(errors) - 20} additional verification error(s) omitted", "red"))
         return 0 if ok else 1
-    if action == "view":
-        path = _arg_or_prompt(args[1:], "Report path")
-        print(_render_read_report(read_report(path)))
-        return 0
-    if action == "export":
-        return _report_export(args[1:])
-    print(color(f"Unknown report action: {action}", "red"))
-    return 2
+    data = read_report(args.path)
+    if args.format == "zip":
+        if Path(args.path).suffix.lower() != ".zip":
+            raise ValueError("Only an existing canonical ZIP can be exported as ZIP without rebuilding evidence.")
+        source = Path(args.path).resolve()
+        destination = Path(args.output).resolve()
+        if source != destination:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+    elif args.format == "json":
+        export_json(data, args.output)
+    else:
+        view = report_view(data)
+        if args.format == "html":
+            export_html(view, args.output)
+        else:
+            export_markdown(view, args.output)
+    print(color(f"Saved {args.output}", "green"))
+    return 0
 
 
-def cmd_rules(args: list[str]) -> int:
-    rules = list(get_rules().get("rules") or [])
-    if args and args[0] == "search":
-        query = " ".join(args[1:]).lower() or prompt_text("Rule search").lower()
-        rules = [rule for rule in rules if query in json.dumps(rule).lower()]
-    elif args and args[0] == "show":
-        rule_id = args[1] if len(args) > 1 else prompt_text("Rule ID")
-        match = next((rule for rule in rules if rule.get("rule_id") == rule_id), None)
+def _view_report(path: str, *, show_all: bool) -> int:
+    data = read_report(path)
+    print(render_scan_report(report_view(data), show_all=show_all))
+    return 0
+
+
+def cmd_rules(args: argparse.Namespace) -> int:
+    catalog = get_rules()
+    rules = list(catalog.get("rules") or [])
+    query = " ".join(args.query).strip()
+    if args.action == "search":
+        if not query:
+            query = prompt_text("Rule search")
+        rules = [rule for rule in rules if query.lower() in json.dumps(rule).lower()]
+    elif args.action == "show":
+        if not query:
+            query = prompt_text("Rule ID")
+        match = next((rule for rule in rules if rule.get("rule_id") == query), None)
         if not match:
-            print(color(f"Rule not found: {rule_id}", "red"))
-            return 1
+            raise ValueError(f"Rule not found: {query}")
         print(panel(str(match.get("rule_id")), key_values([
             ("Title", match.get("title", "")),
             ("Category", match.get("category", "")),
             ("Severity", color(severity_label(str(match.get("default_severity") or "")), severity_style(str(match.get("default_severity") or "")))),
-            ("Class", match.get("evidence_class", "")),
+            ("Evidence", match.get("evidence_class", "")),
             ("Description", match.get("description", "")),
             ("Recommendation", match.get("recommendation", "")),
             ("False positives", match.get("false_positive_notes", "")),
-        ]), subtitle="rule"))
+        ]), subtitle="detection rule"))
         return 0
-    print(banner("Rules Reference"))
-    print(panel("Rules", f"Ruleset version: {get_rules().get('ruleset_version', 'unknown')}", subtitle=f"{len(rules)} rules"))
+    print(banner("Detection rules"))
+    print(panel("Rule catalog", f"Ruleset {catalog.get('ruleset_version', 'unknown')} · {len(rules)} rule(s)", subtitle="local scanner"))
     print(render_rules(rules))
     return 0
 
 
-def cmd_metrics(args: list[str]) -> int:
-    topic = args[0] if args else "all"
-    blocks = {
+def cmd_metrics(args: argparse.Namespace) -> int:
+    topics = {
+        "decisions": [
+            ("ALLOW", "Required analysis completed and no decision-level evidence requires review."),
+            ("REVIEW", "The extension has capabilities or evidence that need human context."),
+            ("BLOCK", "The report contains authoritative or high-specificity evidence supporting a block."),
+            ("INCOMPLETE", "Acquisition or required analysis did not complete; no allow conclusion is available."),
+        ],
         "scores": [
-            ("Risk score", "Actionable extension risk if the extension is compromised or abused."),
-            ("Malware score", "Confidence that evidence indicates malicious behavior or confirmed intelligence."),
-            ("Context score", "Metadata, reputation, posture, and hygiene notes that should not alone create malware alarm."),
-            ("Grade", "Scanner-provided display grade derived from scanner scores."),
+            ("Risk", "Review priority based on security-relevant behavior and access."),
+            ("Malware evidence", "Reserved for authoritative threat sources or high-specificity observed proof."),
         ],
         "evidence": [
-            ("confirmed", "Known-bad hash, malware removal, trusted threat feed, or equivalent confirmed intel."),
-            ("correlated", "Multiple behavior signals combined into an abuse chain."),
-            ("capability", "Powerful permission, API, artifact, or IDE contribution requiring review."),
-            ("reputation", "Marketplace/repository metadata and trust context."),
-            ("weak", "Standalone static signal or contextual note."),
+            ("confirmed", "Known-bad artifact or equivalent authoritative source."),
+            ("correlated", "Multiple related signals forming a concrete behavior chain."),
+            ("capability", "Powerful access or behavior that requires product context."),
+            ("weak", "A standalone observation that cannot establish intent."),
         ],
-        "verdicts": [
-            ("Safe with notes", "No actionable risk, but contextual findings may exist."),
-            ("Review", "Non-confirmed risk evidence that needs human context."),
-            ("Suspicious", "Correlated or high-risk behavior chain."),
-            ("Confirmed malicious", "Confirmed intelligence indicates malicious package or artifact."),
+        "coverage": [
+            ("Complete", "Every provider required by the selected profile completed."),
+            ("Incomplete", "At least one required provider or artifact step failed."),
+            ("Unavailable", "An optional provider was not installed or not requested."),
         ],
     }
-    rows = []
-    if topic == "all":
-        for values in blocks.values():
+    rows: list[tuple[str, str]] = []
+    if args.topic == "all":
+        for values in topics.values():
             rows.extend(values)
     else:
-        rows = blocks.get(topic, blocks["scores"])
-    print(banner("Metrics Reference"))
-    print(panel("Metrics", "Scores are calculated by the scanner and shown here for review.", subtitle=topic))
-    print(table(["Metric", "Meaning"], rows, max_widths=[24, 96]))
+        rows = topics[args.topic]
+    print(banner("How results are reported"))
+    print(table(["Term", "Meaning"], rows, max_widths=[22, 96]))
     return 0
 
 
-def cmd_doctor(args: list[str]) -> int:
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    installed = installed_extensions()
     checks = [
         ("Python", "OK", sys.version.split()[0]),
-        ("Scanner import", "OK" if importlib.util.find_spec("ide_scanner") else "FAIL", "ide_scanner"),
-        ("Node AST analyzer", "OK" if shutil.which("node") else "WARN", shutil.which("node") or "node not found"),
-        ("Vendored acorn", "OK" if _acorn_path().exists() else "FAIL", str(_acorn_path())),
-        ("Color terminal", "OK" if supports_color() else "WARN", "enabled" if supports_color() else "disabled/non-tty"),
-        ("Output directory", "OK" if Path.cwd().exists() else "FAIL", str(Path.cwd())),
+        ("Scanner", "OK" if importlib.util.find_spec("ide_scanner") else "FAIL", "local analysis engine"),
+        ("Node AST", "OK" if shutil.which("node") else "FAIL", shutil.which("node") or "node not found"),
+        ("Semgrep", "OK" if shutil.which("semgrep") else "WARN", shutil.which("semgrep") or "optional; required by deep profile"),
+        ("YARA", "OK" if importlib.util.find_spec("yara") else "WARN", "available" if importlib.util.find_spec("yara") else "optional; required by deep profile"),
+        ("Installed extensions", "OK" if installed else "WARN", f"{len(installed)} detected"),
+        ("Color terminal", "OK" if supports_color() else "WARN", "enabled" if supports_color() else "plain-text mode"),
     ]
-    print(banner("Environment Doctor"))
-    print(panel("Doctor", "Local CLI environment checks.", subtitle=APP_NAME))
-    print(table(["Check", "Status", "Detail"], [[a, _status(b), c] for a, b, c in checks], max_widths=[24, 10, 80]))
+    print(banner("Environment doctor"))
+    print(table(["Check", "Status", "Detail"], [[name, _status(status), detail] for name, status, detail in checks], max_widths=[24, 10, 76]))
     return 0 if all(status != "FAIL" for _, status, _ in checks) else 1
 
 
-def cmd_test(args: list[str]) -> int:
-    print(color("Running scanner tests...", "cyan"))
-    result = subprocess.run(
-        [sys.executable, "-m", "unittest", "tests.test_scanner"],
-        cwd=Path(__file__).resolve().parents[2],
-        text=True,
-        capture_output=True,
-        env={**dict(os.environ), "PYTHONPATH": "src"},
-    )
-    status = "PASS" if result.returncode == 0 else "FAIL"
-    print(table(["Suite", "Status"], [["tests.test_scanner", _status(status)]], max_widths=[32, 10]))
-    output = result.stdout + result.stderr
-    tail = "\n".join(output.splitlines()[-12:])
-    print(tail)
-    return result.returncode
-
-
-def maybe_export(report: dict[str, Any], *, default_base: str, source: str) -> int:
-    if not sys.stdin.isatty():
-        return 0
-    if not confirm("Export report", default=False):
-        return 0
-    choices = ["zip", "md", "html", "json", "none"]
-    index = prompt_choice("Format", choices)
-    fmt = choices[index]
-    if fmt == "none":
-        return 0
-    default = f"{default_base}-report.{fmt if fmt != 'zip' else 'zip'}"
-    output = prompt_text("Output path", default=default)
-    export_report(report, fmt, output, source=source)
-    print(color(f"Wrote {output}", "green"))
-    return 0
-
-
-def export_report(report: dict[str, Any], fmt: str, output: str, *, source: str = "cli") -> None:
+def _export_fresh(report: dict[str, Any], view: dict[str, Any], fmt: str, output: str, *, source: str, profile: str) -> None:
     if fmt == "zip":
-        write_bundle(report, output, source=source)
-    elif fmt == "md":
-        export_markdown(display_report(report, source=source), output)
+        duplicates = _duplicate_installation_identities(view)
+        if duplicates:
+            examples = ", ".join(f"{extension_id}@{version}" for extension_id, version in duplicates[:3])
+            raise ValueError(
+                "A canonical ZIP cannot represent duplicate installations of the same extension version "
+                f"without merging detail records ({examples}). Export JSON, HTML, or Markdown instead."
+            )
+        write_bundle(report, output, source=source, profile=profile)
+        ok, errors = validate_report(output)
+        if not ok:
+            raise ValueError("The generated report failed verification: " + "; ".join(errors[:3]))
     elif fmt == "html":
-        export_html(display_report(report, source=source), output)
+        export_html(view, output)
+    elif fmt == "md":
+        export_markdown(view, output)
     elif fmt == "json":
         export_json(report, output)
     else:
-        raise ValueError(f"unknown export format: {fmt}")
+        raise ValueError(f"Unsupported export format: {fmt}")
 
 
-def _report_export(args: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="scan report export", add_help=False)
-    parser.add_argument("report", nargs="?")
-    parser.add_argument("--format", choices=sorted(EXPORT_FORMATS - {"none"}), required=False)
-    parser.add_argument("--output", "--out", dest="output")
-    ns = parser.parse_args(args)
-    report_path = ns.report or prompt_text("Report path")
-    fmt = ns.format or prompt_text("Format", default="md")
-    output = ns.output or prompt_text("Output path", default=f"{Path(report_path).stem}.{fmt}")
-    report = _bundle_to_report(read_report(report_path))
-    export_report(report, fmt, output)
-    print(color(f"Wrote {output}", "green"))
-    return 0
+def _duplicate_installation_identities(view: dict[str, Any]) -> list[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    duplicates: list[tuple[str, str]] = []
+    for item in view.get("extensions", []):
+        if not isinstance(item, dict):
+            continue
+        identity = (str(item.get("extension_id") or "unknown"), str(item.get("version") or "unknown"))
+        if identity in seen and identity not in duplicates:
+            duplicates.append(identity)
+        seen.add(identity)
+    return duplicates
 
 
-def _marketplace_table(results: list[dict[str, Any]]) -> str:
-    rows = []
-    for index, item in enumerate(results, start=1):
-        rows.append([
-            index,
-            item.get("display_name") or item.get("extension_id"),
-            item.get("publisher", ""),
-            _compact_int(item.get("install_count", 0)),
-            f"{float(item.get('rating_average') or 0):.1f}" if item.get("rating_average") else "-",
-            "yes" if item.get("publisher_verified") else "no",
-            item.get("extension_id", ""),
-        ])
-    return table(["#", "Extension", "Publisher", "Installs", "Rating", "Verified", "ID"], rows, max_widths=[4, 30, 18, 10, 8, 9, 34])
+def _attach_installation_context(report: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+    by_path = {str(Path(row["path"]).resolve()): row for row in rows}
+    for extension in report.get("extensions", []):
+        if not isinstance(extension, dict):
+            continue
+        install_path = str(extension.get("install_path") or "")
+        try:
+            context = by_path.get(str(Path(install_path).resolve()))
+        except OSError:
+            context = None
+        if context:
+            extension["client"] = context["client"]
+            extension["installation_path"] = context.get("original_path") or context["path"]
+
+
+def _run_with_profile(profile: str, operation):
+    previous = os.environ.get("IDE_SCANNER_REQUIRE_PROVIDERS")
+    if profile == "deep":
+        existing = {item.strip() for item in (previous or "").split(",") if item.strip()}
+        existing.update({"semgrep", "yara", "dependency_intelligence"})
+        os.environ["IDE_SCANNER_REQUIRE_PROVIDERS"] = ",".join(sorted(existing))
+    try:
+        return operation()
+    finally:
+        if previous is None:
+            os.environ.pop("IDE_SCANNER_REQUIRE_PROVIDERS", None)
+        else:
+            os.environ["IDE_SCANNER_REQUIRE_PROVIDERS"] = previous
 
 
 def _installed_table(rows: list[dict[str, Any]]) -> str:
     return table(
-        ["#", "Extension", "Version", "Client", "Publisher", "ID"],
-        [[index, item["display_name"], item["version"], item["client"], item["publisher"], item["extension_id"]] for index, item in enumerate(rows, start=1)],
-        max_widths=[4, 30, 12, 16, 18, 34],
+        ["#", "IDE", "Extension", "Version", "Publisher", "ID"],
+        [[index, item["client"], item["display_name"], item["version"], item["publisher"], item["extension_id"]] for index, item in enumerate(rows, start=1)],
+        max_widths=[4, 16, 30, 14, 18, 38],
     )
 
 
-def _render_read_report(data: dict[str, Any]) -> str:
-    if "extensions" in data:
-        return render_scan_report(data)
-    return render_scan_report(_bundle_to_report(data))
+def _marketplace_table(results: list[dict[str, Any]]) -> str:
+    return table(
+        ["#", "Extension", "Publisher", "Version", "Installs", "ID"],
+        [[index, item.get("display_name") or item.get("extension_id"), item.get("publisher", ""), item.get("version", ""), _compact_int(item.get("install_count", 0)), item.get("extension_id", "")] for index, item in enumerate(results, start=1)],
+        max_widths=[4, 30, 18, 14, 10, 38],
+    )
 
 
-def _bundle_to_report(data: dict[str, Any]) -> dict[str, Any]:
-    if "extensions" in data:
-        return data
-    details = list((data.get("details") or {}).values())
-    metadata = dict(data.get("metadata") or {})
-    summary = dict((data.get("summary") or {}).get("summary") or {})
-    return {
-        "scan_id": metadata.get("scan_id", "report"),
-        "created_at": metadata.get("created_at", ""),
-        "summary": {
-            "total_extensions": summary.get("total_extensions", len(details)),
-            "max_risk_score": summary.get("max_risk_score", 0),
-            "max_malware_score": summary.get("max_malware_score", 0),
-            "posture_status": summary.get("posture_status", ""),
-        },
-        "extensions": details,
+def _parse_selection(value: str, count: int) -> list[int]:
+    if value.lower() in {"all", "a"}:
+        return list(range(count))
+    selected: set[int] = set()
+    try:
+        for token in value.split(","):
+            token = token.strip()
+            if "-" in token:
+                start, end = (int(part) for part in token.split("-", 1))
+                selected.update(range(start - 1, end))
+            else:
+                selected.add(int(token) - 1)
+    except ValueError as exc:
+        raise ValueError("Invalid --select value; use 1,3-5 or all.") from exc
+    if not selected or min(selected) < 0 or max(selected) >= count:
+        raise ValueError(f"Selection must refer to rows 1-{count}.")
+    return sorted(selected)
+
+
+def _scan_namespace(**overrides: Any) -> argparse.Namespace:
+    defaults = {
+        "file": None, "marketplace": None, "marketplace_search": None,
+        "all": False, "ide": None, "search": "", "extension": [], "select": None,
+        "version": None, "profile": "standard", "online": False,
+        "format": "terminal", "output": None, "show_all": False, "yes": False,
     }
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
 
 
-def _arg_or_prompt(args: list[str], label: str) -> str:
-    return args[0] if args else prompt_text(label)
+def _ide_key(client: str) -> str:
+    value = client.lower()
+    if "cursor" in value:
+        return "cursor"
+    if "windsurf" in value:
+        return "windsurf"
+    if "vscodium" in value:
+        return "vscodium"
+    if "insiders" in value:
+        return "insiders"
+    return "vscode"
 
 
-def _safe_name(value: str) -> str:
-    out = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value)
-    return out.strip("-") or "extension"
+def _decision(extension: dict[str, Any]) -> str:
+    value = str(extension.get("decision") or "").lower()
+    if value in {"allow", "review", "block", "incomplete"}:
+        return value
+    return {"clean": "allow", "review": "review", "suspicious": "review", "malicious": "block"}.get(str(extension.get("verdict") or "").lower(), "incomplete")
 
 
 def _compact_int(value: object) -> str:
@@ -468,17 +519,7 @@ def _compact_int(value: object) -> str:
 
 
 def _status(value: str) -> str:
-    if value == "OK" or value == "PASS":
-        return color(value, "green")
-    if value == "WARN":
-        return color(value, "yellow")
-    return color(value, "red")
-
-
-def _acorn_path() -> Path:
-    import ide_scanner
-
-    return Path(ide_scanner.__file__).parent / "js_ast" / "acorn_vendor.js"
+    return color(value, "green" if value == "OK" else "yellow" if value == "WARN" else "red")
 
 
 if __name__ == "__main__":

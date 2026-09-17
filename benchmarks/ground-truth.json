@@ -10,8 +10,8 @@
     {
       "path": "../fixtures/agent-tool",
       "extension_id": "example.agent-toolbox",
-      "expected_verdict": "review",
-      "reason": "Agent-facing capability requires review but is not malware."
+      "expected_verdict": "clean",
+      "reason": "Agent-facing capability is reported as a capability contract; it is not static malware evidence by itself."
     },
     {
       "path": "../fixtures/credential-exfil",
@@ -34,14 +34,14 @@
     {
       "path": "../fixtures/mutable-dependency",
       "extension_id": "example.mutable-dependency",
-      "expected_verdict": "review",
-      "reason": "Mutable and unpinned runtime dependencies need supply-chain review."
+      "expected_verdict": "clean",
+      "reason": "Mutable and unpinned runtime dependencies are low-severity hardening notes until exact vulnerable or malicious resolution is established."
     },
     {
       "path": "../fixtures/native-artifact",
       "extension_id": "example.native-artifact",
-      "expected_verdict": "review",
-      "reason": "Native binary artifact needs provenance review."
+      "expected_verdict": "clean",
+      "reason": "Native artifact origin is a bounded low-severity governance note until independent provenance evidence or a policy violation exists."
     },
     {
       "path": "../fixtures/threat-feed-malware",

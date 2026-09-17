@@ -27,6 +27,15 @@ class WalkerLargeOutputTests(unittest.TestCase):
         self.assertEqual(status, "timeout")
         self.assertEqual(run.call_count, ast_analyzer.JS_AST_TIMEOUT_ATTEMPTS)
 
+    def test_input_budget_skips_large_source_before_spawning_node(self) -> None:
+        with patch.object(ast_analyzer, "JS_AST_MAX_INPUT_BYTES", 4), \
+             patch.object(ast_analyzer, "node_available", return_value=True), \
+             patch.object(ast_analyzer.subprocess, "run") as run:
+            _findings, status = analyze_js_source_status("large.js", "12345")
+
+        self.assertEqual(status, "resource-skipped")
+        run.assert_not_called()
+
     @unittest.skipUnless(node_available(), "node runtime required")
     def test_large_findings_payload_is_not_truncated(self) -> None:
         # Regression: walker.js used to call process.exit() immediately after

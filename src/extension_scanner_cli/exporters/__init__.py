@@ -1,1 +1,1 @@
-"""Report exporters for Extension Scanner CLI."""
+"""Guardrails local report exporters."""

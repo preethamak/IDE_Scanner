@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import copy
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from extension_scanner_cli import __version__
+
 from ide_scanner.discovery import discover_from_path, discover_local_installations
 from ide_scanner.registry import search_marketplace_extensions
-from ide_scanner.report_bundle import build_report_bundle, write_report_bundle
+from ide_scanner.report_bundle import write_report_bundle
 from ide_scanner.rule_registry import rules_json
 from ide_scanner.scanner import scan_targets
 
@@ -36,12 +40,17 @@ def installed_extensions() -> list[dict[str, Any]]:
     return sorted(rows, key=lambda item: (item["client"], item["display_name"].lower(), item["version"]))
 
 
-def scan_marketplace(extension_id: str) -> dict[str, Any]:
-    return scan_targets(marketplace_scan_ids=[extension_id], online=True, include_posture=False)
+def scan_marketplace(extension_id: str, *, version: str | None = None) -> dict[str, Any]:
+    return scan_targets(
+        marketplace_scan_ids=[extension_id],
+        marketplace_version=version,
+        online=True,
+        include_posture=False,
+    )
 
 
-def scan_paths(paths: list[str | Path]) -> dict[str, Any]:
-    return scan_targets(paths=[Path(item) for item in paths], online=False, include_posture=False)
+def scan_paths(paths: list[str | Path], *, online: bool = False) -> dict[str, Any]:
+    return scan_targets(paths=[Path(item) for item in paths], online=online, include_posture=False)
 
 
 def discover_paths(path: str | Path) -> list[dict[str, str]]:
@@ -52,23 +61,33 @@ def get_rules() -> dict[str, Any]:
     return rules_json()
 
 
-def write_bundle(report: dict[str, Any], output: str | Path, *, source: str = "cli") -> dict[str, Any]:
-    return write_report_bundle(report, output, profile="smart", source=source)
+def write_bundle(report: dict[str, Any], output: str | Path, *, source: str = "cli", profile: str = "standard") -> dict[str, Any]:
+    bundle_report = copy.deepcopy(report)
+    if source == "installed":
+        for extension in bundle_report.get("extensions", []):
+            if isinstance(extension, dict) and extension.get("client"):
+                extension["source"] = str(extension["client"])
+    return write_report_bundle(bundle_report, output, profile=profile, source=source)
 
 
-def display_report(report: dict[str, Any], *, source: str = "cli") -> dict[str, Any]:
-    bundle = build_report_bundle(report, profile="smart", source=source)
-    summary = dict(bundle["summary"]["summary"])
+def display_report(report: dict[str, Any], *, source: str = "cli", profile: str = "standard") -> dict[str, Any]:
+    """Prepare raw scanner output for presentation without rebuilding evidence."""
+    extensions = [item for item in report.get("extensions", []) if isinstance(item, dict)]
+    summary = dict(report.get("summary") or {})
     return {
-        "scan_id": bundle["metadata"].get("scan_id", report.get("scan_id", "unknown")),
-        "created_at": bundle["metadata"].get("created_at", report.get("created_at", "")),
-        "summary": {
-            "total_extensions": summary.get("total_extensions", 0),
-            "max_risk_score": summary.get("max_risk_score", 0),
-            "max_malware_score": summary.get("max_malware_score", 0),
-            "posture_status": summary.get("posture_status", ""),
+        "scan_id": report.get("scan_id", "unknown"),
+        "created_at": report.get("created_at", ""),
+        "metadata": {
+            "scan_id": report.get("scan_id", "unknown"),
+            "created_at": report.get("created_at", ""),
+            "scanner_version": __version__,
+            "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown-local-build",
+            "ruleset_version": rules_json().get("ruleset_version", "unknown"),
+            "profile": profile,
+            "source": source,
         },
-        "extensions": list(bundle["extensions"].values()),
+        "summary": {**summary, "total_extensions": summary.get("total_extensions", len(extensions))},
+        "extensions": extensions,
     }
 
 

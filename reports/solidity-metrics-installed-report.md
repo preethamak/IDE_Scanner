@@ -4,6 +4,7 @@ Generated: 2026-07-06
 
 Scanner: `ide-scanner`
 
+
 Targets:
 
 - `/home/akprajwal/.vscode/extensions/tintinweb.solidity-metrics-0.0.26`

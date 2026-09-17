@@ -61,7 +61,7 @@ uses a documented 90-second per-file timeout, 2 GiB Node old-space boundary, and
 3 GiB isolated-runner memory limit.
 
 Iteration 1 confirms that the five `Review/Low` rows arise from the general
-`binary-without-origin` provenance gate. It does **not** support five
+`binary-without-origin` provenance note. It does **not** support five
 `Review/Medium` rows: the proposed candidates currently contain capability or
 weak proximity evidence, not a demonstrated trust-boundary violation. Those
 labels remain unaccepted pending source-level evidence.
@@ -101,10 +101,10 @@ not a scanner fixture or extension-specific exception.
 | `ms-kubernetes-tools.vscode-kubernetes-tools@1.4.0` | Review/Medium | Allow/Low | Dangerous workflow triggers and broad token permissions are low repository hardening notes. |
 | `amazonwebservices.aws-toolkit-vscode@4.10.0` | Review/Medium | Allow/Low | Credential use is expected; mutable dependency sources remain low. |
 | `GitHub.vscode-pull-request-github@0.159.2026071604` | Review/Medium | Allow/Info | Agent surfaces are expected and generated-bundle CSP text has no actionable path. |
-| `ms-vscode.cpptools@1.33.4` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
-| `GitHub.copilot@1.388.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
-| `Continue.continue@2.1.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
-| `Semgrep.semgrep@1.17.0` | Review/Medium | Review/Low | Unattributed native artifacts require provenance review. |
+| `ms-vscode.cpptools@1.33.4` | Review/Medium | Clean/Low | Native artifact origin is a governance note; review is required only when policy disallows native code or release provenance changes. |
+| `GitHub.copilot@1.388.0` | Review/Medium | Clean/Low | Native artifact origin is a governance note; review is required only when policy disallows native code or release provenance changes. |
+| `Continue.continue@2.1.0` | Review/Medium | Clean/Low | Native artifact origin is a governance note; review is required only when policy disallows native code or release provenance changes. |
+| `Semgrep.semgrep@1.17.0` | Review/Medium | Clean/Low | Native artifact origin is a governance note; review is required only when policy disallows native code or release provenance changes. |
 | `snyk-security.snyk-vulnerability-scanner@2.31.0` | Review/Medium | Allow/Low | Missing webview CSP remains a low hardening note; credential command surfaces are contextual. |
 | `mhutchie.git-graph@1.30.0` | Review/Medium | Allow/Low | Git askpass is bounded and expected; the unsafe CSP directive remains a low hardening note. |
 | `GitHub.copilot-chat@0.48.1` | Review/Medium | Allow/Info | Manifest-declared agent tooling is capability context; no unsafe prompt-to-tool flow was established. |

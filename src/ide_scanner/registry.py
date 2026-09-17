@@ -27,6 +27,10 @@ OSV_BATCH_SIZE = 100
 VSIX_ASSET_TYPE = "Microsoft.VisualStudio.Services.VSIXPackage"
 MAX_VSIX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 MAX_CONFIGURED_VSIX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+# Cap on the decompressed size of a gzip-wrapped VSIX. Matches the archive
+# uncompressed cap enforced later by _safe_extract_vsix so a gzip bomb cannot
+# exhaust disk before the zip-level limits apply.
+MAX_GUNZIP_BYTES = 2 * 1024 * 1024 * 1024
 VSIX_DOWNLOAD_TIMEOUT = 30
 EXTENSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$")
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
@@ -347,24 +351,36 @@ def _normalize_marketplace_search_row(raw: dict[str, Any]) -> dict[str, Any] | N
     }
 
 
-def _degzip_if_needed(path: Path) -> None:
+def _degzip_if_needed(path: Path, max_bytes: int = MAX_GUNZIP_BYTES) -> None:
     """The vspackage endpoint sometimes serves the VSIX gzip-compressed
     (Content-Encoding: gzip) without a matching urllib auto-decode, so the
     raw bytes on disk start with the gzip magic (1f 8b) instead of the PK
     zip signature. Unwrap it in place before scan_vsix() opens it as a
-    zipfile."""
+    zipfile.
+
+    The decompressed output is capped so a gzip bomb (a few KB expanding to
+    many GB) cannot exhaust disk before the zip-level limits ever apply."""
     with path.open("rb") as handle:
         header = handle.read(2)
     if header != b"\x1f\x8b":
         return
     decompressed_fd, decompressed_name = tempfile.mkstemp(prefix="ide-scanner-mkt-gunzip-", suffix=".vsix", dir=str(path.parent))
+    total = 0
     try:
         with gzip.open(path, "rb") as source, os.fdopen(decompressed_fd, "wb") as target:
             while True:
                 chunk = source.read(1024 * 1024)
                 if not chunk:
                     break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise MarketplaceDownloadError(
+                        f"Downloaded VSIX gzip stream exceeded the {max_bytes} byte decompression cap; aborted."
+                    )
                 target.write(chunk)
+    except MarketplaceDownloadError:
+        Path(decompressed_name).unlink(missing_ok=True)
+        raise
     except OSError as exc:
         Path(decompressed_name).unlink(missing_ok=True)
         raise MarketplaceDownloadError(f"Downloaded VSIX was gzip-encoded but could not be decompressed: {exc}") from exc

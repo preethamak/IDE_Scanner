@@ -8,11 +8,14 @@ import re
 import shutil
 import tempfile
 import zipfile
+from concurrent.futures import ProcessPoolExecutor
+from itertools import repeat
 from pathlib import Path
 from typing import Any
 
 from .ast_analyzer import (
     JS_AST_EXTS,
+    JS_AST_MAX_INPUT_BYTES,
     JS_AST_MAX_OLD_SPACE_MB,
     JS_AST_TIMEOUT_ATTEMPTS,
     JS_AST_TIMEOUT_SECONDS,
@@ -83,7 +86,11 @@ SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
 MAX_SOURCE_PREVIEW_BYTES = 200 * 1024
 MAX_SOURCE_PREVIEWS = 40
+# Multi-megabyte entrypoints are treated as generated for correlation and AST
+# budgeting even when pretty-printed. This keeps one vendor bundle from making
+# an inventory scan unbounded while raw-text and YARA coverage remain active.
 GENERATED_BLOB_BYTES = 10 * 1024 * 1024
+GENERATED_ENTRYPOINT_AST_MAX_BYTES = JS_AST_MAX_INPUT_BYTES
 # Generated webpack/esbuild output can be substantially smaller than 1 MiB.
 # Treat a long, nearly line-free JavaScript artifact as generated once it is
 # large enough that character proximity no longer represents source locality.
@@ -234,7 +241,10 @@ def scan_targets(
     previous_report_file: Path | str | None = None,
     include_posture: bool = True,
     required_providers: set[str] | frozenset[str] | None = None,
+    jobs: int = 1,
 ) -> dict[str, Any]:
+    if not 1 <= jobs <= 32:
+        raise ValueError("jobs must be between 1 and 32")
     request = ScanRequest.create(
         paths=paths,
         extension_ids=extension_ids,
@@ -253,10 +263,10 @@ def scan_targets(
         include_posture=include_posture,
         required_providers=required_providers,
     )
-    return _scan_request(request)
+    return _scan_request(request, jobs=jobs)
 
 
-def _scan_request(request: ScanRequest) -> dict[str, Any]:
+def _scan_request(request: ScanRequest, *, jobs: int = 1) -> dict[str, Any]:
     targets: list[dict[str, str]] = []
     root = Path.cwd()
 
@@ -272,10 +282,7 @@ def _scan_request(request: ScanRequest) -> dict[str, Any]:
         unique[target["path"]] = target
 
     known_bad_hashes = _load_known_bad_hashes(request.known_bad_hashes_file)
-    extensions = [
-        _scan_discovered_target(target, known_bad_hashes)
-        for target in unique.values()
-    ]
+    extensions = _scan_discovered_targets(list(unique.values()), known_bad_hashes, jobs=jobs)
     extensions.extend(_registry_only_extension(extension_id) for extension_id in request.extension_ids)
     extensions.extend(
         scan_marketplace_extension(
@@ -289,7 +296,9 @@ def _scan_request(request: ScanRequest) -> dict[str, Any]:
     _apply_threat_feed(extensions, _load_threat_feed(request.threat_feed_file))
     advisory_bundle = _load_extension_advisories(request.extension_advisories_file)
     _apply_extension_advisories(extensions, advisory_bundle)
-    _apply_sandbox_observations(extensions, _load_sandbox_observations(request.sandbox_observations_file))
+    sandbox_bundle = _load_sandbox_observation_bundle(request.sandbox_observations_file)
+    _apply_sandbox_observations(extensions, sandbox_bundle["extensions"])
+    _apply_sandbox_provider(extensions, sandbox_bundle)
     registry = (
         _load_registry_snapshot(request.registry_snapshot_file)
         if request.registry_snapshot_file is not None
@@ -362,6 +371,7 @@ def _scan_request(request: ScanRequest) -> dict[str, Any]:
             "sha256": str(registry_identity.get("sha256") or ""),
             "payload": _registry_snapshot_payload(registry),
         },
+        "dynamic_sandbox": dict(sandbox_bundle["metadata"]),
     }
     return _build_report(
         extensions,
@@ -573,13 +583,21 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 })
             else:
                 analysis_coverage["provider_scopes"]["semgrep"]["eligible_files"].append(rel)
-            if is_entrypoint or not generated_blob:
+            ast_budget_allows_entrypoint = (
+                not is_entrypoint
+                or not generated_blob
+                or len(encoded_text) <= GENERATED_ENTRYPOINT_AST_MAX_BYTES
+            )
+            if ast_budget_allows_entrypoint:
                 status = _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
                 js_ast_statuses.append(status)
                 if status not in ("ok", "unparsed"):
                     js_ast_failed_paths.append(rel)
                 if is_entrypoint and status == "unparsed":
                     ast_unparsed_entrypoints.append(rel)
+            else:
+                js_ast_statuses.append("generated-resource-skipped")
+                js_ast_failed_paths.append(rel)
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
             executable_sources.append((rel, text))
@@ -752,6 +770,28 @@ def _scan_discovered_target(target: dict[str, str], known_bad_hashes: dict[str, 
         return scan_extension(path, source=target.get("type", "vscode"), known_bad_hashes=known_bad_hashes)
     except Exception as exc:  # noqa: BLE001 - isolate any per-artifact failure
         return _local_error_extension(path, target.get("type", "vscode"), f"{type(exc).__name__}: {exc}")
+
+
+def _scan_discovered_targets(
+    targets: list[dict[str, str]],
+    known_bad_hashes: dict[str, dict[str, Any]],
+    *,
+    jobs: int,
+) -> list[ExtensionReport]:
+    """Scan local artifacts with deterministic, bounded parallelism."""
+    if not targets:
+        return []
+    if jobs <= 1 or len(targets) == 1:
+        return [_scan_discovered_target(target, known_bad_hashes) for target in targets]
+    with ProcessPoolExecutor(max_workers=min(jobs, len(targets))) as executor:
+        return list(
+            executor.map(
+                _scan_discovered_target,
+                targets,
+                repeat(known_bad_hashes),
+                chunksize=1,
+            )
+        )
 
 
 def _local_error_extension(path: Path, source: str, message: str) -> ExtensionReport:
@@ -1415,6 +1455,7 @@ def _add_artifact_inventory_findings(
     all_paths = {str(entry.get("path")) for entry in artifact_inventory.get("_all_file_hashes", [])}
     packed_artifacts: list[dict[str, Any]] = []
     native_artifacts: list[dict[str, Any]] = []
+    native_without_origin: list[dict[str, Any]] = []
     for artifact in artifact_inventory["risky_artifacts"]:
         rel = str(artifact["path"])
         kind = str(artifact["kind"])
@@ -1422,21 +1463,38 @@ def _add_artifact_inventory_findings(
             native_artifacts.append(artifact)
             capabilities.setdefault("native_code", {"id": "native_code", "evidence": []})["evidence"].append(rel)
             if not _has_origin_evidence(path, rel, all_paths):
-                findings.append(_finding(
-                    extension_id,
-                    version,
-                    "binary-without-origin",
-                    "provenance",
-                    "MEDIUM",
-                    0.55,
-                    f"Native binary {rel} has no companion checksum or signature file and no documented provenance.",
-                    [rel],
-                    "Publish a checksum/signature alongside the binary or document its build origin in SECURITY.md/README.",
-                    {"sha256": artifact["sha256"]},
-                ))
+                native_without_origin.append(artifact)
         else:
             packed_artifacts.append(artifact)
             capabilities.setdefault("packed_artifacts", {"id": "packed_artifacts", "evidence": []})["evidence"].append(rel)
+
+    # Origin verification is not independent intelligence yet: the scanner
+    # cannot authenticate a package-controlled README, checksum, or signature
+    # against a vendor trust root. Keep the gap visible, but aggregate it into
+    # one bounded hardening note and never turn every bundled language-server
+    # binary into a separate review event.
+    if native_without_origin:
+        sample = native_without_origin[:20]
+        sample_paths = [str(a["path"]) for a in sample]
+        findings.append(_finding(
+            extension_id,
+            version,
+            "binary-without-origin",
+            "provenance",
+            "MEDIUM",
+            0.55,
+            (
+                f"{len(native_without_origin)} native artifact(s) lack independent origin verification."
+                f" Sample: {', '.join(sample_paths)}."
+            ),
+            sample_paths,
+            "Use a registry-backed signature or attestation when available; otherwise document the build origin and keep the artifact under release monitoring.",
+            {
+                "unverified_count": len(native_without_origin),
+                "sample_artifacts": _artifact_evidence(sample),
+                "verification_status": "not_independently_verified",
+            },
+        ))
 
     # Emit one aggregate finding per kind rather than one per file. A language
     # server that legitimately ships dozens of jars or native binaries would
@@ -1883,12 +1941,12 @@ def _add_cross_extension_code_findings(
     sensitive_input = _find_sensitive_api_text(text, r"showInputBox\s*\((?P<args>[^;\n]{0,800})", "InputBox")
     sensitive_config_reads = _find_sensitive_api_text(
         text,
-        r"(?:getConfiguration\s*\([^)]*\)\s*\.\s*get|WorkspaceConfiguration\s*\.\s*get|config\s*\.\s*get)\s*\((?P<args>[^;\n]{0,500})",
+        r"(?:getConfiguration\s*\([^)]{0,500}\)\s*\.\s*get|WorkspaceConfiguration\s*\.\s*get|config\s*\.\s*get)\s*\((?P<args>[^;\n]{0,500})",
         "WorkspaceConfiguration",
     )
     sensitive_config_updates = _find_sensitive_api_text(
         text,
-        r"(?:getConfiguration\s*\([^)]*\)\s*\.\s*update|WorkspaceConfiguration\s*\.\s*update|config\s*\.\s*update)\s*\((?P<args>[^;\n]{0,500})",
+        r"(?:getConfiguration\s*\([^)]{0,500}\)\s*\.\s*update|WorkspaceConfiguration\s*\.\s*update|config\s*\.\s*update)\s*\((?P<args>[^;\n]{0,500})",
         "WorkspaceConfiguration",
     )
     sensitive_global_state = _find_sensitive_api_text(
@@ -2095,7 +2153,7 @@ def _add_cross_extension_code_findings(
 
 def _find_sensitive_api_text(text: str, pattern: str, surface: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for match in re.finditer(pattern, text, re.I | re.S):
+    for match in re.finditer(pattern, text, re.I):
         snippet = _balanced_call_arguments(text, match.start("args")) if "args" in match.groupdict() else match.group(0)
         if not _looks_sensitive_text(snippet):
             continue
@@ -2493,15 +2551,34 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         "download_execute": ("observed-download-execute", "HIGH", 0.86, "Sandbox observed downloaded content being executed or loaded."),
         "persistence": ("observed-persistence", "HIGH", 0.84, "Sandbox observed persistence or autorun behavior."),
         "destructive": ("observed-destructive-behavior", "HIGH", 0.88, "Sandbox observed destructive file behavior."),
-        "unexpected_network": ("observed-unexpected-network", "MEDIUM", 0.68, "Sandbox observed network traffic to an unexpected destination."),
-        "process_exec": ("observed-process-exec", "MEDIUM", 0.66, "Sandbox observed process execution."),
-        "filesystem_write": ("observed-filesystem-write", "LOW", 0.58, "Sandbox observed filesystem writes."),
+        "network_attempt": ("runtime-network-attempt", "INFO", 0.35, "Sandbox observed an attempted network request; isolation prevented the request from completing."),
+        "unexpected_network": ("runtime-network-attempt", "INFO", 0.35, "Sandbox observed an attempted network request; isolation prevented the request from completing."),
+        "process_exec": ("runtime-process-execution", "INFO", 0.35, "Sandbox observed process execution; this confirms capability, not malicious intent."),
+        "filesystem_write": ("runtime-filesystem-write", "INFO", 0.3, "Sandbox observed a filesystem write; this confirms capability, not malicious intent."),
     }
-    if kind not in mapping:
+    if kind == "runtime_timeout":
+        rule_id, severity, confidence, summary = (
+            "sandbox-runtime-timeout",
+            "INFO",
+            0.4,
+            "Sandbox action timed out; runtime coverage is incomplete.",
+        )
+        evidence_class = "weak"
+    elif kind == "sandbox_error":
+        rule_id, severity, confidence, summary = (
+            "sandbox-runtime-error",
+            "INFO",
+            0.35,
+            "Sandbox runtime instrumentation could not complete; runtime coverage is incomplete.",
+        )
+        evidence_class = "weak"
+    elif kind in mapping:
+        rule_id, severity, confidence, summary = mapping[kind]
+        evidence_class = "weak" if kind in {"network_attempt", "unexpected_network", "process_exec", "filesystem_write"} else "observed"
+    else:
         return None
-    rule_id, severity, confidence, summary = mapping[kind]
     evidence = dict(item)
-    evidence["evidence_class"] = "observed"
+    evidence["evidence_class"] = evidence_class
     file_refs = [str(ref) for ref in item.get("file_refs", [])] if isinstance(item.get("file_refs"), list) else []
     return _finding(
         extension.extension_id,
@@ -2517,23 +2594,104 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
     )
 
 
-def _load_sandbox_observations(path: Path | str | None = None) -> dict[str, list[dict[str, Any]]]:
+def _load_sandbox_observation_bundle(path: Path | str | None = None) -> dict[str, Any]:
     raw_path = str(path or os.environ.get("IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE") or "")
     if not raw_path:
-        return {}
+        return {
+            "extensions": {},
+            "metadata": {
+                "status": "not-requested",
+                "mode": "static-only",
+                "executed": False,
+                "observation_count": 0,
+            },
+        }
     try:
         parsed = json.loads(Path(raw_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
-    if isinstance(parsed, dict) and isinstance(parsed.get("extensions"), dict):
-        parsed = parsed["extensions"]
-    if not isinstance(parsed, dict):
-        return {}
+        return {
+            "extensions": {},
+            "metadata": {
+                "status": "failed",
+                "mode": "external",
+                "executed": False,
+                "observation_count": 0,
+                "error": "sandbox observations file could not be read or parsed",
+            },
+        }
+    metadata_source = parsed if isinstance(parsed, dict) else {}
+    extension_payload = metadata_source.get("extensions") if isinstance(metadata_source.get("extensions"), dict) else parsed
+    if not isinstance(extension_payload, dict):
+        return {
+            "extensions": {},
+            "metadata": {
+                "status": "failed",
+                "mode": "external",
+                "executed": False,
+                "observation_count": 0,
+                "error": "sandbox observations payload has no extensions object",
+            },
+        }
     out: dict[str, list[dict[str, Any]]] = {}
-    for extension_id, items in parsed.items():
+    for extension_id, items in extension_payload.items():
         if isinstance(extension_id, str) and isinstance(items, list):
             out[extension_id] = [item for item in items if isinstance(item, dict)]
-    return out
+    mode = str(metadata_source.get("mode") or "external")
+    if mode == "executed":
+        status = "executed"
+        execution = "controlled-bubblewrap"
+    elif mode == "plan-only":
+        status = "planned"
+        execution = "not-run"
+    else:
+        status = "imported"
+        execution = "external"
+    plan = metadata_source.get("plan") if isinstance(metadata_source.get("plan"), dict) else {}
+    instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
+    metadata: dict[str, Any] = {
+        "status": status,
+        "mode": mode,
+        "execution": execution,
+        "executed": mode == "executed",
+        "schema_version": str(metadata_source.get("schema_version") or "unknown"),
+        "backend": str(plan.get("backend") or "external"),
+        "observation_count": sum(len(items) for items in out.values()),
+    }
+    if isinstance(plan.get("resource_limits"), dict):
+        metadata["resource_limits"] = dict(plan["resource_limits"])
+    if isinstance(plan.get("runtime_probes"), dict):
+        metadata["runtime_probes"] = dict(plan["runtime_probes"])
+    if isinstance(instrumentation.get("captures"), list):
+        metadata["captures"] = [str(item) for item in instrumentation["captures"]]
+    return {"extensions": out, "metadata": metadata}
+
+
+def _load_sandbox_observations(path: Path | str | None = None) -> dict[str, list[dict[str, Any]]]:
+    """Backward-compatible access to the extension observation map."""
+    bundle = _load_sandbox_observation_bundle(path)
+    return bundle["extensions"]
+
+
+def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:
+    metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
+    observations = bundle.get("extensions") if isinstance(bundle.get("extensions"), dict) else {}
+    status = str(metadata.get("status") or "not-requested")
+    for extension in extensions:
+        items = observations.get(extension.extension_id, [])
+        provider = {
+            "provider": "dynamic_sandbox",
+            "status": status,
+            "mode": str(metadata.get("mode") or "static-only"),
+            "execution": str(metadata.get("execution") or "not-run"),
+            "executed": bool(metadata.get("executed")),
+            "observation_count": len(items) if isinstance(items, list) else 0,
+            "error_count": sum(
+                1 for item in items
+                if isinstance(item, dict) and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+            ) if isinstance(items, list) else 0,
+            "required": False,
+        }
+        extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
 
 
 def _build_report(
@@ -2552,11 +2710,15 @@ def _build_report(
     by_verdict: dict[str, int] = {}
     by_severity: dict[str, int] = {}
     by_decision: dict[str, int] = {}
+    by_analysis_status: dict[str, int] = {}
     max_score = 0
     max_malware_score = 0
     max_risk_score = 0
     for extension in extensions:
-        by_verdict[extension.verdict] = by_verdict.get(extension.verdict, 0) + 1
+        analysis_status = str(extension.analysis_status or "incomplete")
+        by_analysis_status[analysis_status] = by_analysis_status.get(analysis_status, 0) + 1
+        if analysis_status == "complete" and extension.decision != "incomplete":
+            by_verdict[extension.verdict] = by_verdict.get(extension.verdict, 0) + 1
         by_severity[extension.severity] = by_severity.get(extension.severity, 0) + 1
         by_decision[extension.decision] = by_decision.get(extension.decision, 0) + 1
         max_malware_score = max(max_malware_score, extension.malware_score)
@@ -2575,6 +2737,7 @@ def _build_report(
         "by_verdict": by_verdict,
         "by_severity": by_severity,
         "by_decision": by_decision,
+        "by_analysis_status": by_analysis_status,
         "max_score": max_score,
         "max_malware_score": max_malware_score,
         "max_risk_score": max_risk_score,
@@ -2588,7 +2751,11 @@ def _build_report(
         "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
         "ruleset_version": RULESET_VERSION,
         "policy_version": POLICY_VERSION,
-        "privacy_mode": "local-metadata-and-static-features",
+        "privacy_mode": (
+            "local-metadata-static-features-plus-controlled-runtime"
+            if str((intelligence or {}).get("dynamic_sandbox", {}).get("status") or "") in {"executed", "imported"}
+            else "local-metadata-and-static-features"
+        ),
         "registry_checks": registry,
         "intelligence": dict(intelligence or {}),
         "summary": summary,
@@ -2626,12 +2793,14 @@ def _human_summary(
     posture_summary: dict[str, Any] | None = None,
 ) -> list[str]:
     by_verdict = summary.get("by_verdict", {})
+    by_analysis_status = summary.get("by_analysis_status", {})
     notes = [
         f"Scanned {summary.get('total_extensions', 0)} extension(s): "
         f"{by_verdict.get('malicious', 0)} malicious, "
         f"{by_verdict.get('suspicious', 0)} suspicious, "
         f"{by_verdict.get('review', 0)} review, "
-        f"{by_verdict.get('clean', 0)} clean."
+        f"{by_verdict.get('clean', 0)} clean, "
+        f"{sum(count for status, count in by_analysis_status.items() if status != 'complete')} incomplete."
     ]
     if registry.get("enabled"):
         notes.append(
@@ -3523,6 +3692,8 @@ def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str]
         "timeout_seconds_per_file": JS_AST_TIMEOUT_SECONDS,
         "max_timeout_attempts": JS_AST_TIMEOUT_ATTEMPTS,
         "max_old_space_mb": JS_AST_MAX_OLD_SPACE_MB,
+        "max_input_bytes_per_file": JS_AST_MAX_INPUT_BYTES,
+        "generated_entrypoint_max_bytes": GENERATED_ENTRYPOINT_AST_MAX_BYTES,
     }
     if not statuses:
         # No JS/TS files were reachable; nothing for this provider to do.
@@ -3543,6 +3714,17 @@ def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str]
             record["failed_paths"] = sorted(set(failed_paths))
         if "node-missing" in reasons:
             record["error"] = "Node runtime unavailable; JavaScript AST analysis did not run."
+        elif "generated-resource-skipped" in reasons:
+            record["error"] = (
+                "AST analysis skipped generated entrypoints beyond the "
+                f"{GENERATED_ENTRYPOINT_AST_MAX_BYTES:,}-byte generated-code budget; "
+                "bounded raw-text and YARA analysis still ran."
+            )
+        elif "resource-skipped" in reasons:
+            record["error"] = (
+                f"AST analysis skipped files beyond the {JS_AST_MAX_INPUT_BYTES:,}-byte "
+                "per-file resource budget; bounded raw-text and YARA analysis still ran."
+            )
     elif unparsed:
         record["status"] = "completed"
         record["note"] = (
@@ -3606,6 +3788,7 @@ def _add_ast_findings(
     or a parse failure on a real entrypoint is never silently reported as
     complete."""
     items, status = analyze_js_source_status(rel, text)
+    dynamic_call_targets: list[dict[str, Any]] = []
     for item in items:
         rule_id = str(item.get("rule") or "")
         if not rule_id:
@@ -3618,6 +3801,9 @@ def _add_ast_findings(
         # string-concat/fromCharCode) is a genuine obfuscation signal even in
         # minified code, so it is retained.
         if generated and rule_id in _GENERATED_NOISE_AST_RULES:
+            continue
+        if rule_id == "ast-dynamic-call-target":
+            dynamic_call_targets.append(item)
             continue
         severity = str(item.get("severity") or "MEDIUM")
         if severity not in _SEVERITY_TO_CONFIDENCE:
@@ -3636,6 +3822,33 @@ def _add_ast_findings(
             [rel],
             "Confirm whether the dynamically constructed target/argument is attacker-influenceable; this evades plain-text regex detection by design.",
             evidence={"line": line} if isinstance(line, int) else None,
+        ))
+    if dynamic_call_targets:
+        severity_order = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+        representative = max(
+            dynamic_call_targets,
+            key=lambda item: severity_order.get(str(item.get("severity") or "MEDIUM"), 2),
+        )
+        severity = str(representative.get("severity") or "MEDIUM")
+        if severity not in _SEVERITY_TO_CONFIDENCE:
+            severity = "MEDIUM"
+        line = representative.get("line")
+        examples = [str(item.get("detail") or "computed call target") for item in dynamic_call_targets[:3]]
+        summary = (
+            f"AST found {len(dynamic_call_targets)} computed call target(s) in {rel}; "
+            f"representative examples: {'; '.join(examples)}"
+        )
+        findings.append(_finding(
+            extension_id,
+            version,
+            "ast-dynamic-call-target",
+            "code",
+            severity,
+            _SEVERITY_TO_CONFIDENCE[severity],
+            summary,
+            [rel],
+            "Treat computed dispatch as contextual only unless a separate rule resolves the target to a sensitive sink or establishes attacker control.",
+            evidence={"line": line, "count": len(dynamic_call_targets)} if isinstance(line, int) else {"count": len(dynamic_call_targets)},
         ))
     return status
 

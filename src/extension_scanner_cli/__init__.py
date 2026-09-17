@@ -1,4 +1,4 @@
-"""Terminal product interface for IDE Scanner."""
+"""Guardrails local IDE extension scanner."""
 
 __all__ = ["__version__"]
 

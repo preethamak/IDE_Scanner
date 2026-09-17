@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ from .agent import build_agent_report, upload_agent_report
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .discovery import discover_from_path, discover_local_installations
+from .evidence import location_from_finding
 from .report_bundle import iter_report_events, write_report_bundle
 from .sandbox_runner import run_sandbox
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
@@ -24,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--fixtures", action="store_true", help="Scan bundled sample extensions.")
     scan.add_argument("--all", "--installed", dest="installed", action="store_true", help="Scan local VS Code-compatible extension installs.")
     scan.add_argument("--path", "--folder", "--vsix", dest="path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to scan.")
+    scan.add_argument("--jobs", type=int, default=1, help="Scan local artifacts in parallel with 1-32 worker processes.")
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
@@ -36,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--registry-snapshot", help="Replay registry and dependency intelligence captured in an earlier JSON report.")
     scan.add_argument("--sandbox-observations", help="JSON observations from an external sandbox run. The scanner imports this evidence but does not execute extensions.")
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
+    scan.add_argument("--skip-posture", action="store_true", help="Skip local IDE/client posture checks; useful for portable extension corpus scans.")
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
@@ -48,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
     sandbox.add_argument("--out", required=True, help="Write sandbox observations JSON to this file.")
-    sandbox.add_argument("--allow-execute", action="store_true", help="Reserved; disabled until OS-level isolation is implemented.")
+    sandbox.add_argument("--allow-execute", action="store_true", help="Execute lifecycle scripts and the activation entrypoint, then probe registered commands and webview messages inside Bubblewrap isolation with networking disabled.")
     sandbox.add_argument("--timeout", type=int, default=15, help="Execution timeout per command in seconds.")
 
     benchmark = subparsers.add_parser("benchmark", help="Run scanner benchmarks.")
@@ -104,7 +108,9 @@ def main(argv: list[str] | None = None) -> int:
             registry_snapshot_file=args.registry_snapshot,
             sandbox_observations_file=args.sandbox_observations,
             previous_report_file=args.previous_report,
+            include_posture=not args.skip_posture,
             required_providers=DEEP_REQUIRED_PROVIDERS if args.profile == "deep" else None,
+            jobs=args.jobs,
         )
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
@@ -259,8 +265,10 @@ def _emit_terminal_brief(report: dict[str, Any]) -> None:
         for finding in findings[:3]:
             severity = str(finding.get("effective_severity") or finding.get("severity") or "INFO")
             summary = str(finding.get("evidence_summary") or finding.get("rule_id") or "Scanner observation")
-            refs = finding.get("file_refs") if isinstance(finding.get("file_refs"), list) else []
-            location = f" · {refs[0]}" if refs else ""
+            evidence_location = location_from_finding(finding)
+            path = str(evidence_location["file"] or "")
+            line = evidence_location["line"]
+            location = f" · {path}:{line}" if path and line is not None else f" · {path}" if path else ""
             print(f"  [{severity}] {summary}{location}")
         if len(findings) > 3:
             print(f"  + {len(findings) - 3} additional observation(s) in JSON or report bundle")
@@ -292,6 +300,8 @@ def _run_benchmark() -> dict[str, Any]:
     )
     by_id = {extension["extension_id"]: extension for extension in report["extensions"]}
     rows: list[dict[str, Any]] = []
+    rule_counts: Counter[str] = Counter()
+    rule_extension_counts: dict[str, set[str]] = {}
     correct = 0
     false_positive = 0
     false_negative = 0
@@ -315,6 +325,10 @@ def _run_benchmark() -> dict[str, Any]:
             "malware_score": actual.get("malware_score") if actual else None,
             "top_findings": [finding["rule_id"] for finding in (actual.get("findings", []) if actual else [])[:5]],
         })
+        for finding in (actual.get("findings", []) if actual else []):
+            rule_id = str(finding.get("rule_id") or "unknown")
+            rule_counts[rule_id] += 1
+            rule_extension_counts.setdefault(rule_id, set()).add(extension_id)
     malicious_expected = [row for row in rows if row["expected_verdict"] in {"suspicious", "malicious"}]
     malicious_detected = [row for row in malicious_expected if row["actual_verdict"] in {"suspicious", "malicious"}]
     return {
@@ -325,6 +339,14 @@ def _run_benchmark() -> dict[str, Any]:
         "false_positive": false_positive,
         "false_negative": false_negative,
         "malicious_recall": round(len(malicious_detected) / len(malicious_expected), 4) if malicious_expected else 0,
+        "rule_observations": [
+            {
+                "rule_id": rule_id,
+                "finding_count": count,
+                "extension_count": len(rule_extension_counts.get(rule_id, set())),
+            }
+            for rule_id, count in rule_counts.most_common()
+        ],
         "rows": rows,
         "scanner_summary": report["summary"],
     }

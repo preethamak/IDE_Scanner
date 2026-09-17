@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.07.24-policy-v3-calibration.6"
+RULESET_VERSION = "2026.09.17-policy-v3-calibration.13"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -422,6 +422,11 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "powerful-ide-contribution": ("ide-capability", "capability", "LOW", "The extension contributes debugger, task, or terminal capability."),
     "repo-binary-artifacts": ("repository-posture", "posture", "LOW", "The package contains a committed native binary artifact."),
     "repo-url-missing": ("reputation", "reputation", "LOW", "The extension manifest does not declare a source repository."),
+    "runtime-filesystem-write": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed a filesystem write; this confirms capability, not malicious intent."),
+    "runtime-network-attempt": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed an attempted network request; isolation does not establish that it completed."),
+    "runtime-process-execution": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed process execution; this confirms capability, not malicious intent."),
+    "sandbox-runtime-error": ("coverage", "weak", "INFO", "The runtime sandbox could not complete one execution phase, so dynamic coverage is incomplete."),
+    "sandbox-runtime-timeout": ("coverage", "weak", "INFO", "The runtime sandbox timed out during one execution phase, so dynamic coverage is incomplete."),
     "security-policy-missing": ("repository-posture", "reputation", "LOW", "The packaged artifact does not include a recognized security policy."),
     "sensitive-activation": ("activation", "capability", "LOW", "The extension activates on a security-sensitive IDE event."),
     "startup-activation": ("activation", "capability", "LOW", "The extension activates automatically after IDE startup."),

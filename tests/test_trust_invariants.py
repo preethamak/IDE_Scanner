@@ -121,6 +121,12 @@ class ProviderStatusTests(unittest.TestCase):
         self.assertIn("Node runtime unavailable", record["error"])
         self.assertEqual(record["failed_paths"], ["extension.js"])
 
+    def test_generated_entrypoint_resource_skip_names_its_budget(self) -> None:
+        record = _javascript_ast_provider_status(["generated-resource-skipped"], ["dist/extension.js"])
+        self.assertEqual(record["status"], "failed")
+        self.assertIn("generated entrypoints", record["error"])
+        self.assertIn("generated_entrypoint_max_bytes", record)
+
     def test_all_ok_completes(self) -> None:
         record = _javascript_ast_provider_status(["ok", "ok"])
         self.assertEqual(record["status"], "completed")

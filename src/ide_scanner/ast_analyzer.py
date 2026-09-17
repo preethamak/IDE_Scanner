@@ -14,6 +14,7 @@ _WALKER_PATH = Path(__file__).parent / "js_ast" / "walker.js"
 # near that limit on a single CPU. Keep both limits fixed and report them in
 # provider metadata so the coverage boundary is reproducible.
 JS_AST_TIMEOUT_SECONDS = 90
+JS_AST_MAX_INPUT_BYTES = 64 * 1024 * 1024
 JS_AST_MAX_OLD_SPACE_MB = 2048
 JS_AST_TIMEOUT_ATTEMPTS = 2
 
@@ -43,6 +44,8 @@ def analyze_js_source_status(rel: str, text: str) -> tuple[list[dict[str, Any]],
     failure as "no findings"."""
     if not node_available():
         return [], "node-missing"
+    if len(text) > JS_AST_MAX_INPUT_BYTES or len(text.encode("utf-8")) > JS_AST_MAX_INPUT_BYTES:
+        return [], "resource-skipped"
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=Path(rel).suffix or ".js", delete=False) as handle:
             handle.write(text)

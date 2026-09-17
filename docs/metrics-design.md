@@ -92,7 +92,7 @@ These are the only metrics allowed to set `verdict=malicious`.
 | `source_vsix_diff_unexplained` | Build declared repo and compare expected files to VSIX artifact. | Review to suspicious depending on sensitive additions. | Ignore expected generated bundles when source map/build config matches. |
 | `attestation_missing` | deps.dev/SLSA/provenance missing for packages that normally provide it. | Weak/context. | Absence is not abuse. |
 | `attestation_violation` | Attestation says artifact was not built from declared source or builder. | Suspicious/provenance. | Require exact version/artifact and verifiable statement. |
-| `binary_without_origin` | `.node`, `.dll`, `.so`, `.dylib`, `.exe`, archive, or bundled server lacks source, signature, checksum, or expected path. Implemented as `binary-without-origin`: fires when a native artifact from the artifact inventory has no companion `.sha256`/`.sig`/`.asc`/`.p7s` file and is not referenced by name in `SECURITY.md`/`README.md`. | Review (provenance, MEDIUM). | Language servers often ship binaries; reduce when signed and checksum-pinned. |
+| `binary_without_origin` | `.node`, `.dll`, `.so`, `.dylib`, `.exe`, archive, or bundled server lacks independently verified origin. Implemented as `binary-without-origin`: aggregates native artifacts that the scanner cannot authenticate against a registry or vendor trust root. | Low hardening note (provenance, MEDIUM evidence). | Native language servers commonly ship binaries. Do not treat a package-controlled README/checksum as independent proof; require review only when policy disallows native code or release provenance changes. |
 | `reproducible_hash_match` | Local built artifact matches published VSIX/package hash. | Risk reducer. | Reducer only; does not override confirmed malware. |
 
 ### 4. Install-Time Behavior
@@ -146,7 +146,7 @@ Dynamic execution should be run in a disposable VM/container with no real secret
 | `observed_download_execute` | Downloads bytes then executes, loads, or marks executable. | Suspicious. | Reduce for signed/checksummed first-party language servers. |
 | `observed_persistence` | Writes autorun locations or persistent shell/config hooks. | Suspicious. | Some installers add PATH or shell integration; require user-visible docs. |
 | `observed_destructive_behavior` | Deletes/encrypts user files outside extension directory. | Suspicious high. | Use disposable canary files and require trace evidence. |
-| `observed_unexpected_network` | Contacts domains not declared in package, docs, telemetry policy, or known vendor list. | Review to suspicious based on payload and trigger. | Maintain expected domain registry with evidence. |
+| `runtime_network_attempt` | Attempts a network request inside the isolated runtime. | Contextual capability evidence; escalate only when paired with canary exfiltration or another abuse chain. | The harness blocks completion and records destination/API; do not infer successful transfer from an attempt alone. |
 
 Dynamic findings are stronger than static findings, but still should not become `malicious` unless backed by trusted intelligence, a known-bad hash, or an explicit malware verdict from a trusted source.
 
@@ -331,7 +331,7 @@ To make the scanner reliable, metrics must be tested against a labeled corpus an
 
 ### Phase 4: Dynamic sandbox
 
-- Run install, activation, command invocation, webview open, language server startup, and uninstall in a disposable sandbox.
+- Run lifecycle scripts and activation in a disposable Bubblewrap sandbox with a copied artifact, synthetic home/workspace, isolated PID namespace, and disabled networking. Command invocation, webview open, language server startup, and uninstall remain the next coverage expansion.
 - Instrument process tree, filesystem, environment reads, network destinations, DNS, and payload hashes.
 - Seed fake credential canaries and detect exfiltration.
 - Use dynamic observations to corroborate static chains.
@@ -359,10 +359,10 @@ Current `ide-scanner` behavior already matches the most important safety rules:
 - known-bad SHA-256 feed matches produce `known-bad-artifact` confirmed evidence.
 - install-time script chains produce `install-download-execute`, `install-secret-access`, `install-network-telemetry`, and `install-shell-obfuscation`.
 - static behavior chains now include obfuscation+execution+network, persistence, and agent data exfiltration.
-- dynamic sandbox observations can be imported as `observed-*` evidence from an external runner.
+- dynamic sandbox observations can be produced by `sandbox --allow-execute` through the Bubblewrap backend or imported as `observed-*` evidence from an external runner. Missing Bubblewrap fails closed; the scanner never falls back to host execution.
 - repository posture and agent-specific tool surface metrics are implemented as review/context evidence.
 - `repo-binary-artifacts` (posture) is now emitted from the artifact inventory's native-kind entries; it was previously registered in scoring/evidence-class sets but never produced a finding.
-- `binary-without-origin` (provenance) fires for native artifacts lacking a companion checksum/signature file or documented origin in `SECURITY.md`/`README.md`.
+- `binary-without-origin` (provenance) is one bounded low-severity finding for native artifacts lacking independent registry/vendor origin verification. It is not malware evidence and does not force manual review by itself.
 - `install-rating-mismatch` (reputation) fires for high-install, low-rating marketplace metadata combinations, distinct from the existing flat low-install/low-rating thresholds.
 - `webview-csp-missing` and `webview-csp-unsafe-directive` (capability) detect webview surfaces lacking a Content-Security-Policy or declaring an unsafe one.
 - `license-missing` (reputation) flags packaged artifacts with no local LICENSE file; kept out of `posture` deliberately, since posture evidence is always verdict-actionable and license absence alone must not escalate a clean extension to `review`.
@@ -370,7 +370,7 @@ Current `ide-scanner` behavior already matches the most important safety rules:
 - Standalone secret, network, filesystem, execution, dynamic code, and obfuscation indicators are `weak` unless they form a chain.
 - `malicious` currently requires confirmed evidence.
 - Correlated static abuse paths produce `suspicious` with `malware_authority=non_authoritative`.
-- Capability findings produce `review`.
+- Capability findings are normally contextual; the enterprise capability contract can require explicit approval for high-impact agent, process, network, credential, or native surfaces without calling those capabilities malware.
 - Weak-only findings stay `clean` with score 0.
 
 The main gap is that current `risk_score` is doing double duty. The next version should report:

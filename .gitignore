@@ -20,3 +20,13 @@ report.json
 real-extensions*.json
 python-solidity-metrics-report.json
 ten-extension-comparison-report.json
+
+# External benchmark artifacts and outputs. These can contain malicious VSIX
+# files and must never be committed or inspected outside the disposable
+# static-analysis container.
+benchmarks/external/artifacts/
+benchmarks/external/results/
+
+# One local workspace for the frozen 50-extension cohort. The public manifest
+# and normalized result summary live beside it under real-world-cohort/v1.
+benchmarks/real-world-cohort/v1/work/

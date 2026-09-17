@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import io
+import json
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from ide_scanner import cli
@@ -18,9 +21,12 @@ class CliHonestyTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("IDE Scanner security brief", buffer.getvalue())
 
-    def test_jobs_flag_is_removed_not_a_silent_noop(self) -> None:
-        with self.assertRaises(SystemExit):
-            cli.main(["scan", "--fixtures", "--jobs", "4"])
+    def test_jobs_flag_runs_bounded_parallel_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "report.json"
+            code = cli.main(["scan", "--fixtures", "--jobs", "2", "--format", "json", "--out", str(output)])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["summary"]["total_extensions"], 8)
 
     def test_terminal_separates_file_coverage_from_provider_completion(self) -> None:
         report = {
@@ -42,6 +48,30 @@ class CliHonestyTests(unittest.TestCase):
         self.assertIn("Executable-file coverage 100%", output)
         self.assertIn("required analysis incomplete", output)
         self.assertNotIn("required analyzers complete", output)
+
+    def test_terminal_includes_a_recorded_evidence_line(self) -> None:
+        report = {
+            "extensions": [{
+                "extension_id": "example.location",
+                "analysis_status": "complete",
+                "decision": "review",
+                "analysis_coverage": {
+                    "executable_file_coverage_percent": 100,
+                    "required_providers_complete": True,
+                },
+                "findings": [{
+                    "severity": "MEDIUM",
+                    "evidence_summary": "Process execution reference",
+                    "file_refs": ["src/terminal.js"],
+                    "evidence": {"line": 43},
+                }],
+            }],
+        }
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            cli._emit_terminal_brief(report)
+
+        self.assertIn("src/terminal.js:43", buffer.getvalue())
 
 
 if __name__ == "__main__":
