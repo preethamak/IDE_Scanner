@@ -4468,12 +4468,30 @@ def _read_text(path: Path) -> str | None:
 # structurally ubiquitous there. Retained on hand-written code.
 _GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-sensitive-access"}
 
+# These rules describe ordinary extension capabilities rather than an abuse
+# path. A large extension commonly uses each one in several bundled modules;
+# emitting one finding per file makes the report look like a list of incidents
+# even though the classification policy already treats these signals as
+# contextual. Keep the paths and occurrence count, but surface one concise
+# finding. Do not add correlated, observed, provenance, or AST rules here:
+# repeated high-specificity evidence must remain individually reviewable.
+_CONTEXTUAL_OCCURRENCE_RULES = frozenset({
+    "dynamic-code-loading",
+    "filesystem-access",
+    "network-access",
+    "obfuscation",
+    "process-execution",
+})
+
 
 def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
     """Collapse findings that share a finding_id (identical rule + file_refs +
     evidence summary) to the first occurrence, preserving order. Multiple
     analyzers and code paths can surface the same fact; the report should state
-    it once. Scoring is unaffected -- component scores use max(), not counts."""
+    it once. Then aggregate only repeated, explicitly contextual capability
+    notes. Scoring is unaffected by the aggregation because component scores
+    use max(), while weak-context scoring reflects surfaced notes rather than
+    every duplicate file occurrence."""
     seen: set[str] = set()
     unique: list[Finding] = []
     for finding in findings:
@@ -4481,7 +4499,55 @@ def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
             continue
         seen.add(finding.finding_id)
         unique.append(finding)
-    return unique
+    return _aggregate_contextual_findings(unique)
+
+
+def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
+    """Merge repeated low-signal capability notes without hiding evidence.
+
+    A finding remains separate when its rule is not in the allowlist or when
+    policy has promoted it beyond ``contextual``. Aggregated findings carry the
+    union of file references and an occurrence count so callers can still
+    investigate every location and distinguish one use from many uses.
+    """
+    grouped: dict[tuple[str, str, str, str, str], Finding] = {}
+    occurrence_counts: dict[tuple[str, str, str, str, str], int] = {}
+    output: list[Finding] = []
+
+    for finding in findings:
+        key = (
+            finding.rule_id,
+            finding.category,
+            finding.severity,
+            finding.evidence_type,
+            finding.evidence_summary,
+        )
+        if (
+            finding.rule_id not in _CONTEXTUAL_OCCURRENCE_RULES
+            or finding_actionability(finding) != "contextual"
+        ):
+            output.append(finding)
+            continue
+
+        first = grouped.get(key)
+        if first is None:
+            grouped[key] = finding
+            occurrence_counts[key] = 1
+            output.append(finding)
+            continue
+
+        occurrence_counts[key] += 1
+        first.file_refs = sorted(set(first.file_refs).union(finding.file_refs))
+        evidence = dict(first.evidence or {})
+        evidence["occurrence_count"] = occurrence_counts[key]
+        evidence["occurrence_files"] = list(first.file_refs)
+        first.evidence = evidence
+        first.finding_id = _stable_id(
+            f"{first.extension_id}:{first.version}:{first.rule_id}:"
+            f"{','.join(first.file_refs)}:{first.evidence_summary}"
+        )
+
+    return output
 
 
 def _add_ast_findings(

@@ -24,6 +24,7 @@ from ide_scanner.scanner import (
     _add_ast_findings,
     _apply_local_dynamic_runtime,
     _apply_sandbox_provider,
+    _dedupe_findings,
     _find_sensitive_api_text,
     _is_generated_code_blob,
     _local_error_extension,
@@ -40,6 +41,54 @@ from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_repeated_contextual_capability_notes_are_aggregated_with_paths(self) -> None:
+        def finding(path: str) -> Finding:
+            return Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="filesystem-access",
+                category="filesystem",
+                severity="LOW",
+                confidence=0.42,
+                score=20,
+                evidence_type="static",
+                evidence_summary="Extension reads or writes local files. Expected for many developer tools.",
+                file_refs=[path],
+                recommendation="Treat this as review evidence unless it combines with credential, network, download, or destructive behavior.",
+                evidence={"evidence_class": "weak"},
+            )
+
+        result = _dedupe_findings([finding("dist/a.js"), finding("dist/b.js")])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].file_refs, ["dist/a.js", "dist/b.js"])
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "dist/b.js"])
+
+    def test_correlated_findings_are_not_aggregated_as_contextual_notes(self) -> None:
+        def finding(path: str) -> Finding:
+            return Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="download-and-execute",
+                category="execution",
+                severity="HIGH",
+                confidence=0.82,
+                score=78,
+                evidence_type="static",
+                evidence_summary="Code can download content and execute local processes from the same file.",
+                file_refs=[path],
+                recommendation="Verify the download source, integrity checks, and execution purpose.",
+                evidence={"evidence_class": "correlated"},
+            )
+
+        result = _dedupe_findings([finding("src/a.js"), finding("src/b.js")])
+
+        self.assertEqual(len(result), 2)
+        self.assertNotIn("occurrence_count", result[0].evidence or {})
+
     def test_local_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "agent.vsix"
