@@ -21,6 +21,11 @@ from urllib.parse import urlparse
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 LABELS = {"known_safe", "known_malicious"}
+# A two-artifact holdout can only catch a catastrophic regression.  Public
+# classification needs a small, independently labelled sample on both sides
+# before it is allowed to represent ecosystem accuracy.
+MIN_FRESH_HOLDOUT_SAFE = 5
+MIN_FRESH_HOLDOUT_MALICIOUS = 5
 
 
 def build_publication_accuracy_gate(
@@ -66,8 +71,15 @@ def build_publication_accuracy_gate(
         raise ValueError("The publication holdout must scan every exact artifact completely.")
     if _number(summary.get("required_passed")) != len(artifacts):
         raise ValueError("The publication holdout contains a labelled routing mismatch.")
-    if _number(summary.get("safe_evaluated")) < 1 or _number(summary.get("malicious_evaluated")) < 1:
-        raise ValueError("The publication holdout must contain known-safe and known-malicious artifacts.")
+    if (
+        _number(summary.get("safe_evaluated")) < MIN_FRESH_HOLDOUT_SAFE
+        or _number(summary.get("malicious_evaluated")) < MIN_FRESH_HOLDOUT_MALICIOUS
+    ):
+        raise ValueError(
+            "The publication holdout must contain at least "
+            f"{MIN_FRESH_HOLDOUT_SAFE} known-safe and "
+            f"{MIN_FRESH_HOLDOUT_MALICIOUS} known-malicious artifacts."
+        )
     _validate_holdout_results(holdout_gate, artifacts)
 
     return {

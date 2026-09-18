@@ -25,17 +25,34 @@ on:
         description: Canonical publication purpose (benchmark or public_intelligence)
         required: false
         type: choice
+        default: public_intelligence
         options:
           - public_intelligence
           - benchmark
+      worker_count:
+        description: Parallel isolated workers for this run; use 1 when claiming one exact job_id
+        required: false
+        type: choice
+        default: "16"
+        options:
+          - "1"
+          - "4"
+          - "8"
+          - "16"
 
 permissions:
   contents: read
 
 jobs:
   scan:
+    if: ${{ matrix.worker <= fromJSON(inputs.worker_count || '16') }}
+    name: Deep Scan worker ${{ matrix.worker }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -74,6 +91,7 @@ jobs:
             -- /usr/bin/true
       - name: Enqueue canonical maintenance scan
         id: enqueue
+        if: ${{ matrix.worker == 1 && !inputs.job_id }}
         env:
           SCAN_ENQUEUE_URL: https://abscissa.dev/api/internal/scan-jobs/enqueue
           SCAN_EXTENSION_ID: ${{ inputs.extension_id }}
@@ -89,7 +107,7 @@ jobs:
           # Only the canonical apex host. abscissa.dev is canonical; vercel.app aliases redirect
           # here, and urllib refuses to follow a 307 on POST, crashing the claim.
           SCAN_CLAIM_URLS: https://abscissa.dev/api/internal/scan-jobs/claim
-          SCAN_RUNNER_ID: github-actions-${{ github.run_id }}
+          SCAN_RUNNER_ID: github-actions-${{ github.run_id }}-${{ matrix.worker }}
           SCAN_JOB_ID: ${{ inputs.job_id || steps.enqueue.outputs.job_id }}
           SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
           SCAN_GITHUB_SHA: ${{ github.sha }}

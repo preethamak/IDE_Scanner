@@ -34,6 +34,33 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
 
 
 def holdout_corpus(source_type: str = "vsix") -> dict:
+    artifacts = []
+    for index in range(5):
+        artifacts.append({
+            "extension_id": f"safe.extension{index}",
+            "version": f"1.0.{index}",
+            "gate_required": True,
+            "label": "known_safe",
+            "label_evidence": {
+                "source_type": "independent_review",
+                "source_url": f"https://security.example.org/safe-extension-{index}",
+                "retrieved_at": "2026-09-18T00:00:00Z",
+            },
+            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": f"{index + 1:x}" * 64},
+        })
+    for index in range(5):
+        artifacts.append({
+            "extension_id": f"bad.extension{index}",
+            "version": f"9.9.{index}",
+            "gate_required": True,
+            "label": "known_malicious",
+            "label_evidence": {
+                "source_type": "independent_threat_report",
+                "source_url": f"https://security.example.org/bad-extension-{index}",
+                "retrieved_at": "2026-09-18T00:00:00Z",
+            },
+            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": f"{index + 11:x}" * 64},
+        })
     return {
         "schema_version": "1.0",
         "corpus_id": "fresh-holdout",
@@ -44,65 +71,41 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
             "original_bytes_available": True,
             "label_source": "independent-adjudication-2026-09-18",
         },
-        "artifacts": [
-            {
-                "extension_id": "safe.extension",
-                "version": "1.0.0",
-                "gate_required": True,
-                "label": "known_safe",
-                "label_evidence": {
-                    "source_type": "independent_review",
-                    "source_url": "https://example.test/safe-extension",
-                    "retrieved_at": "2026-09-18T00:00:00Z",
-                },
-                "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": "b" * 64},
-            },
-            {
-                "extension_id": "bad.extension",
-                "version": "9.9.9",
-                "gate_required": True,
-                "label": "known_malicious",
-                "label_evidence": {
-                    "source_type": "independent_threat_report",
-                    "source_url": "https://example.test/bad-extension",
-                    "retrieved_at": "2026-09-18T00:00:00Z",
-                },
-                "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": "c" * 64},
-            },
-        ],
+        "artifacts": artifacts,
     }
 
 
 def holdout_gate() -> dict:
-    result = gate("fresh-holdout", safe=1, malicious=1, version="2026.09.18.1")
+    result = gate("fresh-holdout", safe=5, malicious=5, version="2026.09.18.1")
     result["runtime_evidence"] = {
         "required": True,
         "runtime_enabled": True,
         "profile": "deep",
         "runtime_timeout_seconds": 20,
     }
-    result["artifacts"] = [
-        {
-            "extension_id": "safe.extension",
-            "version": "1.0.0",
+    result["artifacts"] = []
+    for index in range(5):
+        result["artifacts"].append({
+            "extension_id": f"safe.extension{index}",
+            "version": f"1.0.{index}",
             "gate_required": True,
             "label": "known_safe",
             "scanned": True,
             "passed": True,
             "gate_passed": True,
-            "actual": {"analysis_status": "complete", "artifact_sha256": "b" * 64},
-        },
-        {
-            "extension_id": "bad.extension",
-            "version": "9.9.9",
+            "actual": {"analysis_status": "complete", "artifact_sha256": f"{index + 1:x}" * 64},
+        })
+    for index in range(5):
+        result["artifacts"].append({
+            "extension_id": f"bad.extension{index}",
+            "version": f"9.9.{index}",
             "gate_required": True,
             "label": "known_malicious",
             "scanned": True,
             "passed": True,
             "gate_passed": True,
-            "actual": {"analysis_status": "complete", "artifact_sha256": "c" * 64},
-        },
-    ]
+            "actual": {"analysis_status": "complete", "artifact_sha256": f"{index + 11:x}" * 64},
+        })
     return result
 
 
@@ -177,6 +180,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             invalid = holdout_gate()
             invalid["runtime_evidence"]["required"] = False
             with self.assertRaisesRegex(ValueError, "required deep runtime"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_small_fresh_holdout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["summary"]["safe_evaluated"] = 4
+            with self.assertRaisesRegex(ValueError, "at least 5 known-safe"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),

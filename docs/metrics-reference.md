@@ -454,8 +454,19 @@ PYTHONPATH=src python -m ide_scanner benchmark holdout \
 The holdout evaluator requires every exact artifact to be complete, keeps the
 scanner/policy/ruleset identity and hash in every result row, rejects a
 known-safe block or malicious allow, and requires evidence that the deep
-runtime path was enabled. `--allow-static-only` exists only for offline
-calibration and must not feed the publication gate.
+runtime path was enabled. The publication holdout must contain at least five
+independently labelled safe artifacts and five independently labelled harmful
+artifacts; a two-item spot check is not treated as ecosystem accuracy. The
+`--allow-static-only` option exists only for offline calibration and must not
+feed the publication gate.
+
+The production Deep Scan workflow supports 1, 4, 8, or 16 isolated worker
+shards. Scheduled runs use the 16-worker profile; an exact manual `job_id`
+should use one worker. Each shard still claims one job, downloads one exact
+artifact, runs the deep runtime path, and submits one immutable callback. The
+catalog refresh can queue up to 10,000 ranked releases, but registry
+activation still requires the independent holdout gate and a complete
+immutable release manifest.
 
 The corpus runner isolates each artifact in a killable subprocess. A timeout is
 recorded as `decision=incomplete`, never as clean. The audit reports findings,
