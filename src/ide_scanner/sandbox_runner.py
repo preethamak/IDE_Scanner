@@ -580,13 +580,22 @@ function patchFunction(object, name, handler) {
 for (const name of ['readFileSync', 'readFile', 'createReadStream']) {
   patchFunction(fs, name, (args) => record({kind: 'fs_read', api: name, path: safeString(args[0])}));
 }
-for (const name of ['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'createWriteStream']) {
+for (const name of ['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'createWriteStream', 'rmSync', 'rm', 'unlinkSync', 'unlink', 'renameSync', 'rename', 'copyFileSync', 'copyFile']) {
   patchFunction(fs, name, (args) => record({kind: 'fs_write', api: name, path: safeString(args[0])}));
 }
+try {
+  const promises = require('fs/promises');
+  for (const name of ['readFile', 'open', 'access', 'readdir', 'stat', 'lstat']) {
+    patchFunction(promises, name, (args) => record({kind: 'fs_read', api: 'fs.promises.' + name, path: safeString(args[0])}));
+  }
+  for (const name of ['writeFile', 'appendFile', 'rm', 'unlink', 'rename', 'copyFile', 'mkdir', 'chmod']) {
+    patchFunction(promises, name, (args) => record({kind: 'fs_write', api: 'fs.promises.' + name, path: safeString(args[0])}));
+  }
+} catch (_) {}
 
 try {
   const child_process = require('child_process');
-  for (const name of ['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+  for (const name of ['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork']) {
     patchFunction(child_process, name, (args) => record({kind: 'process_exec', api: name, command: safeString(args[0])}));
   }
 } catch (_) {}
@@ -763,10 +772,17 @@ def _write_entrypoint_runner(path: Path, manifest: dict[str, Any]) -> None:
     path.write_text(
         f"""
 const path = require('path');
+const {{ pathToFileURL }} = require('url');
 const target = '/target';
 const mainFile = path.resolve(target, {json.dumps(main)});
 async function run() {{
-  const mod = require(mainFile);
+  let mod;
+  try {{
+    mod = require(mainFile);
+  }} catch (error) {{
+    if (!error || !['ERR_REQUIRE_ESM', 'ERR_REQUIRE_ASYNC_MODULE'].includes(error.code)) throw error;
+    mod = await import(pathToFileURL(mainFile).href);
+  }}
   const context = {{
     subscriptions: [],
     extensionPath: target,
@@ -775,8 +791,9 @@ async function run() {{
     storageUri: {{ fsPath: path.join(process.env.HOME || target, '.workspaceStorage') }},
     secrets: {{ get: async () => undefined, store: async () => undefined, delete: async () => undefined }}
   }};
-  if (mod && typeof mod.activate === 'function') {{
-    await Promise.resolve(mod.activate(context));
+  const activate = mod && (mod.activate || (mod.default && mod.default.activate));
+  if (typeof activate === 'function') {{
+    await Promise.resolve(activate(context));
   }}
   if (global.__guardrailsProbe && typeof global.__guardrailsProbe.run === 'function') {{
     await global.__guardrailsProbe.run();
