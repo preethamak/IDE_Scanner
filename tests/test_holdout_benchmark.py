@@ -71,6 +71,19 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertFalse(result["gate"]["passed"])
             self.assertTrue(any("SHA-256" in item for item in result["artifacts"][0]["violations"]))
 
+    def test_holdout_fails_when_required_runtime_provider_is_not_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            report["extensions"][1]["analysis_coverage"]["providers"]["dynamic_sandbox"]["status"] = "failed"
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertTrue(any("provider_status" in item for item in result["artifacts"][1]["violations"]))
+
     @staticmethod
     def _corpus() -> dict:
         return {
@@ -112,19 +125,41 @@ class HoldoutBenchmarkTests(unittest.TestCase):
                     "extension_id": "safe.extension",
                     "version": "1.0.0",
                     "analysis_status": "complete",
-                    "decision": "allow",
-                    "verdict": "clean",
-                    "artifact_hash": "a" * 64,
-                    "findings": [],
+                "decision": "allow",
+                "verdict": "clean",
+                "artifact_hash": "a" * 64,
+                "analysis_coverage": {
+                    "status": "complete",
+                    "required_providers_complete": True,
+                    "providers": {"dynamic_sandbox": {
+                        "required": False,
+                        "status": "not-applicable",
+                        "execution": "policy-gated",
+                        "policy": "capability-gated-v1",
+                        "executed": False,
+                    }},
+                },
+                "findings": [],
                 },
                 {
                     "extension_id": "bad.extension",
                     "version": "2.0.0",
                     "analysis_status": "complete",
-                    "decision": "block",
-                    "verdict": "malicious",
-                    "artifact_hash": "b" * 64,
-                    "findings": [{"rule_id": "trusted-threat-feed-hit"}],
+                "decision": "block",
+                "verdict": "malicious",
+                "artifact_hash": "b" * 64,
+                "analysis_coverage": {
+                    "status": "complete",
+                    "required_providers_complete": True,
+                    "providers": {"dynamic_sandbox": {
+                        "required": True,
+                        "status": "completed",
+                        "execution": "controlled-bubblewrap",
+                        "policy": "capability-gated-v1",
+                        "executed": True,
+                    }},
+                },
+                "findings": [{"rule_id": "trusted-threat-feed-hit"}],
                 },
             ],
         }

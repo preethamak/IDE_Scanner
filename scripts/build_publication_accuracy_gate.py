@@ -288,6 +288,12 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
         decision = str(actual.get("decision") or "")
         if verdict not in VERDICTS or decision not in DECISIONS:
             raise ValueError(f"Holdout artifact {key[0]}@{key[1]} is missing a valid verdict and decision")
+        runtime_errors = _runtime_contract_errors(_object(actual.get("runtime_contract")))
+        if runtime_errors:
+            raise ValueError(
+                f"Holdout artifact {key[0]}@{key[1]} has incomplete runtime coverage: "
+                + "; ".join(runtime_errors)
+            )
         if artifact.get("label") == "known_safe":
             safe_evaluated += 1
             if decision == "block" or verdict == "malicious":
@@ -321,6 +327,32 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
         "malicious_allow_rate": round(malicious_allows / malicious_evaluated, 4) if malicious_evaluated else 0.0,
         "incomplete_required": 0,
     }
+
+
+def _runtime_contract_errors(contract: dict[str, Any]) -> list[str]:
+    if contract.get("coverage_status") != "complete" or contract.get("required_providers_complete") is not True:
+        return ["required analysis coverage is not complete"]
+    if not isinstance(contract.get("required"), bool):
+        return ["required is not boolean"]
+    if contract["required"]:
+        expected = {
+            "provider_status": "completed",
+            "execution": "controlled-bubblewrap",
+            "runtime_policy": "capability-gated-v1",
+            "executed": True,
+        }
+    else:
+        expected = {
+            "provider_status": "not-applicable",
+            "execution": "policy-gated",
+            "runtime_policy": "capability-gated-v1",
+            "executed": False,
+        }
+    return [
+        f"{field}={contract.get(field)!r} expected {value!r}"
+        for field, value in expected.items()
+        if contract.get(field) != value
+    ]
 
 
 def _identity(value: dict[str, Any]) -> dict[str, str]:

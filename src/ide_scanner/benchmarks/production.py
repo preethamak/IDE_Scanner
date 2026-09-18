@@ -110,7 +110,11 @@ def evaluate_holdout_corpus(
         if isinstance(item, dict)
     }
     rows = [
-        _evaluate_holdout_artifact(expected, actual_by_identity.get(_expected_key(expected)))
+        _evaluate_holdout_artifact(
+            expected,
+            actual_by_identity.get(_expected_key(expected)),
+            require_runtime=require_runtime,
+        )
         for expected in corpus["artifacts"]
     ]
     execution = _corpus_execution(report)
@@ -218,7 +222,12 @@ def _report_identity(report: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _evaluate_holdout_artifact(expected: dict[str, Any], actual: dict[str, Any] | None) -> dict[str, Any]:
+def _evaluate_holdout_artifact(
+    expected: dict[str, Any],
+    actual: dict[str, Any] | None,
+    *,
+    require_runtime: bool,
+) -> dict[str, Any]:
     violations: list[str] = []
     if actual is None:
         violations.append("artifact was not present in the scanner report")
@@ -228,6 +237,9 @@ def _evaluate_holdout_artifact(expected: dict[str, Any], actual: dict[str, Any] 
     verdict = str(actual.get("verdict") or "missing")
     if analysis_status != "complete":
         violations.append(f"analysis_status {analysis_status!r} is not complete")
+    runtime_contract = _runtime_contract(actual)
+    if require_runtime:
+        violations.extend(_runtime_contract_violations(runtime_contract))
     label = expected["label"]
     if label == "known_safe":
         if decision == "block" or verdict == "malicious":
@@ -241,10 +253,16 @@ def _evaluate_holdout_artifact(expected: dict[str, Any], actual: dict[str, Any] 
     actual_hash = str(actual.get("artifact_hash") or (actual.get("artifact_identity") or {}).get("sha256") or "").lower()
     if actual_hash != expected_hash:
         violations.append("artifact SHA-256 does not match the frozen holdout")
-    return _holdout_row(expected, actual, violations)
+    return _holdout_row(expected, actual, violations, runtime_contract=runtime_contract)
 
 
-def _holdout_row(expected: dict[str, Any], actual: dict[str, Any] | None, violations: list[str]) -> dict[str, Any]:
+def _holdout_row(
+    expected: dict[str, Any],
+    actual: dict[str, Any] | None,
+    violations: list[str],
+    *,
+    runtime_contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "extension_id": expected["extension_id"],
         "version": expected["version"],
@@ -262,6 +280,7 @@ def _holdout_row(expected: dict[str, Any], actual: dict[str, Any] | None, violat
             "risk_score": actual.get("risk_score"),
             "malware_score": actual.get("malware_score"),
             "artifact_sha256": actual.get("artifact_hash") or (actual.get("artifact_identity") or {}).get("sha256"),
+            "runtime_contract": runtime_contract or {},
             "rule_ids": sorted({
                 str(item.get("rule_id"))
                 for item in actual.get("findings") or []
@@ -269,6 +288,46 @@ def _holdout_row(expected: dict[str, Any], actual: dict[str, Any] | None, violat
             }),
         },
     }
+
+
+def _runtime_contract(actual: dict[str, Any]) -> dict[str, Any]:
+    coverage = actual.get("analysis_coverage") if isinstance(actual.get("analysis_coverage"), dict) else {}
+    providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+    provider = providers.get("dynamic_sandbox") if isinstance(providers.get("dynamic_sandbox"), dict) else {}
+    return {
+        "coverage_status": str(coverage.get("status") or ""),
+        "required_providers_complete": coverage.get("required_providers_complete") is True,
+        "required": provider.get("required") is True,
+        "provider_status": str(provider.get("status") or ""),
+        "execution": str(provider.get("execution") or ""),
+        "runtime_policy": str(provider.get("policy") or ""),
+        "executed": provider.get("executed") is True,
+    }
+
+
+def _runtime_contract_violations(contract: dict[str, Any]) -> list[str]:
+    if contract.get("coverage_status") != "complete" or contract.get("required_providers_complete") is not True:
+        return ["required analysis coverage is not complete"]
+    if contract.get("required") is True:
+        expected = {
+            "provider_status": "completed",
+            "execution": "controlled-bubblewrap",
+            "runtime_policy": "capability-gated-v1",
+            "executed": True,
+        }
+    else:
+        expected = {
+            "provider_status": "not-applicable",
+            "execution": "policy-gated",
+            "runtime_policy": "capability-gated-v1",
+            "executed": False,
+        }
+    mismatches = [
+        f"runtime contract {field}={contract.get(field)!r} expected {value!r}"
+        for field, value in expected.items()
+        if contract.get(field) != value
+    ]
+    return mismatches
 
 
 def _holdout_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:

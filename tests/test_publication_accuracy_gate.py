@@ -111,6 +111,15 @@ def holdout_gate() -> dict:
                 "verdict": "clean",
                 "decision": "allow",
                 "artifact_sha256": f"{index + 1:x}" * 64,
+                "runtime_contract": {
+                    "coverage_status": "complete",
+                    "required_providers_complete": True,
+                    "required": False,
+                    "provider_status": "not-applicable",
+                    "execution": "policy-gated",
+                    "runtime_policy": "capability-gated-v1",
+                    "executed": False,
+                },
             },
         })
     for index in range(5):
@@ -127,6 +136,15 @@ def holdout_gate() -> dict:
                 "verdict": "suspicious",
                 "decision": "block",
                 "artifact_sha256": f"{index + 11:x}" * 64,
+                "runtime_contract": {
+                    "coverage_status": "complete",
+                    "required_providers_complete": True,
+                    "required": True,
+                    "provider_status": "completed",
+                    "execution": "controlled-bubblewrap",
+                    "runtime_policy": "capability-gated-v1",
+                    "executed": True,
+                },
             },
         })
     return result
