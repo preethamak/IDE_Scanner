@@ -16,7 +16,7 @@ from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
-from ide_scanner.sandbox_runner import _execute_entrypoint, _extension_main, _observations_from_trace, _prepare_target, run_sandbox
+from ide_scanner.sandbox_runner import _execute_entrypoint, _extension_main, _observations_from_trace, _prepare_target, run_sandbox, sandbox_preflight
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
@@ -2526,6 +2526,29 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations["plan"]["extension_id"], "example.sandboxed")
         self.assertEqual(len(observations["plan"]["commands"]), 1)
         self.assertEqual(observations["extensions"]["example.sandboxed"], [])
+
+    def test_sandbox_preflight_requires_the_same_isolation_boundary_as_runtime(self) -> None:
+        completed = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("ide_scanner.sandbox_runner.shutil.which", return_value="/usr/bin/bwrap"), patch(
+            "ide_scanner.sandbox_runner.subprocess.run", return_value=completed,
+        ) as run:
+            result = sandbox_preflight()
+
+        self.assertEqual(result["status"], "ready")
+        command = run.call_args.args[0]
+        self.assertIn("--unshare-net", command)
+        self.assertIn("--unshare-pid", command)
+        self.assertEqual(command[-1], "/bin/true")
+
+    def test_sandbox_preflight_fails_closed_when_namespace_creation_is_denied(self) -> None:
+        completed = MagicMock(returncode=1, stdout="", stderr="Operation not permitted")
+        with patch("ide_scanner.sandbox_runner.shutil.which", return_value="/usr/bin/bwrap"), patch(
+            "ide_scanner.sandbox_runner.subprocess.run", return_value=completed,
+        ):
+            result = sandbox_preflight()
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("Operation not permitted", result["error"])
 
     def test_sandbox_runtime_exfil_requires_canary_in_network_body(self) -> None:
         with TemporaryDirectory() as tmp:

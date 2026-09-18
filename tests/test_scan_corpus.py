@@ -63,7 +63,9 @@ class ScanCorpusTests(unittest.TestCase):
                     "observed_kinds": {"example.runtime": ["secret_exfil", "network_attempt"]},
                 },
             }
-            with patch("scripts.scan_corpus._scan_one", return_value=extension):
+            with patch("scripts.scan_corpus._scan_one", return_value=extension), patch(
+                "scripts.scan_corpus.sandbox_preflight", return_value={"status": "ready"},
+            ):
                 report = run(args)
 
         dynamic = report["intelligence"]["dynamic_sandbox"]

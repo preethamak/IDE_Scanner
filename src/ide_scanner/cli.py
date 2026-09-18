@@ -17,7 +17,7 @@ from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
 from .report_bundle import iter_report_events, write_report_bundle
-from .sandbox_runner import run_sandbox
+from .sandbox_runner import run_sandbox, sandbox_preflight
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
 
@@ -76,6 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     sandbox.add_argument("--out", required=True, help="Write sandbox observations JSON to this file.")
     sandbox.add_argument("--allow-execute", action="store_true", help="Execute lifecycle scripts and the activation entrypoint, then probe registered commands and webview messages inside Bubblewrap isolation with networking disabled.")
     sandbox.add_argument("--timeout", type=int, default=15, help="Execution timeout per command in seconds.")
+
+    preflight = subparsers.add_parser(
+        "sandbox-preflight",
+        help="Verify that this worker can create the required isolated runtime namespace.",
+    )
+    preflight.add_argument("--timeout", type=int, default=10, help="Preflight timeout in seconds (1-60).")
+    preflight.add_argument("--out", "--output", dest="output", help="Write the preflight result to this file.")
 
     benchmark = subparsers.add_parser("benchmark", help="Run scanner benchmarks.")
     benchmark_subparsers = benchmark.add_subparsers(dest="benchmark_command")
@@ -239,6 +246,12 @@ def main(argv: list[str] | None = None) -> int:
         observations = run_sandbox(Path(args.path), allow_execute=args.allow_execute, timeout_seconds=args.timeout)
         _emit(observations, args.out)
         return 0
+    if args.command == "sandbox-preflight":
+        if not 1 <= args.timeout <= 60:
+            parser.error("sandbox-preflight --timeout must be between 1 and 60 seconds")
+        result = sandbox_preflight(args.timeout)
+        _emit(result, args.output)
+        return 0 if result.get("status") == "ready" else 2
     if args.command == "benchmark":
         if args.benchmark_command == "production":
             result = evaluate_production_corpus(args.corpus, args.report)

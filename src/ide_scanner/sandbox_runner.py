@@ -31,6 +31,102 @@ MAX_RUNTIME_MEMORY_BYTES = 1536 * 1024 * 1024
 MAX_RUNTIME_OPEN_FILES = 4096
 
 
+def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
+    """Verify that the production runtime can create the required namespace.
+
+    Bubblewrap being installed is not sufficient: managed workers can still
+    lack the kernel capability needed to create a network or PID namespace.
+    A tiny ``/bin/true`` probe exercises the same isolation boundary used for
+    extension execution and never runs extension code. Callers should refuse
+    runtime-enabled publication when this returns ``status != ready``.
+    """
+    if not 1 <= timeout_seconds <= 60:
+        raise ValueError("Sandbox preflight timeout must be between 1 and 60 seconds")
+    if shutil.which("bwrap") is None:
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "error": "Bubblewrap (bwrap) is not installed.",
+        }
+
+    command = [
+        "bwrap",
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-net",
+        "--unshare-pid",
+        "--unshare-uts",
+        "--unshare-ipc",
+        "--unshare-user",
+        "--uid", "65534",
+        "--gid", "65534",
+        "--cap-drop", "ALL",
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind", "/usr/local", "/usr/local",
+        "--ro-bind", "/bin", "/bin",
+        "--ro-bind", "/sbin", "/sbin",
+        "--ro-bind", "/lib", "/lib",
+        "--ro-bind", "/lib64", "/lib64",
+        "--ro-bind", "/etc", "/etc",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--clearenv",
+        "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "--",
+        "/bin/true",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "error": f"Bubblewrap preflight timed out after {timeout_seconds}s.",
+        }
+    except OSError as exc:
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "error": f"Bubblewrap preflight could not start: {exc}",
+        }
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "Bubblewrap exited unsuccessfully").strip()
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "returncode": result.returncode,
+            "error": detail[-500:],
+        }
+    return {
+        "schema_version": "guardrails.sandbox-preflight.v1",
+        "status": "ready",
+        "backend": "bubblewrap",
+        "execution": "controlled-bubblewrap",
+        "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+        "returncode": 0,
+    }
+
+
 def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 15) -> dict[str, Any]:
     if not 1 <= timeout_seconds <= MAX_RUNTIME_TIMEOUT_SECONDS:
         raise ValueError(f"Sandbox timeout must be between 1 and {MAX_RUNTIME_TIMEOUT_SECONDS} seconds")

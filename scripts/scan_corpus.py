@@ -32,6 +32,7 @@ from ide_scanner.discovery import discover_from_path, discover_local_installatio
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
 from ide_scanner.classification_policy import POLICY_VERSION  # noqa: E402
 from ide_scanner.rule_registry import RULESET_VERSION  # noqa: E402
+from ide_scanner.sandbox_runner import sandbox_preflight  # noqa: E402
 from ide_scanner.scanner import _build_report, _degzip_if_needed, _hash_file, _local_error_extension  # noqa: E402
 
 
@@ -405,6 +406,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("runtime-timeout must be between 1 and 120 seconds")
     if args.profile == "deep" and not args.runtime:
         raise ValueError("deep profile requires --runtime; use standard for static-only corpus scans")
+    if args.runtime:
+        preflight = sandbox_preflight()
+        if preflight.get("status") != "ready":
+            raise ValueError(
+                "runtime-enabled corpus scan requires a ready Bubblewrap namespace; "
+                f"preflight failed: {preflight.get('error', 'unknown runtime error')}"
+            )
     if args.checkpoint_dir and not args.manifest:
         raise ValueError("checkpoint-dir requires --manifest so exact artifact identity can be resumed safely")
     targets = _targets(args)

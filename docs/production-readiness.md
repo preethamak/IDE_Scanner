@@ -108,6 +108,20 @@ coverage. Local environments without namespace permission must report the
 runtime provider as failed/incomplete, never silently fall back to host
 execution or claim dynamic coverage.
 
+Run the worker preflight before starting a large runtime-enabled batch:
+
+```bash
+PYTHONPATH=src python -m ide_scanner.cli sandbox-preflight \
+  --out /tmp/guardrails-sandbox-preflight.json
+```
+
+The probe invokes the same Bubblewrap network and PID namespace boundary as an
+extension run, but executes only `/bin/true`. A non-zero result is an
+operational blocker: provision a worker with the required namespace
+permissions, then rerun the preflight. The corpus runner performs this check
+automatically for `--runtime` jobs and stops before dispatching artifacts when
+the worker is not capable of producing valid dynamic evidence.
+
 ## Contextual finding noise
 
 Ordinary `network-access`, `filesystem-access`, `process-execution`,
