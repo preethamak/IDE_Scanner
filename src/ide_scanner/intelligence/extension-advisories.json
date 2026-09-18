@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-19.2",
+  "snapshot_version": "2026-09-19.3",
   "entries": [
     {
       "extension_id": "nrwl.angular-console",
@@ -10,7 +10,8 @@
       "published_at": "2026-05-18T00:00:00Z",
       "policy_action": "block",
       "source": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
-      "summary": "Nx maintainers reported this exact VS Code artifact as compromised; the malicious release harvested developer credentials and established persistence before removal."
+      "source_secondary": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+      "summary": "The official Nx Console advisory identifies version 18.95.0 as compromised; Phoenix Security independently published this exact VSIX hash and reported credential harvesting and persistence."
     },
     {
       "extension_id": "formulahendry.code-runner",

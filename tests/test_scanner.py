@@ -1710,6 +1710,10 @@ class ScannerTests(unittest.TestCase):
             entries[("nrwl.angular-console", "18.95.0")]["advisory_id"],
             "GHSA-c9j4-9m59-847w",
         )
+        self.assertEqual(
+            entries[("nrwl.angular-console", "18.95.0")]["source_secondary"],
+            "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+        )
 
     def test_bundled_advisory_snapshot_contains_independently_reported_backdoors(self) -> None:
         from ide_scanner.scanner import _load_extension_advisories
