@@ -1,0 +1,113 @@
+name: Publication accuracy holdout
+
+# This workflow is intentionally separate from the deterministic regression
+# gate. It must prove performance on exact, independently labelled ecosystem
+# artifacts before a website release can be activated. It never publishes a
+# registry release by itself.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime isolation backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+      - name: Verify runtime namespace isolation
+        run: |
+          bwrap \
+            --die-with-parent \
+            --new-session \
+            --unshare-net \
+            --unshare-pid \
+            --unshare-uts \
+            --unshare-ipc \
+            --unshare-user \
+            --uid 65534 \
+            --gid 65534 \
+            --cap-drop ALL \
+            --ro-bind /usr /usr \
+            --ro-bind /bin /bin \
+            --ro-bind /sbin /sbin \
+            --ro-bind /lib /lib \
+            --ro-bind /lib64 /lib64 \
+            --ro-bind /etc /etc \
+            --proc /proc \
+            --dev /dev \
+            --tmpfs /tmp \
+            --clearenv \
+            --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --chdir / \
+            -- /usr/bin/true
+      - name: Install scanner and analyzers
+        run: python -m pip install -e '.[analysis]'
+      - name: Freeze exact external holdout
+        run: |
+          python scripts/freeze_accuracy_holdout.py \
+            --source benchmarks/holdouts/real-evidence-2026-source.json \
+            --output-dir holdout-artifacts \
+            --corpus holdout-corpus.json \
+            --manifest holdout-manifest.json
+      - name: Scan deterministic regression corpus
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --fixtures \
+            --threat-feed benchmarks/threat-feed.json \
+            --format json \
+            --out regression-fixtures.json
+          python -m ide_scanner benchmark production \
+            --corpus benchmarks/production-corpus.json \
+            --report regression-fixtures.json \
+            --fail-on-regression \
+            --out regression-gate.json
+      - name: Scan exact holdout with required runtime coverage
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python scripts/scan_corpus.py \
+            --manifest holdout-manifest.json \
+            --profile deep \
+            --runtime \
+            --runtime-timeout 20 \
+            --jobs 2 \
+            --timeout 120 \
+            --out holdout-scan.json
+          python -m ide_scanner benchmark holdout \
+            --corpus holdout-corpus.json \
+            --report holdout-scan.json \
+            --fail-on-regression \
+            --out holdout-gate.json
+      - name: Build publication accuracy gate
+        run: |
+          python scripts/build_publication_accuracy_gate.py \
+            --regression-gate regression-gate.json \
+            --holdout-gate holdout-gate.json \
+            --holdout-corpus holdout-corpus.json \
+            --out publication-accuracy-gate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scanner-publication-accuracy-gate
+          path: |
+            regression-fixtures.json
+            regression-gate.json
+            holdout-corpus.json
+            holdout-manifest.json
+            holdout-scan.json
+            holdout-gate.json
+            publication-accuracy-gate.json
+          retention-days: 30
+          if-no-files-found: warn
