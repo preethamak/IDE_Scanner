@@ -186,3 +186,47 @@ def test_generated_bundle_keeps_capabilities_without_false_import_edges():
     assert module["imports"] == []
     coverage = module_flow_coverage([module], {"dist/extension.js"})
     assert coverage["unresolved_executable_import_count"] == 0
+
+
+def test_comments_and_jsdoc_examples_are_not_import_graph_edges():
+    module = module_summary(
+        "dist/extension.js",
+        """
+        /** Usage: require('./docs-only') */
+        // import './line-comment-only';
+        /* require('./block-comment-only') */
+        const helper = require('./live-helper');
+        """,
+    )
+
+    assert module["imports"] == ["dist/live-helper"]
+
+
+def test_typescript_declaration_import_is_not_executable_coverage():
+    modules = [module_summary("extension.js", "import '../types/client.d.ts';")]
+    coverage = module_flow_coverage(modules, {"extension.js"})
+
+    assert coverage["unresolved_executable_import_count"] == 0
+
+
+def test_template_documentation_and_regex_literals_do_not_create_edges():
+    module = module_summary(
+        "extension.js",
+        """
+        const docs = `Usage: import('./docs-only')`;
+        const pattern = /`import\\('./regex-only'\\)`/;
+        const live = require('./live');
+        """,
+    )
+
+    assert module["imports"] == ["live"]
+
+
+def test_missing_import_in_try_catch_fallback_is_not_incomplete():
+    modules = [
+        module_summary("main.js", "try { require('./out/extension.js'); } catch { require('./dist/extension.js'); }"),
+        module_summary("dist/extension.js", "exports.activate = () => {}"),
+    ]
+    coverage = module_flow_coverage(modules, {"main.js"})
+
+    assert coverage["unresolved_executable_import_count"] == 0

@@ -3648,11 +3648,16 @@ def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
     """
     rule_ids = {finding.rule_id for finding in findings}
     blocking = rule_ids & (BLOCKING_CORRELATED_RULES | BLOCKING_OBSERVED_RULES)
+    automatic_activation = bool(rule_ids & {"broad-activation", "startup-activation", "sensitive-activation"})
     # A filename/token reference is only exposure evidence. It is deliberately
     # excluded here: a downloaded tool plus a nearby `.env` or credential label
     # is common in developer tooling and does not prove that the secret is used.
-    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS)
-    automatic_activation = bool(rule_ids & {"broad-activation", "startup-activation", "sensitive-activation"})
+    # A credential prompt is different only when the extension is automatically
+    # active: startup + credential capture + download/execute is a preventive
+    # abuse chain even if the provider that would prove the final sink failed.
+    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS) or (
+        automatic_activation and "credential-inputbox-prompt" in rule_ids
+    )
     if "download-and-execute" in rule_ids and credential_signal and automatic_activation:
         blocking.add("download-and-execute")
     return blocking

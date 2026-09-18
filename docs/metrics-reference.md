@@ -386,6 +386,19 @@ wrapped VSIX it is the hash of the unwrapped VSIX bytes, matching
 row is checked against the scanned extension identity and canonical artifact
 hash; a mismatch is an explicit incomplete result and is never routed as clean.
 
+For a private directory of VSIX files, generate that manifest without using
+filenames as identity:
+
+```bash
+PYTHONPATH=src python scripts/build_corpus_manifest.py \
+  --path /secure/guardrails-corpus-v1/artifacts \
+  --out /secure/guardrails-corpus-v1/corpus.json
+```
+
+The builder reads only bounded `package.json` metadata and canonical hashes;
+it never installs or executes an artifact. Combine it with `scan_corpus.py
+--checkpoint-dir` to resume a large scan after worker failures.
+
 For public registry activation, the deterministic production gate is only the
 regression half of the evidence. Build a publication gate from that result and
 a separate, frozen, exact-artifact holdout:
