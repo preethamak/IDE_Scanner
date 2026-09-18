@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.18-policy-v3-calibration.14"
+RULESET_VERSION = "2026.09.18-policy-v3-calibration.15"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -147,8 +147,8 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "evidence_class": "correlated",
         "default_severity": "HIGH",
         "description": "Detects remote VSIX download, local write, and IDE installation without visible integrity verification.",
-        "recommendation": "Require explicit approval and verify the VSIX through an independent trusted hash or signature before installation.",
-        "false_positive_notes": "Legitimate enterprise updaters may install extensions, but should use independently trusted integrity metadata and visible approval.",
+        "recommendation": "Review the download source and require an independent trusted hash or signature plus explicit user approval before installation.",
+        "false_positive_notes": "Legitimate IDE tooling and enterprise updaters may install extensions. This rule is review evidence unless it is correlated with direct credential transfer, destructive behavior, or observed execution abuse.",
         "benchmark_tags": ["download", "extension-install", "supply-chain"],
     },
     "lifecycle-script": {

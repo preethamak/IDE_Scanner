@@ -146,7 +146,11 @@ CORRELATED_RULES = {
     "obfuscated-credential-harvesting-exfiltration",
     "supply-chain-dropper-chain",
 }
-BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {"download-and-execute"}
+# A remote extension update without visible integrity verification is a serious
+# supply-chain review signal, but legitimate extension managers use this shape.
+# It becomes blocking only when another high-confidence abuse rule proves the
+# payload is tied to credential theft, destructive behavior, or execution abuse.
+BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {"download-and-execute", "remote-vsix-install-chain"}
 BLOCKING_OBSERVED_RULES = {
     "observed-destructive-behavior",
     "observed-download-execute",
@@ -154,12 +158,13 @@ BLOCKING_OBSERVED_RULES = {
     "observed-secret-exfil",
 }
 DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS = {
-    "credential-command-control",
-    "credential-config-key",
-    "credential-config-update",
-    "credential-global-state-key",
-    "credential-global-state-storage",
-    "credential-inputbox-prompt",
+    "credential-dataflow-to-file",
+    "credential-dataflow-to-network",
+    "credential-dataflow-to-process",
+    "credential-exfiltration-chain",
+    "credential-harvesting-exfiltration",
+    "credential-identifier-flow-to-network",
+    "obfuscated-credential-harvesting-exfiltration",
 }
 CAPABILITY_RULES = {
     "agent-filesystem-tool",
@@ -2009,7 +2014,7 @@ def _add_code_findings(
             0.9,
             "Code downloads a VSIX, writes it locally, and invokes the IDE extension installer without visible integrity verification.",
             [rel],
-            "Block silent remote extension installation or require an independently trusted signature/hash and explicit user approval.",
+            "Review the download source and require an independently trusted signature/hash plus explicit user approval before installation.",
             {
                 "evidence_class": "correlated",
                 "correlation": "same-file-semantic-chain",
@@ -3574,9 +3579,10 @@ def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
     """
     rule_ids = {finding.rule_id for finding in findings}
     blocking = rule_ids & (BLOCKING_CORRELATED_RULES | BLOCKING_OBSERVED_RULES)
-    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS) or any(
-        rule_id.startswith("secret-reference:") for rule_id in rule_ids
-    )
+    # A filename/token reference is only exposure evidence. It is deliberately
+    # excluded here: a downloaded tool plus a nearby `.env` or credential label
+    # is common in developer tooling and does not prove that the secret is used.
+    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS)
     automatic_activation = bool(rule_ids & {"broad-activation", "startup-activation", "sensitive-activation"})
     if "download-and-execute" in rule_ids and credential_signal and automatic_activation:
         blocking.add("download-and-execute")
@@ -4132,6 +4138,12 @@ def _static_provider_targets(
 def _is_generated_code_blob(rel: str, text: str) -> bool:
     normalized = rel.replace("\\", "/").lower()
     if normalized.endswith((".min.js", ".min.mjs", ".bundle.js", ".bundle.mjs", ".chunk.js", ".chunk.mjs")):
+        return True
+    # Webpack keeps readable line breaks in development-mode bundles, so line
+    # density alone misses large generated entrypoints such as CMake Tools.
+    # Their module-table markers are stable enough to suppress false import
+    # edges while the AST/raw-text analyzers still inspect the bundle itself.
+    if len(text) >= 1_048_576 and ("webpackBootstrap" in text[:8_192] or "__webpack_modules__" in text[:65_536]):
         return True
     newline_count = text.count("\n")
     if len(text) >= GENERATED_BLOB_BYTES:

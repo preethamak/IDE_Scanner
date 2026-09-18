@@ -1623,6 +1623,7 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(_is_generated_code_blob("dist/web.js", minified))
         self.assertTrue(_is_generated_code_blob("out/extension.js", medium_minified))
         self.assertTrue(_is_generated_code_blob("out/extension.js", large_compiled))
+        self.assertTrue(_is_generated_code_blob("dist/main.js", "/******/ (() => { // webpackBootstrap\n" + ("const x=1;\n" * 100_000)))
         self.assertFalse(_is_generated_code_blob("src/extension.js", "const x=1;\n" * 100))
 
     def test_semgrep_scope_excludes_large_and_minified_bundles_explicitly(self) -> None:
@@ -2038,7 +2039,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
 
-    def test_unverified_remote_vsix_install_is_blocked(self) -> None:
+    def test_unverified_remote_vsix_install_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -2055,7 +2056,7 @@ class ScannerTests(unittest.TestCase):
 
         finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
         self.assertEqual(report.verdict, "suspicious")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertEqual(report.malware_authority, "non_authoritative")
         self.assertEqual(finding.evidence["sink"], "workbench.extensions.installExtension")
         self.assertFalse(finding.evidence["integrity_verification"])
@@ -2078,7 +2079,7 @@ class ScannerTests(unittest.TestCase):
 
         self.assertNotIn("remote-vsix-install-chain", {item.rule_id for item in report.findings})
 
-    def test_cross_file_import_connected_remote_vsix_install_is_blocked(self) -> None:
+    def test_cross_file_import_connected_remote_vsix_install_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -2093,11 +2094,11 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         finding = next(item for item in report.findings if item.rule_id == "remote-vsix-install-chain")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertEqual(finding.evidence["correlation"], "cross-file-import-connected-semantic-chain")
         self.assertEqual(finding.evidence["stages"]["download"], ["network.js"])
 
-    def test_automatic_credential_aware_download_execute_is_preventively_blocked(self) -> None:
+    def test_automatic_credential_prompt_download_execute_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -2117,11 +2118,11 @@ class ScannerTests(unittest.TestCase):
 
         rule_ids = {finding.rule_id for finding in report.findings}
         self.assertEqual(report.verdict, "suspicious")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", rule_ids)
         self.assertIn("credential-inputbox-prompt", rule_ids)
         self.assertIn("broad-activation", rule_ids)
-        self.assertIn("preventive policy decision", report.decision_reason)
+        self.assertNotIn("preventive policy decision", report.decision_reason)
 
     def test_destructured_process_alias_cannot_bypass_download_execute_chain(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -2143,7 +2144,7 @@ class ScannerTests(unittest.TestCase):
 
         rule_ids = {finding.rule_id for finding in report.findings}
         self.assertEqual(report.verdict, "suspicious")
-        self.assertEqual(report.decision, "block")
+        self.assertEqual(report.decision, "review")
         self.assertIn("process-execution", rule_ids)
         self.assertIn("download-and-execute", rule_ids)
 
