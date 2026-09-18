@@ -17,14 +17,26 @@ def main() -> int:
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--publication-url", default=DEFAULT_PUBLICATION_URL)
     parser.add_argument("--include-published", action="store_true", help="Rescan rows that already have a valid canonical publication.")
-    parser.add_argument("--require-current-build", action="store_true", help="Treat publications from earlier scanner builds as pending.")
+    parser.add_argument(
+        "--require-current-build",
+        action="store_true",
+        help="Deprecated compatibility flag; current-build matching is now the default.",
+    )
+    parser.add_argument(
+        "--allow-stale-build",
+        action="store_true",
+        help="Allow an older scanner build to satisfy an existing publication. Use only for historical reports.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.require_current_build and args.allow_stale_build:
+        parser.error("--require-current-build and --allow-stale-build are mutually exclusive")
 
     corpus = json.loads(args.results.read_text(encoding="utf-8"))
     rows = list(corpus.get("rows") or [])
     current_build = git_output("rev-parse", "HEAD")
-    published = {} if args.include_published else published_artifacts(args.publication_url, current_build if args.require_current_build else None)
+    required_build = None if args.allow_stale_build else current_build
+    published = {} if args.include_published else published_artifacts(args.publication_url, required_build)
     pending = rows_to_dispatch(rows, published)
     for row in pending:
         command = workflow_command(row)
