@@ -22,6 +22,31 @@ class ReportAuditTests(unittest.TestCase):
         self.assertEqual(result["rule_observations"][0]["rule_id"], "dynamic-code-loading")
         self.assertTrue(result["rule_observations"][0]["mixed_outcome"])
         self.assertEqual(result["rule_observations"][0]["finding_count"], 2)
+        self.assertEqual(result["rule_observations"][0]["extension_count"], 2)
+        self.assertEqual(result["rule_observations"][0]["actionability_counts"], {"contextual": 1, "review": 1})
+
+    def test_rule_outcomes_are_deduplicated_per_extension(self) -> None:
+        result = audit_report({
+            "extensions": [
+                {
+                    "extension_id": "publisher.clean",
+                    "version": "1.0.0",
+                    "verdict": "clean",
+                    "findings": [
+                        {"rule_id": "network-access", "evidence": {"evidence_class": "weak"}},
+                        {"rule_id": "network-access", "evidence": {"evidence_class": "weak"}},
+                    ],
+                },
+            ],
+        })
+
+        observation = result["rule_observations"][0]
+        self.assertEqual(observation["finding_count"], 2)
+        self.assertEqual(observation["extension_count"], 1)
+        self.assertEqual(observation["clean_extension_count"], 1)
+        self.assertEqual(observation["review_or_higher_extension_count"], 0)
+        self.assertEqual(observation["routing_outcome_counts"], {"clean": 1})
+        self.assertEqual(observation["actionability_counts"], {"contextual": 2})
 
     def test_labels_report_routing_mismatches_without_claiming_malware_accuracy(self) -> None:
         result = audit_report({

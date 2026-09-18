@@ -12,7 +12,10 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+from ide_scanner.classification_policy import finding_actionability
 
 
 def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
@@ -26,7 +29,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
     routing_counts: Counter[str] = Counter()
     rule_counts: Counter[str] = Counter()
     rule_extensions: dict[str, set[str]] = defaultdict(set)
-    rule_verdicts: dict[str, Counter[str]] = defaultdict(Counter)
+    rule_extension_outcomes: dict[str, dict[str, str]] = defaultdict(dict)
     rule_evidence: dict[str, Counter[str]] = defaultdict(Counter)
     rule_actionability: dict[str, Counter[str]] = defaultdict(Counter)
     extension_rows: list[dict[str, Any]] = []
@@ -56,10 +59,13 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             evidence = raw_finding.get("evidence")
             evidence = evidence if isinstance(evidence, dict) else {}
             evidence_class = str(evidence.get("evidence_class") or "unknown")
-            actionability = str(raw_finding.get("actionability") or evidence.get("actionability") or "unknown")
+            actionability = _finding_actionability(raw_finding, rule_id, evidence)
             rule_counts[rule_id] += 1
             rule_extensions[rule_id].add(extension_id)
-            rule_verdicts[rule_id][routing_outcome] += 1
+            # An extension may legitimately emit the same rule many times. A
+            # calibration report must measure how many distinct extensions were
+            # routed by that rule, not how many duplicate findings it produced.
+            rule_extension_outcomes[rule_id][extension_id] = routing_outcome
             rule_evidence[rule_id][evidence_class] += 1
             rule_actionability[rule_id][actionability] += 1
             finding_rule_ids[rule_id] += 1
@@ -77,7 +83,8 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
 
     rules = []
     for rule_id, finding_count in rule_counts.most_common():
-        verdicts = rule_verdicts[rule_id]
+        outcomes = rule_extension_outcomes[rule_id].values()
+        verdicts = Counter(outcomes)
         clean_extensions = verdicts.get("clean", 0)
         review_extensions = sum(verdicts.get(value, 0) for value in ("review", "suspicious", "malicious"))
         rules.append({
@@ -112,6 +119,14 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
     if labels is not None:
         result["label_metrics"] = _label_metrics(extension_rows, labels)
     return result
+
+
+def _finding_actionability(raw_finding: dict[str, Any], rule_id: str, evidence: dict[str, Any]) -> str:
+    """Resolve actionability exactly as the scanner does for serialized findings."""
+    serialized = str(raw_finding.get("actionability") or evidence.get("actionability") or "").strip().lower()
+    if serialized in {"contextual", "low", "review", "block"}:
+        return serialized
+    return str(finding_actionability(SimpleNamespace(rule_id=rule_id, evidence=evidence)))
 
 
 def _label_metrics(rows: list[dict[str, Any]], labels: dict[str, str]) -> dict[str, Any]:

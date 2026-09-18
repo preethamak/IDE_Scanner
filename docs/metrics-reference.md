@@ -474,10 +474,12 @@ activation still requires the independent holdout gate and a complete
 immutable release manifest.
 
 The corpus runner isolates each artifact in a killable subprocess. A timeout is
-recorded as `decision=incomplete`, never as clean. The audit reports findings,
-affected extensions, completed-versus-incomplete routing, evidence classes,
-actionability, and labeled routing mismatches. A mixed-outcome rule is a
-calibration candidate, not proof of a false positive; adjudicate the cited
+recorded as `decision=incomplete`, never as clean. The audit reports raw finding
+volume separately from distinct affected extensions, completed-versus-incomplete
+routing, evidence classes, actionability, and labeled routing mismatches. Rule
+routing counts are deduplicated per extension, so repeated matches in one bundle
+cannot make a rule look more broadly harmful than it is. A mixed-outcome rule is
+a calibration candidate, not proof of a false positive; adjudicate the cited
 artifact before changing policy. Computed-call AST noise is aggregated to one
 contextual finding per file with a count and representative examples.
 
