@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.18-policy-v3-calibration.15"
+RULESET_VERSION = "2026.09.18-policy-v3-calibration.16"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -139,6 +139,7 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "default_severity": "HIGH",
         "description": "Detects source files that can download content and execute local processes.",
         "recommendation": "Verify download source, integrity checks, and execution purpose.",
+        "false_positive_notes": "Legitimate language servers and tool installers may use this shape. Keep it review-worthy unless direct credential transfer, destructive behavior, independent threat intelligence, or runtime abuse evidence is established.",
         "benchmark_tags": ["download", "execution", "network"],
     },
     "remote-vsix-install-chain": {

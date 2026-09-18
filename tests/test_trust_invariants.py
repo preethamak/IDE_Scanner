@@ -263,7 +263,7 @@ class CoverageHonestyTests(unittest.TestCase):
         self.assertEqual(report.decision, "block")
         self.assertIn("known-bad", report.decision_reason)
 
-    def test_preventive_block_evidence_remains_blocked_when_analysis_is_incomplete(self) -> None:
+    def test_credential_prompt_without_dataflow_remains_incomplete_when_analysis_is_incomplete(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_ext(
@@ -292,8 +292,8 @@ class CoverageHonestyTests(unittest.TestCase):
                 report = scan_extension(root)
         self.assertEqual(report.verdict, "suspicious")
         self.assertEqual(report.analysis_status, "incomplete")
-        self.assertEqual(report.decision, "block")
-        self.assertIn("preventive policy", report.decision_reason)
+        self.assertEqual(report.decision, "incomplete")
+        self.assertNotIn("preventive policy", report.decision_reason)
 
     def test_readme_preview_is_captured_without_treating_it_as_executable_code(self) -> None:
         with TemporaryDirectory() as tmp:

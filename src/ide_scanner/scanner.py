@@ -3643,22 +3643,20 @@ def _preventive_blocking_rule_ids(findings: list[Finding]) -> set[str]:
 
     Generic download-and-execute behavior is intentionally insufficient by itself:
     legitimate language servers and tool installers can look similar. It becomes a
-    preventive block only when automatic activation and credential handling occur in
-    the same extension. Confirmed intelligence is handled separately by verdict.
+    a preventive block only when the scanner establishes a direct credential
+    dataflow or another independent abuse chain. A credential prompt is an
+    exposure signal, not proof that the entered value reaches the downloaded
+    process. Confirmed intelligence is handled separately by verdict.
     """
     rule_ids = {finding.rule_id for finding in findings}
     blocking = rule_ids & (BLOCKING_CORRELATED_RULES | BLOCKING_OBSERVED_RULES)
-    automatic_activation = bool(rule_ids & {"broad-activation", "startup-activation", "sensitive-activation"})
     # A filename/token reference is only exposure evidence. It is deliberately
     # excluded here: a downloaded tool plus a nearby `.env` or credential label
     # is common in developer tooling and does not prove that the secret is used.
-    # A credential prompt is different only when the extension is automatically
-    # active: startup + credential capture + download/execute is a preventive
-    # abuse chain even if the provider that would prove the final sink failed.
-    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS) or (
-        automatic_activation and "credential-inputbox-prompt" in rule_ids
-    )
-    if "download-and-execute" in rule_ids and credential_signal and automatic_activation:
+    # A credential prompt remains contextual until a source-to-sink rule proves
+    # that the value reaches a file, network, or process sink.
+    credential_signal = bool(rule_ids & DOWNLOAD_EXECUTE_CREDENTIAL_SIGNALS)
+    if "download-and-execute" in rule_ids and credential_signal:
         blocking.add("download-and-execute")
     return blocking
 
