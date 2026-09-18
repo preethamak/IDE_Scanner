@@ -229,6 +229,22 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report["summary"]["by_analysis_status"], {"failed": 1})
         self.assertIn("0 clean, 1 incomplete", report["human_summary"][0])
 
+    def test_isolated_local_failure_preserves_manifest_identity(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"timed-out","version":"2.3.4"}',
+                encoding="utf-8",
+            )
+
+            extension = _local_error_extension(root, "vscode", "worker timeout")
+
+        self.assertEqual(extension.extension_id, "example.timed-out")
+        self.assertEqual(extension.publisher, "example")
+        self.assertEqual(extension.version, "2.3.4")
+        self.assertEqual(extension.analysis_status, "incomplete")
+        self.assertEqual(extension.decision, "incomplete")
+
     def test_parallel_local_scan_preserves_serial_results(self) -> None:
         serial = scan_targets(include_fixtures=True, include_posture=False, jobs=1)
         parallel = scan_targets(include_fixtures=True, include_posture=False, jobs=2)

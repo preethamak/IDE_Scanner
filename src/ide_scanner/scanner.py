@@ -1002,13 +1002,23 @@ def _local_error_extension(path: Path, source: str, message: str) -> ExtensionRe
         "manifest_validation": {"valid": False, "status": "scan-aborted"},
         "providers": {},
     }
-    name = path.name or "unknown"
+    # Preserve trustworthy local identity even when the isolated worker dies
+    # before it can produce a normal report. This is deliberately bounded and
+    # manifest-only: it never turns a failed scan into a successful one and
+    # does not inspect executable code on the failure path.
+    manifest, _manifest_status = _read_manifest_status(path / "package.json") if path.is_dir() else ({}, "missing")
+    publisher = str(manifest.get("publisher") or "").strip()
+    package_name = str(manifest.get("name") or "").strip()
+    version = str(manifest.get("version") or "").strip()
+    identity = f"{publisher}.{package_name}" if publisher and package_name else ""
+    name = package_name or path.name or "unknown"
+    extension_id = identity or f"unknown.{name}"
     return ExtensionReport(
         instance_id=_stable_id(str(path)),
-        extension_id=f"unknown.{name}",
+        extension_id=extension_id,
         name=name,
-        publisher="unknown",
-        version="unknown",
+        publisher=publisher or "unknown",
+        version=version or "unknown",
         description="",
         repository="",
         install_path=str(path),
