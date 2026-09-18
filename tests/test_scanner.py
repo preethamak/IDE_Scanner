@@ -1553,6 +1553,25 @@ class ScannerTests(unittest.TestCase):
             "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
         )
 
+    def test_bundled_advisory_snapshot_contains_independently_reported_backdoors(self) -> None:
+        from ide_scanner.scanner import _load_extension_advisories
+
+        entries = {
+            (entry["extension_id"].lower(), entry["version"]): entry
+            for entry in _load_extension_advisories()["entries"]
+        }
+        expected = {
+            ("doriann612.remote-text-fetcher", "0.0.1"): "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
+            ("noahbit.api-reactor", "0.0.1"): "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+            ("koltinsmith.project-restructure-nodejs", "1.0.0"): "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
+            ("sunsethightlight.sunset-highlight", "0.0.2"): "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
+            ("jumbo.jumbokey", "1.0.2"): "9ea98af53a6163497ad92860e60e4c767a72d4199e42ae414876bff469c208bb",
+            ("jumbocore.jumbos", "1.0.0"): "63688d7765e52cf9800ea0dfc296bc86a448d241108c17c564709a6a844816fc",
+        }
+        for key, digest in expected.items():
+            self.assertEqual(entries[key]["artifact_sha256"], digest)
+            self.assertEqual(entries[key]["policy_action"], "block")
+
     def test_missing_required_extension_advisory_snapshot_fails_closed(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "extension"

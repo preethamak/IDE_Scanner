@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-18.2",
+  "snapshot_version": "2026-09-19.1",
   "entries": [
     {
       "extension_id": "formulahendry.code-runner",
@@ -45,6 +45,72 @@
       "policy_action": "block",
       "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
       "summary": "Knostic reported this exact Open VSX artifact as malicious after source validation, including Google OAuth refresh-token theft, full GCP scope access, and proxying of AI API use."
+    },
+    {
+      "extension_id": "DorianN612.remote-text-fetcher",
+      "version": "0.0.1",
+      "artifact_sha256": "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
+      "advisory_id": "KNOSTIC-REMOTE-TEXT-FETCHER-2026-0.0.1",
+      "severity": "CRITICAL",
+      "published_at": "2026-06-02T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/new-malicious-vs-code-extension-backdoor-remote-text-fetcher",
+      "summary": "Knostic reported this exact Marketplace artifact as a startup backdoor that fetches operator-controlled text, decodes it, and executes it through child_process.exec."
+    },
+    {
+      "extension_id": "NoahBit.api-reactor",
+      "version": "0.0.1",
+      "artifact_sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+      "advisory_id": "KNOSTIC-API-REACTOR-2026-0.0.1",
+      "severity": "CRITICAL",
+      "published_at": "2026-06-29T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
+      "summary": "Knostic reported this exact Marketplace artifact as a source/binary-divergent startup backdoor with hidden remote command retrieval and child_process.exec."
+    },
+    {
+      "extension_id": "KoltinSmith.project-restructure-nodejs",
+      "version": "1.0.0",
+      "artifact_sha256": "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
+      "advisory_id": "KNOSTIC-KOLTINSMITH-2026-1.0.0",
+      "severity": "CRITICAL",
+      "published_at": "2026-05-20T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+      "summary": "Knostic reported this exact Marketplace artifact as an auto-starting environment-data exfiltration and remote-eval backdoor."
+    },
+    {
+      "extension_id": "sunsetHightlight.sunset-highlight",
+      "version": "0.0.2",
+      "artifact_sha256": "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
+      "advisory_id": "KNOSTIC-SUNSETHIGHLIGHT-2026-0.0.2",
+      "severity": "CRITICAL",
+      "published_at": "2026-05-20T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+      "summary": "Knostic reported this exact Marketplace artifact as an environment-exfiltration backdoor with hidden encrypted second-stage execution."
+    },
+    {
+      "extension_id": "Jumbo.JumboKey",
+      "version": "1.0.2",
+      "artifact_sha256": "9ea98af53a6163497ad92860e60e4c767a72d4199e42ae414876bff469c208bb",
+      "advisory_id": "KNOSTIC-JUMBOKEY-2026-1.0.2",
+      "severity": "CRITICAL",
+      "published_at": "2026-07-21T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/analyzing-two-malicious-vs-code-extensions-hidden-behind-a-wordpress-tool",
+      "summary": "Knostic reported this exact Marketplace artifact as an auto-starting downloader that launches an external MSI installer."
+    },
+    {
+      "extension_id": "JumboCore.Jumbos",
+      "version": "1.0.0",
+      "artifact_sha256": "63688d7765e52cf9800ea0dfc296bc86a448d241108c17c564709a6a844816fc",
+      "advisory_id": "KNOSTIC-JUMBOCORE-2026-1.0.0",
+      "severity": "CRITICAL",
+      "published_at": "2026-07-21T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/analyzing-two-malicious-vs-code-extensions-hidden-behind-a-wordpress-tool",
+      "summary": "Knostic reported this exact Marketplace artifact as an auto-starting downloader that launches an external MSI installer."
     }
   ]
 }
