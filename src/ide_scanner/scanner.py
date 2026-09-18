@@ -1045,19 +1045,27 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
 
 
 def _runtime_required_for_report(report: ExtensionReport) -> bool:
-    """Require runtime coverage for behavior that static capability labels cannot settle.
+    """Require runtime coverage for every executable extension entrypoint.
 
-    Activation hooks, ordinary filesystem reads, and IDE contributions are
-    common in themes and regular extensions. They remain visible static
-    evidence, but do not by themselves justify executing an artifact. Agent,
-    credential, lifecycle, network, process, and dynamic-code surfaces do.
+    A declared ``main``/``browser`` entrypoint is executable behavior even when
+    static capability extraction does not recognize a sensitive API. Requiring
+    activation coverage for it prevents a missed capability label from turning
+    an unseen runtime path into a false ``not-applicable`` result. Truly
+    non-executable packages such as themes remain policy-gated. The explicit
+    capability set is retained for artifacts that ship executable behavior
+    without a declared entrypoint, such as native or WASM payloads.
     """
     capability_ids = {
         str(item.get("id") or "")
         for item in report.capabilities
         if isinstance(item, dict)
     }
-    return bool(capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES)
+    coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
+    entrypoints = coverage.get("declared_entrypoints")
+    return bool(
+        (isinstance(entrypoints, list) and any(str(item).strip() for item in entrypoints))
+        or capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES
+    )
 
 
 def _apply_local_dynamic_runtime(

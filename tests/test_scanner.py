@@ -1568,6 +1568,21 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("wasm-loader", {finding.rule_id for finding in report.findings})
         self.assertIn("wasm_runtime", {str(item.get("id")) for item in report.capabilities})
 
+    def test_declared_activation_entrypoint_requires_runtime_even_without_sensitive_api_labels(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"ordinary-runtime","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports.activate = () => {};", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertTrue(report.analysis_coverage["declared_entrypoints"])
+        self.assertTrue(_runtime_required_for_report(report))
+
     def test_known_bad_hash_feed_is_authoritative_malware(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2692,6 +2707,7 @@ class ScannerTests(unittest.TestCase):
                 _prepare_target(archive, root / "extracted")
 
     def test_sandbox_runner_runtime_instrumentation_observes_secret_exfil(self) -> None:
+        self._skip_if_runtime_backend_unavailable()
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -2739,6 +2755,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("secret_exfil", {item["kind"] for item in observations})
 
     def test_sandbox_runner_probes_registered_commands_and_webview_messages(self) -> None:
+        self._skip_if_runtime_backend_unavailable()
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -2772,6 +2789,11 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("runtime_webview_message_probe", kinds)
         self.assertIn("filesystem_write", kinds)
         self.assertIn("secret_exfil", kinds)
+
+    def _skip_if_runtime_backend_unavailable(self) -> None:
+        preflight = sandbox_preflight()
+        if preflight.get("status") != "ready":
+            self.skipTest(f"controlled runtime backend unavailable: {preflight.get('error', 'unknown error')}")
 
     def test_repo_binary_artifacts_metric_fires_for_committed_native_binary(self) -> None:
         with TemporaryDirectory() as tmp:

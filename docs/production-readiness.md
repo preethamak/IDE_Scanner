@@ -86,12 +86,13 @@ restricted production workers without turning local fixtures into holdout truth.
 
 `scan --runtime` applies the Bubblewrap runner to both local inputs (VSIX files,
 installed extension directories, and uploaded artifacts) and exact Marketplace
-downloads. The runtime pass is capability-gated: agent, credential, lifecycle,
-native-module, network, process, dynamic-code, and WebAssembly surfaces require execution coverage; ordinary
-activation, IDE contributions, and filesystem capability alone remain static
-review context. Themes therefore do not receive a meaningless runtime verdict,
-while an agentic, process-capable, or WASM-bearing artifact cannot be published as complete
-when Bubblewrap fails, times out, or returns malformed observations.
+downloads. The runtime pass is entrypoint-gated: every package with a declared
+`main` or `browser` activation entrypoint requires execution coverage, as do
+agent, credential, lifecycle, native-module, network, process, dynamic-code,
+and WebAssembly surfaces discovered without an entrypoint. This prevents a
+missed static capability label from turning an unseen activation path into a
+false `not-applicable` result. Truly non-executable packages such as themes
+remain policy-gated and do not receive a meaningless runtime verdict.
 
 The runtime child inherits bounded address space, CPU time, open-file count, and
 file-size limits in addition to the wall-clock timeout. A limit breach is
