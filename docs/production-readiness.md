@@ -87,11 +87,16 @@ restricted production workers without turning local fixtures into holdout truth.
 `scan --runtime` applies the Bubblewrap runner to both local inputs (VSIX files,
 installed extension directories, and uploaded artifacts) and exact Marketplace
 downloads. The runtime pass is capability-gated: agent, credential, lifecycle,
-network, process, and dynamic-code surfaces require execution coverage; ordinary
+network, process, dynamic-code, and WebAssembly surfaces require execution coverage; ordinary
 activation, IDE contributions, and filesystem capability alone remain static
 review context. Themes therefore do not receive a meaningless runtime verdict,
-while an agentic or process-capable artifact cannot be published as complete
+while an agentic, process-capable, or WASM-bearing artifact cannot be published as complete
 when Bubblewrap fails, times out, or returns malformed observations.
+
+WASM is treated as executable capability rather than malware evidence. A
+`wasm-loader` finding is emitted only when executable text visibly loads or
+instantiates a packaged module; the module itself still requires the controlled
+runtime pass so opaque or obfuscated behavior is not silently treated as safe.
 
 The website Deep Scan workflow invokes the same path with `--profile deep
 --runtime`; its callback and publication checks require complete required-provider

@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.18-policy-v3-calibration.17"
+RULESET_VERSION = "2026.09.18-policy-v3-calibration.18"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -492,6 +492,7 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "sensitive-activation": ("activation", "capability", "LOW", "The extension activates on a security-sensitive IDE event."),
     "startup-activation": ("activation", "capability", "LOW", "The extension activates automatically after IDE startup."),
     "unpinned-dependency": ("dependency", "dependency", "LOW", "A runtime dependency uses an unpinned version specifier."),
+    "wasm-loader": ("artifact", "capability", "MEDIUM", "The extension ships WebAssembly and executable code that loads or instantiates the module."),
     "webview-csp-missing": ("webview", "capability", "MEDIUM", "A detected webview lacks a Content-Security-Policy meta tag."),
     "webview-csp-unsafe-directive": ("webview", "capability", "MEDIUM", "A webview CSP contains an unsafe directive."),
     "workflow-token-permissions-broad": ("repository-posture", "posture", "LOW", "A workflow grants broad token permissions or relies on implicit defaults."),

@@ -101,6 +101,11 @@ EXEC_TEXT_EXTS = {".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ps1", ".py", 
 DOCUMENTATION_PREVIEW_EXTS = {".md", ".markdown", ".rst"}
 BINARY_RISK_EXTS = {".dll", ".dylib", ".exe", ".node", ".so"}
 PACKED_RISK_EXTS = {".7z", ".asar", ".gz", ".jar", ".rar", ".tar", ".tgz", ".war", ".zip"}
+WASM_LOADER_RE = re.compile(
+    r"\bWebAssembly\.(?:instantiate|instantiateStreaming|compile|compileStreaming|Module)\b"
+    r"|(?:readFile(?:Sync)?|fetch|request|arrayBuffer)\s*\([^\n]{0,500}\.wasm\b",
+    re.I,
+)
 DEEP_REQUIRED_PROVIDERS = frozenset({"semgrep", "yara", "dependency_intelligence"})
 ARTIFACT_ORIGINS = frozenset({"user_uploaded_vsix", "installed_directory", "local_directory", "archive_artifact", "source_snapshot"})
 SKIP_DIRS = {".git", ".hg", ".svn"}
@@ -187,6 +192,7 @@ CAPABILITY_RULES = {
     "lifecycle-script",
     "mcp-server-command",
     "native-or-packed-artifact",
+    "wasm-loader",
     "powerful-ide-contribution",
     "sensitive-activation",
     "startup-activation",
@@ -1033,6 +1039,7 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
     "lifecycle_scripts",
     "network",
     "process_execution",
+    "wasm_runtime",
 })
 
 
@@ -1962,6 +1969,52 @@ def _add_artifact_inventory_findings(
             "Inspect archive contents and verify the packed artifacts are expected and reproducible.",
             {"kind": "packed", "count": len(packed_artifacts), "artifacts": _artifact_evidence(packed_artifacts)},
         ))
+
+    # WebAssembly is executable code even when it is opaque to the JavaScript
+    # text analyzers. Treat the presence of a module as a runtime capability,
+    # not as malware evidence. A separate contextual finding is emitted only
+    # when an executable text file visibly instantiates or loads the module;
+    # this catches loader-style supply-chain payloads without flagging every
+    # legitimate language tool that ships WASM.
+    wasm_paths = [
+        str(item.get("path"))
+        for item in artifact_inventory.get("_all_file_hashes", [])
+        if isinstance(item, dict) and str(item.get("path") or "").lower().endswith(".wasm")
+    ]
+    if wasm_paths:
+        capabilities.setdefault("wasm_runtime", {"id": "wasm_runtime", "evidence": []})["evidence"].extend(wasm_paths[:20])
+        loader_paths: list[str] = []
+        if path is not None:
+            candidates = [
+                item for item in artifact_inventory.get("_all_file_hashes", [])
+                if isinstance(item, dict)
+                and str(item.get("path") or "").lower().rsplit(".", 1)[-1] in {"js", "cjs", "mjs", "ts", "tsx", "jsx"}
+                and int(item.get("size_bytes") or 0) <= MAX_TEXT_BYTES
+            ]
+            for item in candidates[:2_000]:
+                rel = str(item.get("path") or "")
+                text = _read_text(path / rel)
+                if text and WASM_LOADER_RE.search(text):
+                    loader_paths.append(rel)
+                    if len(loader_paths) >= 20:
+                        break
+        if loader_paths:
+            findings.append(_finding(
+                extension_id,
+                version,
+                "wasm-loader",
+                "artifact",
+                "MEDIUM",
+                0.65,
+                f"Extension ships {len(wasm_paths)} WebAssembly module(s) and executable code that loads or instantiates one.",
+                sorted(set(wasm_paths[:20] + loader_paths)),
+                "Require the controlled runtime pass and verify the module's origin, imports, and any network or process behavior before approval.",
+                {
+                    "wasm_files": wasm_paths[:20],
+                    "loader_files": loader_paths,
+                    "loader_detection": "visible-WebAssembly-instantiation-or-wasm-load",
+                },
+            ))
 
     matches = _known_bad_matches(artifact_inventory, known_bad_hashes)
     if matches:

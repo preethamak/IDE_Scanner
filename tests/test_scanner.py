@@ -31,6 +31,7 @@ from ide_scanner.scanner import (
     _score_details,
     _semgrep_scope_exclusion,
     _sandbox_observation_finding,
+    _runtime_required_for_report,
     scan_extension,
     scan_marketplace_extension,
     scan_targets,
@@ -1410,6 +1411,43 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(report.artifact_inventory["risky_artifacts"]), 2)
         self.assertIn("native-or-packed-artifact", {finding.rule_id for finding in report.findings})
         self.assertIn("packed-artifact", {finding.rule_id for finding in report.findings})
+
+    def test_wasm_requires_runtime_and_only_visible_loaders_emit_context(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"wasm-tool","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "module.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+            (root / "extension.js").write_text(
+                "module.exports.activate = async () => WebAssembly.instantiate(new Uint8Array());",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        capability_ids = {str(item.get("id")) for item in report.capabilities}
+        self.assertIn("wasm-loader", rule_ids)
+        self.assertIn("wasm_runtime", capability_ids)
+        self.assertTrue(_runtime_required_for_report(report))
+
+    def test_wasm_without_a_loader_is_capability_context_only(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"wasm-data","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "module.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+
+            report = scan_extension(root)
+
+        self.assertNotIn("wasm-loader", {finding.rule_id for finding in report.findings})
+        self.assertIn("wasm_runtime", {str(item.get("id")) for item in report.capabilities})
 
     def test_known_bad_hash_feed_is_authoritative_malware(self) -> None:
         with TemporaryDirectory() as tmp:

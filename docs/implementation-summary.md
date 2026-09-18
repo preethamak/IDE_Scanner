@@ -323,6 +323,7 @@ Each rule maps to an evidence class:
 | `native-or-packed-artifact` | `artifact` | `capability` | MEDIUM | Extension contains native executable artifact such as `.node`, `.dll`, `.so`, `.dylib`, `.exe`. |
 | `packed-artifact` | `provenance` | `provenance` | MEDIUM | Extension contains packed archive such as `.zip`, `.asar`, `.tgz`, `.jar`, etc. |
 | `binary-without-origin` | `provenance` | `provenance` | MEDIUM evidence / LOW actionability | Native artifacts lack independent registry/vendor origin verification; emitted once with a bounded sample. |
+| `wasm-loader` | `artifact` | `capability` | MEDIUM evidence / contextual actionability | A packaged WebAssembly module is visibly loaded or instantiated by executable text; the module also requires controlled runtime coverage. |
 | `known-bad-artifact` | `confirmed-intelligence` | `confirmed` | CRITICAL | File/package/VSIX hash matches a configured known-bad hash feed. |
 
 ### Code Behavior Metrics

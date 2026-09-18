@@ -232,6 +232,7 @@ Metrics:
 Product behavior:
 
 - A native binary is recorded as a bounded low-severity governance note unless independent evidence shows an origin mismatch, tampering, or an abuse chain.
+- WebAssembly is recorded as executable capability and requires controlled runtime coverage. `wasm-loader` is emitted only when executable text visibly loads or instantiates a packaged module; the presence of a module alone is not a malware verdict.
 - Most other provenance issues are `review`.
 - Attestation violation or unexplained sensitive artifact additions can become `suspicious`.
 
