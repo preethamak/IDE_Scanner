@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-18.1",
+  "snapshot_version": "2026-09-18.2",
   "entries": [
     {
       "extension_id": "formulahendry.code-runner",
@@ -34,6 +34,17 @@
       "policy_action": "block",
       "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
       "summary": "Socket reported this exact Open VSX artifact as a trojanized theme carrying an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
+    },
+    {
+      "extension_id": "bingcha.bcai-tools",
+      "version": "4.0.37",
+      "artifact_sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+      "advisory_id": "KNOSTIC-BCAI-2026-4.0.37",
+      "severity": "CRITICAL",
+      "published_at": "2026-05-20T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+      "summary": "Knostic reported this exact Open VSX artifact as malicious after source validation, including Google OAuth refresh-token theft, full GCP scope access, and proxying of AI API use."
     }
   ]
 }

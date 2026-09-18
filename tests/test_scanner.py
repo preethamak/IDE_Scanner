@@ -1548,6 +1548,10 @@ class ScannerTests(unittest.TestCase):
             entries[("exargd.vsblack", "0.0.1")]["artifact_sha256"],
             "1e283327ad048bea39f4a8501770858a20f3555e87fe3e202274f2e87f8a3c25",
         )
+        self.assertEqual(
+            entries[("bingcha.bcai-tools", "4.0.37")]["artifact_sha256"],
+            "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+        )
 
     def test_missing_required_extension_advisory_snapshot_fails_closed(self) -> None:
         with TemporaryDirectory() as tmp:
