@@ -11,6 +11,11 @@ from typing import Any
 
 from .jsonc import loads_jsonc
 
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows has no resource module
+    resource = None  # type: ignore[assignment]
+
 CANARY_VALUE = "IDE_SCANNER_CANARY_SECRET_DO_NOT_EXFILTRATE"
 CANARY_FILES = (
     ".env",
@@ -22,6 +27,8 @@ MAX_RUNTIME_FILES = 100_000
 MAX_RUNTIME_BYTES = 2 * 1024 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 512 * 1024 * 1024
 MAX_RUNTIME_TIMEOUT_SECONDS = 300
+MAX_RUNTIME_MEMORY_BYTES = 1536 * 1024 * 1024
+MAX_RUNTIME_OPEN_FILES = 4096
 
 
 def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 15) -> dict[str, Any]:
@@ -360,7 +367,44 @@ def _run_isolated(
         "--",
         *command,
     ]
+    if os.name == "posix":
+        timeout = int(kwargs.get("timeout", MAX_RUNTIME_TIMEOUT_SECONDS))
+        kwargs["preexec_fn"] = _runtime_resource_limiter(timeout)
     return subprocess.run(args, **kwargs)
+
+
+def _runtime_resource_limiter(timeout_seconds: int):
+    """Apply inherited limits to Bubblewrap and the extension process tree.
+
+    Wall-clock timeouts alone do not protect a production worker from an
+    extension that consumes memory or fills the writable sandbox. The limits
+    are inherited by the isolated child and are intentionally conservative;
+    a limit breach becomes a visible runtime error and therefore cannot turn
+    into a completed approval.
+    """
+    def apply_limits() -> None:
+        if resource is None:  # pragma: no cover - POSIX always imports it
+            return
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (MAX_RUNTIME_MEMORY_BYTES, MAX_RUNTIME_MEMORY_BYTES))
+        except (OSError, ValueError):
+            pass
+        try:
+            file_limit = min(MAX_RUNTIME_FILE_BYTES, MAX_RUNTIME_BYTES)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
+        except (OSError, ValueError):
+            pass
+        try:
+            cpu_limit = max(1, timeout_seconds + 1)
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
+        except (OSError, ValueError):
+            pass
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (MAX_RUNTIME_OPEN_FILES, MAX_RUNTIME_OPEN_FILES))
+        except (OSError, ValueError):
+            pass
+
+    return apply_limits
 
 
 def _sandbox_env(home: Path, workspace: Path, hook_file: Path, trace_file: Path) -> dict[str, str]:
@@ -485,6 +529,54 @@ function patchNetwork(moduleName) {
 }
 patchNetwork('http');
 patchNetwork('https');
+
+// Node's global fetch and newer HTTP clients bypass the legacy http/https
+// wrappers above. Keep the runtime observation contract consistent across
+// CommonJS, ESM-transpiled, and undici-backed extensions.
+try {
+  if (typeof globalThis.fetch === 'function') {
+    globalThis.fetch = function(...args) {
+      const destination = safeString(args[0]);
+      record({kind: 'network', api: 'global.fetch', target: destination});
+      const init = args[1];
+      if (init && typeof init === 'object' && init.body !== undefined) {
+        const body = safeString(init.body);
+        record({kind: 'network_write', target: destination, contains_canary: body.includes(process.env.IDE_SCANNER_CANARY || ''), bytes: body.length});
+      }
+      return Promise.resolve({
+        status: 204,
+        ok: true,
+        headers: { get() { return null; } },
+        text: async () => '',
+        json: async () => ({}),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      });
+    };
+  }
+} catch (_) {}
+
+try {
+  const http2 = require('http2');
+  if (typeof http2.connect === 'function') {
+    http2.connect = function(...args) {
+      const destination = safeString(args[0]);
+      record({kind: 'network', api: 'http2.connect', target: destination});
+      return { request: () => fakeRequest(destination), close() {}, destroy() {} };
+    };
+  }
+} catch (_) {}
+
+try {
+  const tls = require('tls');
+  for (const name of ['connect', 'createConnection']) {
+    if (typeof tls[name] !== 'function') continue;
+    tls[name] = function(...args) {
+      const destination = safeString(args[0]);
+      record({kind: 'network', api: 'tls.' + name, target: destination});
+      return fakeRequest(destination);
+    };
+  }
+} catch (_) {}
 
 try {
   const net = require('net');

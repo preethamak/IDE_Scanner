@@ -1037,6 +1037,7 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
     "credential_input",
     "dynamic_code",
     "lifecycle_scripts",
+    "native_code",
     "network",
     "process_execution",
     "wasm_runtime",

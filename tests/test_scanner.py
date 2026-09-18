@@ -80,6 +80,25 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(runtime_bundle["required_extension_ids"], [])
             self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
 
+    def test_local_runtime_requires_native_code_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "native.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.native"
+            report.version = "1.0.0"
+            report.artifact_hash = "c" * 64
+            report.capabilities = [{"id": "native_code", "evidence": ["server.node"]}]
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox") as sandbox:
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            sandbox.assert_called_once_with(artifact, allow_execute=True, timeout_seconds=7)
+            self.assertEqual(runtime_bundle["required_extension_ids"], ["publisher.native"])
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "completed")
+
     def test_ast_dynamic_call_targets_are_aggregated_per_file(self) -> None:
         findings: list[Finding] = []
         with patch(
@@ -2563,6 +2582,25 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("secret_read", kinds)
         self.assertIn("network_attempt", kinds)
         self.assertIn("secret_exfil", kinds)
+
+    def test_sandbox_trace_normalizes_global_fetch_canary_writes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "trace.jsonl"
+            trace.write_text(json.dumps({
+                "kind": "network",
+                "api": "global.fetch",
+                "target": "https://example.invalid/collect",
+            }) + "\n" + json.dumps({
+                "kind": "network_write",
+                "target": "https://example.invalid/collect",
+                "contains_canary": True,
+                "bytes": 42,
+            }) + "\n", encoding="utf-8")
+
+            observations = _observations_from_trace(trace, [])
+
+        self.assertIn("network_attempt", {item["kind"] for item in observations})
+        self.assertIn("secret_exfil", {item["kind"] for item in observations})
 
     def test_sandbox_runner_probes_registered_commands_and_webview_messages(self) -> None:
         with TemporaryDirectory() as tmp:
