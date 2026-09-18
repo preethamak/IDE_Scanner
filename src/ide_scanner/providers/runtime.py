@@ -56,6 +56,14 @@ def run_bounded_process(
     file_size_limit_mb: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a provider without allowing timed-out descendants to survive."""
+    process_env = dict(env) if env is not None else os.environ.copy()
+    # Source checkouts invoke the bounded workers before the package is
+    # installed. Preserve that supported execution mode by making the local
+    # package importable to the child, while retaining caller-provided values.
+    source_root = str(Path(__file__).resolve().parents[2])
+    pythonpath = process_env.get("PYTHONPATH", "")
+    if source_root not in pythonpath.split(os.pathsep):
+        process_env["PYTHONPATH"] = os.pathsep.join(item for item in (source_root, pythonpath) if item)
     popen_options: dict[str, Any] = {}
     if os.name == "posix":
         popen_options["start_new_session"] = True
@@ -68,7 +76,7 @@ def run_bounded_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=env,
+        env=process_env,
         **popen_options,
     )
     try:

@@ -41,6 +41,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--jobs", type=int, default=4, help="Maximum concurrent artifact processes, from 1 to 32.")
     parser.add_argument("--timeout", type=int, default=45, help="Wall-clock timeout per artifact in seconds.")
     parser.add_argument("--profile", choices=["quick", "standard", "benchmark"], default="quick", help="Static scan profile label.")
+    parser.add_argument("--runtime", action="store_true", help="Run the required dynamic providers in an isolated Bubblewrap sandbox for each artifact.")
+    parser.add_argument("--runtime-timeout", type=int, default=20, help="Dynamic runtime budget per artifact in seconds, from 1 to 120.")
     parser.add_argument("--with-posture", action="store_true", help="Include local IDE/client posture once in the aggregate report.")
     parser.add_argument("--out", "--output", required=True, help="Aggregate JSON report path.")
     return parser
@@ -138,7 +140,14 @@ def _wait_for_worker(process: subprocess.Popen[str], timeout: int) -> bool:
         return False
 
 
-def _scan_one(target: dict[str, str], *, timeout: int, profile: str) -> dict[str, Any]:
+def _scan_one(
+    target: dict[str, str],
+    *,
+    timeout: int,
+    profile: str,
+    runtime: bool = False,
+    runtime_timeout: int = 20,
+) -> dict[str, Any]:
     path = Path(target["path"])
     source = target.get("type", "vscode")
     expected_id = target.get("manifest_expected_extension_id")
@@ -154,23 +163,7 @@ def _scan_one(target: dict[str, str], *, timeout: int, profile: str) -> dict[str
     with tempfile.TemporaryDirectory(prefix="guardrails-corpus-") as temp_dir:
         output = Path(temp_dir) / "report.json"
         stderr_path = Path(temp_dir) / "worker.stderr"
-        command = [
-            sys.executable,
-            "-m",
-            "ide_scanner",
-            "scan",
-            "--path",
-            str(path),
-            "--profile",
-            profile,
-            "--jobs",
-            "1",
-            "--skip-posture",
-            "--format",
-            "json",
-            "--out",
-            str(output),
-        ]
+        command = _worker_command(path, profile, output, runtime=runtime, runtime_timeout=runtime_timeout)
         environment = os.environ.copy()
         existing_pythonpath = environment.get("PYTHONPATH", "")
         environment["PYTHONPATH"] = os.pathsep.join(item for item in (str(ROOT / "src"), existing_pythonpath) if item)
@@ -223,6 +216,29 @@ def _scan_one(target: dict[str, str], *, timeout: int, profile: str) -> dict[str
             return extension
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return _worker_error(path, source, target, f"Corpus worker returned an invalid report: {exc}")
+
+
+def _worker_command(path: Path, profile: str, output: Path, *, runtime: bool, runtime_timeout: int) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "ide_scanner",
+        "scan",
+        "--path",
+        str(path),
+        "--profile",
+        profile,
+        "--jobs",
+        "1",
+        "--skip-posture",
+        "--format",
+        "json",
+        "--out",
+        str(output),
+    ]
+    if runtime:
+        command.extend(["--runtime", "--runtime-timeout", str(runtime_timeout)])
+    return command
 
 
 def _canonical_artifact_sha256(path: Path) -> str:
@@ -278,6 +294,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("jobs must be between 1 and 32")
     if args.timeout < 1:
         raise ValueError("timeout must be at least 1 second")
+    if not 1 <= args.runtime_timeout <= 120:
+        raise ValueError("runtime-timeout must be between 1 and 120 seconds")
     targets = _targets(args)
     if not targets:
         raise ValueError("no extension artifacts were discovered")
@@ -285,7 +303,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     extensions_by_index: dict[int, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=min(args.jobs, len(targets))) as executor:
         futures = {
-            executor.submit(_scan_one, target, timeout=args.timeout, profile=args.profile): index
+            executor.submit(
+                _scan_one,
+                target,
+                timeout=args.timeout,
+                profile=args.profile,
+                runtime=args.runtime,
+                runtime_timeout=args.runtime_timeout,
+            ): index
             for index, target in enumerate(targets)
         }
         for future in as_completed(futures):
@@ -308,6 +333,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "jobs": args.jobs,
                 "timeout_seconds": args.timeout,
                 "profile": args.profile,
+                "runtime_enabled": args.runtime,
+                "runtime_timeout_seconds": args.runtime_timeout if args.runtime else 0,
                 "target_count": len(targets),
                 "incomplete_count": sum(item.analysis_status != "complete" for item in extensions),
                 "manifest": str(args.manifest.resolve()) if args.manifest else "",

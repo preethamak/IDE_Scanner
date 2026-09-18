@@ -11,10 +11,20 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from scripts.scan_corpus import _canonical_artifact_sha256, _manifest_targets, _scan_one, _wait_for_worker
+from scripts.scan_corpus import _canonical_artifact_sha256, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command
 
 
 class ScanCorpusTests(unittest.TestCase):
+    def test_parser_exposes_runtime_controls(self) -> None:
+        args = _parser().parse_args(["--path", ".", "--out", "report.json", "--runtime", "--runtime-timeout", "30"])
+        self.assertTrue(args.runtime)
+        self.assertEqual(args.runtime_timeout, 30)
+
+    def test_runtime_controls_reach_each_isolated_worker(self) -> None:
+        command = _worker_command(Path("artifact.vsix"), "benchmark", Path("report.json"), runtime=True, runtime_timeout=30)
+        self.assertIn("--runtime", command)
+        self.assertEqual(command[command.index("--runtime-timeout") + 1], "30")
+
     def test_manifest_requires_exact_identity_and_hash(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

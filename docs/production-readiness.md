@@ -93,6 +93,23 @@ coverage. Local environments without namespace permission must report the
 runtime provider as failed/incomplete, never silently fall back to host
 execution or claim dynamic coverage.
 
+The isolated corpus runner exposes the same control for batch work:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --manifest corpus.json \
+  --profile benchmark \
+  --runtime \
+  --runtime-timeout 20 \
+  --jobs 4 \
+  --timeout 90 \
+  --out corpus-runtime.json
+```
+
+Its aggregate report records `runtime_enabled` and the per-artifact runtime
+status. A batch is not production-complete when required runtime providers are
+failed, skipped, or incomplete.
+
 # Current hardening increment: archive isolation
 
 Untrusted gzip unwrapping, ZIP-member extraction, and complete artifact hashing now execute
