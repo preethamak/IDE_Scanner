@@ -99,7 +99,9 @@ coverage. Local environments without namespace permission must report the
 runtime provider as failed/incomplete, never silently fall back to host
 execution or claim dynamic coverage.
 
-The isolated corpus runner exposes the same control for batch work:
+The isolated corpus runner exposes the same control for batch work. Its
+`deep` profile requires `--runtime`; use `standard` when intentionally
+running a static-only diagnostic corpus:
 
 ```bash
 PYTHONPATH=src python scripts/scan_corpus.py \

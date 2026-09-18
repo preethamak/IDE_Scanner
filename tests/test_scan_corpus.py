@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from scripts.scan_corpus import _canonical_artifact_sha256, _checkpoint_context, _checkpoint_path, _load_checkpoint, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command, _write_checkpoint
+from scripts.scan_corpus import _canonical_artifact_sha256, _checkpoint_context, _checkpoint_path, _load_checkpoint, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command, _write_checkpoint, run
 
 
 class ScanCorpusTests(unittest.TestCase):
@@ -24,6 +24,11 @@ class ScanCorpusTests(unittest.TestCase):
         args = _parser().parse_args(["--manifest", "corpus.json", "--profile", "deep", "--runtime", "--out", "report.json"])
         self.assertEqual(args.profile, "deep")
         self.assertTrue(args.runtime)
+
+    def test_deep_profile_rejects_static_only_corpus_runs(self) -> None:
+        args = _parser().parse_args(["--manifest", "corpus.json", "--profile", "deep", "--out", "report.json"])
+        with self.assertRaisesRegex(ValueError, "deep profile requires --runtime"):
+            run(args)
 
     def test_runtime_controls_reach_each_isolated_worker(self) -> None:
         command = _worker_command(Path("artifact.vsix"), "benchmark", Path("report.json"), runtime=True, runtime_timeout=30)

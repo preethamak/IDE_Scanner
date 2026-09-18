@@ -152,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --artifact-url and --artifact-sha256 must be provided together")
         if not 1 <= args.runtime_timeout <= 300:
             parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
+        if args.profile == "deep" and not args.runtime:
+            parser.error("scan --profile deep requires --runtime; use standard for static-only scans")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             marketplace_scan_ids=args.extension_id,

@@ -299,6 +299,23 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations[0]["phase"], "activation")
         self.assertEqual(observations[0]["stderr_excerpt"], "activation failed")
 
+    def test_runtime_without_node_entrypoint_does_not_create_a_false_failure(self) -> None:
+        observations = _execute_entrypoint(
+            Path("/tmp/runner"),
+            Path("/tmp/home"),
+            Path("/tmp/workspace"),
+            5,
+            Path("/tmp/hook"),
+            Path("/tmp/trace"),
+            Path("/tmp/target"),
+            entrypoint=None,
+        )
+        self.assertEqual(observations, [{
+            "kind": "entrypoint_not_applicable",
+            "phase": "activation",
+            "evidence": "manifest declares no Node activation entrypoint",
+        }])
+
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
             finding_id="range-advisory",

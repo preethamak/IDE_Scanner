@@ -42,6 +42,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
         trace_file = root / "trace.jsonl"
         hook_file = root / "node-runtime-hook.js"
         entrypoint_runner = root / "activate-entrypoint.js"
+        entrypoint = _extension_main(manifest)
         trace_file.touch()
         home.mkdir()
         workspace.mkdir()
@@ -67,6 +68,8 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
             "instrumentation": {
                 "node_require_hook": str(hook_file),
                 "entrypoint_runner": str(entrypoint_runner),
+                "entrypoint": entrypoint or "",
+                "entrypoint_status": "declared" if entrypoint else "not-applicable",
                 "captures": [
                     "fs",
                     "child_process",
@@ -110,6 +113,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 hook_file,
                 trace_file,
                 target,
+                entrypoint=entrypoint,
             ))
             observations.extend(_observations_from_trace(trace_file, canaries))
         return {
@@ -154,9 +158,9 @@ def _planned_commands(manifest: dict[str, Any]) -> list[dict[str, str]]:
     return commands
 
 
-def _extension_main(manifest: dict[str, Any]) -> str:
+def _extension_main(manifest: dict[str, Any]) -> str | None:
     main = str(manifest.get("main") or "").strip()
-    return main or "./extension.js"
+    return main or None
 
 
 def _execute_planned_commands(
@@ -226,7 +230,15 @@ def _execute_entrypoint(
     hook_file: Path,
     trace_file: Path,
     target: Path,
+    *,
+    entrypoint: str | None = "./extension.js",
 ) -> list[dict[str, Any]]:
+    if not entrypoint:
+        return [{
+            "kind": "entrypoint_not_applicable",
+            "phase": "activation",
+            "evidence": "manifest declares no Node activation entrypoint",
+        }]
     try:
         result = _run_isolated(
             ["node", "/runner/activate-entrypoint.js"],
@@ -550,6 +562,12 @@ record({kind: 'instrumentation_started', home: sandboxHome});
 
 def _write_entrypoint_runner(path: Path, manifest: dict[str, Any]) -> None:
     main = _extension_main(manifest)
+    if not main:
+        path.write_text(
+            "// This package has no Node activation entrypoint.\n",
+            encoding="utf-8",
+        )
+        return
     path.write_text(
         f"""
 const path = require('path');

@@ -391,6 +391,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("timeout must be at least 1 second")
     if not 1 <= args.runtime_timeout <= 120:
         raise ValueError("runtime-timeout must be between 1 and 120 seconds")
+    if args.profile == "deep" and not args.runtime:
+        raise ValueError("deep profile requires --runtime; use standard for static-only corpus scans")
     if args.checkpoint_dir and not args.manifest:
         raise ValueError("checkpoint-dir requires --manifest so exact artifact identity can be resumed safely")
     targets = _targets(args)
