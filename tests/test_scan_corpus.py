@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from scripts.scan_corpus import _canonical_artifact_sha256, _checkpoint_path, _load_checkpoint, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command, _write_checkpoint
+from scripts.scan_corpus import _canonical_artifact_sha256, _checkpoint_context, _checkpoint_path, _load_checkpoint, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command, _write_checkpoint
 
 
 class ScanCorpusTests(unittest.TestCase):
@@ -41,9 +41,26 @@ class ScanCorpusTests(unittest.TestCase):
                 "artifact_hash": "a" * 64,
             }
             checkpoint_dir = root / "checkpoints"
-            _write_checkpoint(checkpoint_dir, target, extension)
+            context = _checkpoint_context("quick", False, 20)
+            _write_checkpoint(checkpoint_dir, target, extension, context)
             self.assertTrue(_checkpoint_path(checkpoint_dir, target).is_file())
-            self.assertEqual(_load_checkpoint(checkpoint_dir, target), extension)
+            self.assertEqual(_load_checkpoint(checkpoint_dir, target, context), extension)
+
+    def test_checkpoint_is_not_reused_for_a_different_scanner_context(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = {
+                "path": str(root / "example.vsix"),
+                "manifest_expected_extension_id": "example.extension",
+                "manifest_expected_version": "1.0.0",
+                "manifest_expected_sha256": "a" * 64,
+            }
+            extension = {"extension_id": "example.extension", "version": "1.0.0", "analysis_status": "complete", "artifact_hash": "a" * 64}
+            checkpoint_dir = root / "checkpoints"
+            _write_checkpoint(checkpoint_dir, target, extension, _checkpoint_context("quick", False, 20))
+
+            self.assertIsNone(_load_checkpoint(checkpoint_dir, target, _checkpoint_context("benchmark", False, 20)))
+            self.assertIsNone(_load_checkpoint(checkpoint_dir, target, _checkpoint_context("quick", True, 20)))
 
     def test_manifest_requires_exact_identity_and_hash(self) -> None:
         with TemporaryDirectory() as tmp:

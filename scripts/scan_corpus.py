@@ -30,6 +30,8 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 from ide_scanner.discovery import discover_from_path, discover_local_installations  # noqa: E402
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
+from ide_scanner.classification_policy import POLICY_VERSION  # noqa: E402
+from ide_scanner.rule_registry import RULESET_VERSION  # noqa: E402
 from ide_scanner.scanner import _build_report, _degzip_if_needed, _hash_file, _local_error_extension  # noqa: E402
 
 
@@ -255,7 +257,22 @@ def _checkpoint_path(checkpoint_dir: Path, target: dict[str, str]) -> Path:
     return checkpoint_dir / f"{hashlib.sha256(identity).hexdigest()}.json"
 
 
-def _load_checkpoint(checkpoint_dir: Path | None, target: dict[str, str]) -> dict[str, Any] | None:
+def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_timeout: int = 20) -> dict[str, Any]:
+    return {
+        "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
+        "policy_version": POLICY_VERSION,
+        "ruleset_version": RULESET_VERSION,
+        "profile": profile,
+        "runtime": bool(runtime),
+        "runtime_timeout_seconds": runtime_timeout if runtime else 0,
+    }
+
+
+def _load_checkpoint(
+    checkpoint_dir: Path | None,
+    target: dict[str, str],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if checkpoint_dir is None or not target.get("manifest_expected_sha256"):
         return None
     path = _checkpoint_path(checkpoint_dir, target)
@@ -269,7 +286,13 @@ def _load_checkpoint(checkpoint_dir: Path | None, target: dict[str, str]) -> dic
         "version": target.get("manifest_expected_version", ""),
         "sha256": target.get("manifest_expected_sha256", ""),
     }
-    if not isinstance(payload, dict) or payload.get("schema_version") != "guardrails.corpus-checkpoint.v1" or payload.get("target") != expected_target:
+    expected_context = context or _checkpoint_context()
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "guardrails.corpus-checkpoint.v1"
+        or payload.get("target") != expected_target
+        or payload.get("context") != expected_context
+    ):
         return None
     extension = payload.get("extension")
     if not isinstance(extension, dict) or extension.get("analysis_status") != "complete":
@@ -280,7 +303,12 @@ def _load_checkpoint(checkpoint_dir: Path | None, target: dict[str, str]) -> dic
     return extension
 
 
-def _write_checkpoint(checkpoint_dir: Path | None, target: dict[str, str], extension: dict[str, Any]) -> None:
+def _write_checkpoint(
+    checkpoint_dir: Path | None,
+    target: dict[str, str],
+    extension: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> None:
     if checkpoint_dir is None or not target.get("manifest_expected_sha256"):
         return
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -295,6 +323,7 @@ def _write_checkpoint(checkpoint_dir: Path | None, target: dict[str, str], exten
     temporary.write_text(json.dumps({
         "schema_version": "guardrails.corpus-checkpoint.v1",
         "target": target_identity,
+        "context": context or _checkpoint_context(),
         "extension": extension,
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
@@ -369,10 +398,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("no extension artifacts were discovered")
 
     checkpoint_dir = args.checkpoint_dir.resolve() if args.checkpoint_dir else None
+    checkpoint_context = _checkpoint_context(args.profile, args.runtime, args.runtime_timeout)
     extensions_by_index: dict[int, dict[str, Any]] = {}
     pending: dict[int, dict[str, str]] = {}
     for index, target in enumerate(targets):
-        cached = _load_checkpoint(checkpoint_dir, target)
+        cached = _load_checkpoint(checkpoint_dir, target, checkpoint_context)
         if cached is not None:
             extensions_by_index[index] = cached
             print(json.dumps({"completed": len(extensions_by_index), "total": len(targets), "source": "checkpoint", "path": target["path"]}), file=sys.stderr, flush=True)
@@ -396,7 +426,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             index = futures[future]
             result = future.result()
             extensions_by_index[index] = result
-            _write_checkpoint(checkpoint_dir, targets[index], result)
+            _write_checkpoint(checkpoint_dir, targets[index], result, checkpoint_context)
             print(json.dumps({"completed": len(extensions_by_index), "total": len(targets), "source": "scan", "path": targets[index]["path"], "analysis_status": result.get("analysis_status", "incomplete")}), file=sys.stderr, flush=True)
     except BaseException:
         executor.shutdown(wait=False, cancel_futures=True)
