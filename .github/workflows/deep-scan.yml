@@ -46,6 +46,32 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap
           bwrap --version
+      - name: Verify runtime namespace isolation
+        run: |
+          bwrap \
+            --die-with-parent \
+            --new-session \
+            --unshare-net \
+            --unshare-pid \
+            --unshare-uts \
+            --unshare-ipc \
+            --unshare-user \
+            --uid 65534 \
+            --gid 65534 \
+            --cap-drop ALL \
+            --ro-bind /usr /usr \
+            --ro-bind /bin /bin \
+            --ro-bind /sbin /sbin \
+            --ro-bind /lib /lib \
+            --ro-bind /lib64 /lib64 \
+            --ro-bind /etc /etc \
+            --proc /proc \
+            --dev /dev \
+            --tmpfs /tmp \
+            --clearenv \
+            --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --chdir / \
+            -- /usr/bin/true
       - name: Enqueue canonical maintenance scan
         id: enqueue
         env:

@@ -42,7 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, help="JSON manifest of exact VSIX artifacts with path, extension_id, version, and canonical scanner sha256.")
     parser.add_argument("--jobs", type=int, default=4, help="Maximum concurrent artifact processes, from 1 to 32.")
     parser.add_argument("--timeout", type=int, default=45, help="Wall-clock timeout per artifact in seconds.")
-    parser.add_argument("--profile", choices=["quick", "standard", "benchmark"], default="quick", help="Static scan profile label.")
+    parser.add_argument("--profile", choices=["quick", "standard", "deep", "benchmark"], default="quick", help="Static/deep scan profile label recorded in the corpus execution evidence.")
     parser.add_argument("--runtime", action="store_true", help="Run the required dynamic providers in an isolated Bubblewrap sandbox for each artifact.")
     parser.add_argument("--runtime-timeout", type=int, default=20, help="Dynamic runtime budget per artifact in seconds, from 1 to 120.")
     parser.add_argument("--checkpoint-dir", type=Path, help="Private directory for per-artifact JSON checkpoints; enables resumable manifest scans.")

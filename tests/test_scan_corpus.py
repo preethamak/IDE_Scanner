@@ -20,6 +20,11 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertTrue(args.runtime)
         self.assertEqual(args.runtime_timeout, 30)
 
+    def test_parser_accepts_deep_runtime_holdout_profile(self) -> None:
+        args = _parser().parse_args(["--manifest", "corpus.json", "--profile", "deep", "--runtime", "--out", "report.json"])
+        self.assertEqual(args.profile, "deep")
+        self.assertTrue(args.runtime)
+
     def test_runtime_controls_reach_each_isolated_worker(self) -> None:
         command = _worker_command(Path("artifact.vsix"), "benchmark", Path("report.json"), runtime=True, runtime_timeout=30)
         self.assertIn("--runtime", command)

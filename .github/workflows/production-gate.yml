@@ -45,3 +45,78 @@ jobs:
             production-gate.json
           retention-days: 30
           if-no-files-found: warn
+
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime isolation backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+          bwrap \
+            --die-with-parent \
+            --new-session \
+            --unshare-net \
+            --unshare-pid \
+            --unshare-uts \
+            --unshare-ipc \
+            --unshare-user \
+            --uid 65534 \
+            --gid 65534 \
+            --cap-drop ALL \
+            --ro-bind /usr /usr \
+            --ro-bind /bin /bin \
+            --ro-bind /sbin /sbin \
+            --ro-bind /lib /lib \
+            --ro-bind /lib64 /lib64 \
+            --ro-bind /etc /etc \
+            --proc /proc \
+            --dev /dev \
+            --tmpfs /tmp \
+            --clearenv \
+            --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --chdir / \
+            -- /usr/bin/true
+      - name: Install scanner and analyzers
+        run: python -m pip install -e '.[analysis]'
+      - name: Execute deep runtime smoke corpus
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python scripts/scan_corpus.py \
+            --path fixtures/agent-tool \
+            --profile deep \
+            --runtime \
+            --runtime-timeout 20 \
+            --jobs 1 \
+            --timeout 90 \
+            --out runtime-smoke.json
+          python - <<'PY'
+          import json
+
+          report = json.load(open("runtime-smoke.json", encoding="utf-8"))
+          execution = report.get("corpus_execution", {})
+          if execution.get("runtime_enabled") is not True or execution.get("profile") != "deep":
+              raise SystemExit("runtime smoke report did not prove deep runtime execution")
+          if execution.get("incomplete_count") != 0:
+              raise SystemExit("runtime smoke corpus is incomplete")
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit("runtime smoke corpus did not return exactly one extension")
+          provider = ((extensions[0].get("analysis_coverage") or {}).get("providers") or {}).get("dynamic_sandbox") or {}
+          if provider.get("status") != "completed" or provider.get("executed") is not True:
+              raise SystemExit(f"dynamic runtime provider was not completed: {provider}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scanner-runtime-smoke
+          path: runtime-smoke.json
+          retention-days: 30
+          if-no-files-found: warn
