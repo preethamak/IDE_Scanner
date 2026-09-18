@@ -50,7 +50,11 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
                 "version": "1.0.0",
                 "gate_required": True,
                 "label": "known_safe",
-                "label_evidence": "publisher-and-artifact-review",
+                "label_evidence": {
+                    "source_type": "independent_review",
+                    "source_url": "https://example.test/safe-extension",
+                    "retrieved_at": "2026-09-18T00:00:00Z",
+                },
                 "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": "b" * 64},
             },
             {
@@ -58,7 +62,11 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
                 "version": "9.9.9",
                 "gate_required": True,
                 "label": "known_malicious",
-                "label_evidence": "independent-threat-report-2026-09-18",
+                "label_evidence": {
+                    "source_type": "independent_threat_report",
+                    "source_url": "https://example.test/bad-extension",
+                    "retrieved_at": "2026-09-18T00:00:00Z",
+                },
                 "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": "c" * 64},
             },
         ],
@@ -143,4 +151,16 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),
                     self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_free_form_label_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = holdout_corpus()
+            corpus["artifacts"][0]["label_evidence"] = "operator says safe"
+            with self.assertRaisesRegex(ValueError, "structured label evidence"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", corpus),
                 )

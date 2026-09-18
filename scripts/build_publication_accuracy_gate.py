@@ -13,8 +13,10 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
@@ -134,14 +136,33 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
         seen.add(key)
         if artifact.get("gate_required") is not True or artifact.get("label") not in LABELS:
             raise ValueError(f"Holdout artifact {index} must be a required known_safe or known_malicious label")
-        if not str(artifact.get("label_evidence") or "").strip():
-            raise ValueError(f"Holdout artifact {index} requires artifact-specific label evidence")
+        _validate_label_evidence(artifact.get("label_evidence"), index)
         identity = _object(artifact.get("artifact"))
         source_type = str(identity.get("source_type") or "")
         if source_type == "fixture_directory" or not source_type:
             raise ValueError(f"Holdout artifact {index} cannot use a synthetic fixture source")
         if identity.get("original_bytes_available") is not True or not SHA256_RE.fullmatch(str(identity.get("sha256") or "")):
             raise ValueError(f"Holdout artifact {index} requires retained exact bytes and a SHA-256")
+
+
+def _validate_label_evidence(value: Any, index: int) -> None:
+    """Require auditable evidence instead of an operator-written label claim."""
+    if not isinstance(value, dict):
+        raise ValueError(f"Holdout artifact {index} requires structured label evidence")
+    source_type = str(value.get("source_type") or "").strip()
+    source_url = str(value.get("source_url") or "").strip()
+    retrieved_at = str(value.get("retrieved_at") or "").strip()
+    if not source_type or not source_url or not retrieved_at:
+        raise ValueError(f"Holdout artifact {index} label evidence requires source_type, source_url, and retrieved_at")
+    parsed = urlparse(source_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError(f"Holdout artifact {index} label evidence requires a public HTTPS source URL")
+    if parsed.port not in (None, 443):
+        raise ValueError(f"Holdout artifact {index} label evidence URL must use the standard HTTPS port")
+    try:
+        datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"Holdout artifact {index} label evidence retrieved_at must be ISO-8601") from exc
 
 
 def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> None:
