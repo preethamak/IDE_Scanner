@@ -5,7 +5,7 @@
   "holdout": {
     "status": "fresh-labeled",
     "label_source": "Independent hash report and independent review of exact official publisher artifacts for known-safe controls; independent threat report and exact hash for the known-malicious BCAI Rosetta artifact.",
-    "frozen_at": "2026-09-18T00:00:00Z"
+    "frozen_at": "2026-09-19T00:00:00Z"
   },
   "artifacts": [
     {
