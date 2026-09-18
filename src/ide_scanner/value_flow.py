@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 MAX_VALUE_PROPAGATION_ROUNDS = 32
@@ -41,6 +42,13 @@ def credential_value_flow(text: str) -> dict[str, Any] | None:
         (match.group("target"), match.group("expression"), match.start())
         for match in _ASSIGNMENT.finditer(text)
     ]
+    # Generated/minified bundles routinely reuse short identifiers in separate
+    # lexical scopes. A file-wide name map would merge those bindings and can
+    # turn an unrelated readFileSync() into a false source-to-sink lineage.
+    # Keep the high-recall flow for unique bindings, but require an unambiguous
+    # name path before reporting a finding.
+    assignment_counts = Counter(target for target, _, _ in assignments)
+    ambiguous_targets = {target for target, count in assignment_counts.items() if count > 1}
     credential_path_names = {
         target
         for target, expression, _ in assignments
@@ -105,6 +113,8 @@ def credential_value_flow(text: str) -> dict[str, Any] | None:
             source = _first_tainted_identifier(match.group("value"), tainted, before=match.start())
             if source is not None:
                 flow = tainted[source]
+                if _flow_uses_ambiguous_binding(flow, ambiguous_targets):
+                    continue
                 return {
                     "source_variable": flow["source_variable"],
                     "sink_variable": source,
@@ -126,6 +136,8 @@ def credential_value_flow(text: str) -> dict[str, Any] | None:
             if source is None:
                 continue
             flow = tainted[source]
+            if _flow_uses_ambiguous_binding(flow, ambiguous_targets):
+                continue
             return {
                 "source_variable": flow["source_variable"],
                 "sink_variable": source,
@@ -138,6 +150,15 @@ def credential_value_flow(text: str) -> dict[str, Any] | None:
                 "parameter": summary["parameters"][parameter_index],
             }
     return None
+
+
+def _flow_uses_ambiguous_binding(flow: dict[str, Any], ambiguous_targets: set[str]) -> bool:
+    if not ambiguous_targets:
+        return False
+    names = {str(flow.get("source_variable") or "")}
+    for item in flow.get("path") or []:
+        names.update(re.findall(rf"\b({_IDENT})\b", str(item)))
+    return bool(names & ambiguous_targets)
 
 
 def _credential_read_expression(expression: str, credential_path_names: set[str]) -> bool:

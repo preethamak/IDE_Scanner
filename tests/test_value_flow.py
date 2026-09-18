@@ -53,6 +53,14 @@ def test_unrelated_function_argument_does_not_taint_network_sink():
     ) is None
 
 
+def test_reused_minified_identifier_does_not_merge_lexical_bindings():
+    assert credential_value_flow(
+        "const n=fs.readFileSync(home+'/.npmrc');"
+        "function unrelated(){const n=workspace+'/package.json';return n;}"
+        "function transmit(n){req.write(n)}transmit(n);"
+    ) is None
+
+
 def test_function_with_unused_parameter_is_not_a_sink():
     assert credential_value_flow(
         "function log(data){console.log('event')}"
