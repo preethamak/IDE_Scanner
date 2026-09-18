@@ -1,0 +1,38 @@
+{
+  "schema_version": "guardrails.holdout-source.v1",
+  "corpus_id": "nx-console-supply-chain-2026",
+  "corpus_version": "2026.09.18.1",
+  "holdout": {
+    "status": "fresh-labeled",
+    "label_source": "public incident report and maintainer advisory; freeze exact bytes before scanning",
+    "frozen_at": "2026-09-18T00:00:00Z"
+  },
+  "artifacts": [
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.94.0",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.94.0/vspackage",
+      "sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3",
+      "label_evidence": {
+        "source_type": "independent_hash_report_and_official_release",
+        "source_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "official_release_url": "https://github.com/nrwl/nx-console/releases/tag/vscode-v18.94.0"
+      }
+    },
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.95.0",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.95.0/vspackage",
+      "sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+      "label_evidence": {
+        "source_type": "maintainer_advisory_and_independent_hash_report",
+        "source_url": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "independent_hash_report_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/"
+      }
+    }
+  ]
+}
