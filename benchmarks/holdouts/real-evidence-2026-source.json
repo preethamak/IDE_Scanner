@@ -1,7 +1,7 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.19.5",
+  "corpus_version": "2026.09.19.6",
   "holdout": {
     "status": "fresh-labeled",
     "label_source": "Independent hash report and independent review of exact official publisher artifacts for known-safe controls; independent threat report and exact hash for the known-malicious BCAI Rosetta artifact.",
@@ -75,6 +75,54 @@
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
         "retrieved_at": "2026-09-18T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "DorianN612.remote-text-fetcher",
+      "version": "0.0.1",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/DorianN612/vsextensions/remote-text-fetcher/0.0.1/vspackage",
+      "sha256": "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/new-malicious-vs-code-extension-backdoor-remote-text-fetcher",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "NoahBit.api-reactor",
+      "version": "0.0.1",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/NoahBit/vsextensions/api-reactor/0.0.1/vspackage",
+      "sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "KoltinSmith.project-restructure-nodejs",
+      "version": "1.0.0",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/KoltinSmith/vsextensions/project-restructure-nodejs/1.0.0/vspackage",
+      "sha256": "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "sunsetHightlight.sunset-highlight",
+      "version": "0.0.2",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/sunsetHightlight/vsextensions/sunset-highlight/0.0.2/vspackage",
+      "sha256": "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+        "retrieved_at": "2026-09-19T00:00:00Z"
       }
     },
     {
