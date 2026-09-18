@@ -126,6 +126,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             )
         self.assertEqual(result["holdout"]["status"], "fresh-labeled")
         self.assertTrue(result["holdout"]["complete"])
+        self.assertEqual(result["holdout"]["label_counts"], {"known_safe": 5, "known_malicious": 5})
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
 
     def test_rejects_fixture_only_holdout(self) -> None:
