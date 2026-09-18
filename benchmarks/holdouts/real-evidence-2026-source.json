@@ -1,0 +1,39 @@
+{
+  "schema_version": "guardrails.holdout-source.v1",
+  "corpus_id": "guardrails-real-evidence-2026",
+  "corpus_version": "2026.09.18.3",
+  "holdout": {
+    "status": "fresh-labeled",
+    "label_source": "Independent hash report and official release for the known-safe Nx Console control; independent threat report and exact hash for the known-malicious BCAI Rosetta artifact.",
+    "frozen_at": "2026-09-18T00:00:00Z"
+  },
+  "artifacts": [
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.94.0",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.94.0/vspackage",
+      "local_path": "../external/artifacts/public-holdout-2026-09-18/nrwl-angular-console-18.94.0.vsix",
+      "sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3",
+      "label_evidence": {
+        "source_type": "independent_hash_report_and_official_release",
+        "source_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "official_release_url": "https://github.com/nrwl/nx-console/releases/tag/vscode-v18.94.0"
+      }
+    },
+    {
+      "extension_id": "bingcha.bcai-tools",
+      "version": "4.0.37",
+      "label": "known_malicious",
+      "artifact_url": "https://open-vsx.org/api/bingcha/bcai-tools/4.0.37/file/bingcha.bcai-tools-4.0.37.vsix",
+      "local_path": "../external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix",
+      "sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+        "retrieved_at": "2026-09-18T00:00:00Z"
+      }
+    }
+  ]
+}
