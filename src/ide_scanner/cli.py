@@ -13,7 +13,7 @@ from .artifact_store import FilesystemArtifactStore
 from .agent import build_agent_report, upload_agent_report
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
-from .benchmarks.production import evaluate_production_corpus
+from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
 from .report_bundle import iter_report_events, write_report_bundle
@@ -104,6 +104,24 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-regression",
         action="store_true",
         help="Exit non-zero when any required production gate fails.",
+    )
+
+    benchmark_holdout = benchmark_subparsers.add_parser(
+        "holdout",
+        help="Evaluate a frozen exact-artifact holdout against a deep runtime corpus report.",
+    )
+    benchmark_holdout.add_argument("--corpus", required=True, help="Frozen labelled holdout corpus JSON.")
+    benchmark_holdout.add_argument("--report", required=True, help="Runtime-enabled corpus scan report JSON or report.zip.")
+    benchmark_holdout.add_argument("--out", "--output", dest="output", help="Write the holdout gate result as JSON.")
+    benchmark_holdout.add_argument(
+        "--allow-static-only",
+        action="store_true",
+        help="Do not require the report to prove runtime-enabled deep scanning (for offline calibration only).",
+    )
+    benchmark_holdout.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Exit non-zero when the holdout gate fails.",
     )
 
     agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
@@ -222,6 +240,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "benchmark":
         if args.benchmark_command == "production":
             result = evaluate_production_corpus(args.corpus, args.report)
+            _emit(result, args.output)
+            return 1 if args.fail_on_regression and not result["gate"]["passed"] else 0
+        if args.benchmark_command == "holdout":
+            result = evaluate_holdout_corpus(
+                args.corpus,
+                args.report,
+                require_runtime=not args.allow_static_only,
+            )
             _emit(result, args.output)
             return 1 if args.fail_on_regression and not result["gate"]["passed"] else 0
         if args.benchmark_command == "run":

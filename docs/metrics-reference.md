@@ -433,8 +433,29 @@ PYTHONPATH=src python scripts/freeze_accuracy_holdout.py \
 
 The freezer never executes the VSIX. It refuses redirects, non-HTTPS URLs,
 credentials in URLs, duplicate extension identities, and SHA-256 mismatches.
-Retain the artifact directory privately and run the corpus manifest with
-`scan_corpus.py --runtime` before building the publication gate.
+Retain the artifact directory privately, run the corpus manifest through the
+isolated deep runtime path, and then build the holdout gate before the
+publication gate:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --manifest /secure/guardrails-holdout-v1/corpus-manifest.json \
+  --profile deep --runtime --runtime-timeout 20 \
+  --checkpoint-dir /secure/guardrails-holdout-v1/checkpoints \
+  --out /secure/guardrails-holdout-v1/scan-report.json
+
+PYTHONPATH=src python -m ide_scanner benchmark holdout \
+  --corpus /secure/guardrails-holdout-v1/holdout-corpus.json \
+  --report /secure/guardrails-holdout-v1/scan-report.json \
+  --out /secure/guardrails-holdout-v1/holdout-gate.json \
+  --fail-on-regression
+```
+
+The holdout evaluator requires every exact artifact to be complete, keeps the
+scanner/policy/ruleset identity and hash in every result row, rejects a
+known-safe block or malicious allow, and requires evidence that the deep
+runtime path was enabled. `--allow-static-only` exists only for offline
+calibration and must not feed the publication gate.
 
 The corpus runner isolates each artifact in a killable subprocess. A timeout is
 recorded as `decision=incomplete`, never as clean. The audit reports findings,
