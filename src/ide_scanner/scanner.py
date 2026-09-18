@@ -4477,6 +4477,7 @@ _GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-s
 # repeated high-specificity evidence must remain individually reviewable.
 _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
     "dynamic-code-loading",
+    "dynamic-shell-execution",
     "filesystem-access",
     "network-access",
     "obfuscation",

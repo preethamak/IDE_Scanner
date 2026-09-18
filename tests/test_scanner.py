@@ -89,6 +89,31 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertNotIn("occurrence_count", result[0].evidence or {})
 
+    def test_repeated_contextual_shell_capability_is_aggregated(self) -> None:
+        findings = [
+            Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="dynamic-shell-execution",
+                category="execution",
+                severity="MEDIUM",
+                confidence=0.72,
+                score=45,
+                evidence_type="static",
+                evidence_summary="Code uses shell-style process execution.",
+                file_refs=[path],
+                recommendation="Review command construction and avoid shell execution for untrusted input.",
+                evidence={"evidence_class": "capability"},
+            )
+            for path in ("dist/a.js", "dist/b.js")
+        ]
+
+        result = _dedupe_findings(findings)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+
     def test_local_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "agent.vsix"
