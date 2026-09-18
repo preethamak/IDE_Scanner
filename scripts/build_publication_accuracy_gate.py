@@ -92,6 +92,7 @@ def build_publication_accuracy_gate(
             "required_pass_rate": _number(summary.get("required_pass_rate")),
             "safe_block_rate": _number(summary.get("safe_block_rate")),
             "malicious_allow_rate": _number(summary.get("malicious_allow_rate")),
+            "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
         },
         "provenance": {
