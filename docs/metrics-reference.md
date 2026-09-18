@@ -406,6 +406,23 @@ full scanner build and rejects an `unknown` build. The website publication
 scripts consume this combined artifact and will not activate a regression-only
 gate.
 
+For reproducible acquisition, prepare a private source specification with
+`guardrails.holdout-source.v1`, one exact HTTPS URL and SHA-256 per artifact, and
+structured evidence (`source_type`, `source_url`, `retrieved_at`) for each label:
+
+```bash
+PYTHONPATH=src python scripts/freeze_accuracy_holdout.py \
+  --source private-holdout-source.json \
+  --output-dir /secure/guardrails-holdout-v1/artifacts \
+  --corpus /secure/guardrails-holdout-v1/holdout-corpus.json \
+  --manifest /secure/guardrails-holdout-v1/corpus-manifest.json
+```
+
+The freezer never executes the VSIX. It refuses redirects, non-HTTPS URLs,
+credentials in URLs, duplicate extension identities, and SHA-256 mismatches.
+Retain the artifact directory privately and run the corpus manifest with
+`scan_corpus.py --runtime` before building the publication gate.
+
 The corpus runner isolates each artifact in a killable subprocess. A timeout is
 recorded as `decision=incomplete`, never as clean. The audit reports findings,
 affected extensions, completed-versus-incomplete routing, evidence classes,
