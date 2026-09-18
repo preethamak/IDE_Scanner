@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -40,6 +41,7 @@ def freeze_holdout(
 ) -> dict[str, Any]:
     source = _read_source(Path(source_path))
     destination = Path(output_dir).resolve()
+    manifest_root = Path(manifest_path).resolve().parent
     destination.mkdir(parents=True, exist_ok=True)
     artifacts: list[dict[str, Any]] = []
     manifest_artifacts: list[dict[str, str]] = []
@@ -82,7 +84,7 @@ def freeze_holdout(
             },
         })
         manifest_artifacts.append({
-            "path": filename,
+            "path": Path(os.path.relpath(target, manifest_root)).as_posix(),
             "extension_id": extension_id,
             "version": version,
             "sha256": sha256,

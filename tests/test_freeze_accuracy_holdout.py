@@ -66,7 +66,7 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
             self.assertEqual(corpus_value["holdout"]["status"], "fresh-labeled")
             self.assertEqual(len(corpus_value["artifacts"]), 2)
             self.assertEqual(len(manifest_value["artifacts"]), 2)
-            self.assertTrue(all((output_dir / row["path"]).is_file() for row in manifest_value["artifacts"]))
+            self.assertTrue(all((manifest.parent / row["path"]).is_file() for row in manifest_value["artifacts"]))
 
     def test_freezer_can_verify_already_retained_private_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
