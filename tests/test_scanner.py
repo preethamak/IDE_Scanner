@@ -1702,6 +1702,14 @@ class ScannerTests(unittest.TestCase):
             entries[("bingcha.bcai-tools", "4.0.37")]["artifact_sha256"],
             "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
         )
+        self.assertEqual(
+            entries[("nrwl.angular-console", "18.95.0")]["artifact_sha256"],
+            "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+        )
+        self.assertEqual(
+            entries[("nrwl.angular-console", "18.95.0")]["advisory_id"],
+            "GHSA-c9j4-9m59-847w",
+        )
 
     def test_bundled_advisory_snapshot_contains_independently_reported_backdoors(self) -> None:
         from ide_scanner.scanner import _load_extension_advisories
