@@ -3268,6 +3268,7 @@ def _load_sandbox_observation_bundle(path: Path | str | None = None) -> dict[str
         "schema_version": str(metadata_source.get("schema_version") or "unknown"),
         "backend": str(plan.get("backend") or "external"),
         "observation_count": sum(len(items) for items in out.values()),
+        "observed_kinds": _observation_kinds(out),
     }
     if isinstance(plan.get("resource_limits"), dict):
         metadata["resource_limits"] = dict(plan["resource_limits"])
@@ -3311,8 +3312,18 @@ def _merge_dynamic_runtime_bundle(
         "runtime_runs": runs,
         "runtime_required_ids": sorted({str(item) for item in required_ids if str(item)}),
         "observation_count": sum(len(value) for value in merged_extensions.values()),
+        "observed_kinds": _observation_kinds(merged_extensions),
     })
     return {"extensions": merged_extensions, "metadata": metadata}
+
+
+def _observation_kinds(observations: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+    """Expose bounded runtime event types without persisting raw paths/commands."""
+    return {
+        extension_id: sorted({str(item.get("kind")) for item in items if item.get("kind")})
+        for extension_id, items in observations.items()
+        if items
+    }
 
 
 def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:

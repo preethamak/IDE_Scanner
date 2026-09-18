@@ -91,6 +91,7 @@ jobs:
         run: |
           python scripts/scan_corpus.py \
             --path fixtures/agent-tool \
+            --path fixtures/credential-exfil \
             --profile deep \
             --runtime \
             --runtime-timeout 20 \
@@ -107,11 +108,18 @@ jobs:
           if execution.get("incomplete_count") != 0:
               raise SystemExit("runtime smoke corpus is incomplete")
           extensions = report.get("extensions") or []
-          if len(extensions) != 1:
-              raise SystemExit("runtime smoke corpus did not return exactly one extension")
-          provider = ((extensions[0].get("analysis_coverage") or {}).get("providers") or {}).get("dynamic_sandbox") or {}
-          if provider.get("status") != "completed" or provider.get("executed") is not True:
-              raise SystemExit(f"dynamic runtime provider was not completed: {provider}")
+          if len(extensions) != 2:
+              raise SystemExit("runtime smoke corpus did not return exactly two extensions")
+          for extension in extensions:
+              provider = ((extension.get("analysis_coverage") or {}).get("providers") or {}).get("dynamic_sandbox") or {}
+              if provider.get("status") != "completed" or provider.get("executed") is not True:
+                  raise SystemExit(f"dynamic runtime provider was not completed: {provider}")
+          credential = next((item for item in extensions if item.get("extension_id") == "unknown.shadow-helper"), None)
+          if credential is None:
+              raise SystemExit("runtime smoke corpus did not include the credential-exfiltration control")
+          observed_kinds = ((report.get("intelligence") or {}).get("dynamic_sandbox") or {}).get("observed_kinds") or {}
+          if "secret_exfil" not in observed_kinds.get("unknown.shadow-helper", []):
+              raise SystemExit("runtime smoke did not observe the credential canary reaching a network body")
           PY
       - uses: actions/upload-artifact@v4
         if: always()

@@ -35,6 +35,42 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertIn("--runtime", command)
         self.assertEqual(command[command.index("--runtime-timeout") + 1], "30")
 
+    def test_runtime_observation_kinds_survive_corpus_aggregation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"runtime","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            args = _parser().parse_args([
+                "--path", str(root),
+                "--profile", "deep",
+                "--runtime",
+                "--out", str(root / "report.json"),
+            ])
+            extension = {
+                "extension_id": "example.runtime",
+                "version": "1.0.0",
+                "analysis_status": "complete",
+                "decision": "allow",
+                "verdict": "clean",
+                "artifact_hash": "a" * 64,
+                "analysis_coverage": {"status": "complete", "coverage_percent": 100},
+                "_corpus_dynamic_sandbox": {
+                    "runtime_required_ids": ["example.runtime"],
+                    "runtime_runs": [{"extension_id": "example.runtime", "status": "completed"}],
+                    "observed_kinds": {"example.runtime": ["secret_exfil", "network_attempt"]},
+                },
+            }
+            with patch("scripts.scan_corpus._scan_one", return_value=extension):
+                report = run(args)
+
+        dynamic = report["intelligence"]["dynamic_sandbox"]
+        self.assertEqual(dynamic["observed_kinds"]["example.runtime"], ["network_attempt", "secret_exfil"])
+        self.assertEqual(dynamic["runtime_required_ids"], ["example.runtime"])
+        self.assertEqual(dynamic["runtime_runs"][0]["status"], "completed")
+
     def test_complete_manifest_result_can_be_resumed_from_checkpoint(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

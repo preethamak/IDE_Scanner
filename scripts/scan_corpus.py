@@ -216,6 +216,17 @@ def _scan_one(
                     "expected_sha256": expected_sha256,
                 }
                 extension["artifact_inventory"] = inventory
+            dynamic_sandbox = (
+                payload.get("intelligence", {}).get("dynamic_sandbox")
+                if isinstance(payload.get("intelligence"), dict)
+                else None
+            )
+            if isinstance(dynamic_sandbox, dict):
+                # The child report intentionally exposes only bounded event
+                # kinds here. Raw runtime paths and commands remain in the
+                # child evidence/finding surface and are not duplicated into
+                # the aggregate corpus metadata.
+                extension["_corpus_dynamic_sandbox"] = dynamic_sandbox
             return extension
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return _worker_error(path, source, target, f"Corpus worker returned an invalid report: {exc}")
@@ -265,6 +276,7 @@ def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_t
         "profile": profile,
         "runtime": bool(runtime),
         "runtime_timeout_seconds": runtime_timeout if runtime else 0,
+        "runtime_evidence_version": "1",
     }
 
 
@@ -436,7 +448,44 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         executor.shutdown(wait=True)
 
-    extensions = [_extension_from_dict(extensions_by_index[index]) for index in range(len(targets))]
+    observed_kinds: dict[str, set[str]] = {}
+    runtime_runs: list[dict[str, Any]] = []
+    runtime_required_ids: set[str] = set()
+    extension_values: list[dict[str, Any]] = []
+    for index in range(len(targets)):
+        value = extensions_by_index[index]
+        dynamic_sandbox = value.pop("_corpus_dynamic_sandbox", {})
+        if isinstance(dynamic_sandbox, dict):
+            kinds = dynamic_sandbox.get("observed_kinds")
+            if isinstance(kinds, dict):
+                for extension_id, event_kinds in kinds.items():
+                    if isinstance(extension_id, str) and isinstance(event_kinds, list):
+                        observed_kinds.setdefault(extension_id, set()).update(
+                            str(item) for item in event_kinds if str(item)
+                        )
+            runs = dynamic_sandbox.get("runtime_runs")
+            if isinstance(runs, list):
+                runtime_runs.extend(item for item in runs if isinstance(item, dict))
+            required_ids = dynamic_sandbox.get("runtime_required_ids")
+            if isinstance(required_ids, list):
+                runtime_required_ids.update(str(item) for item in required_ids if str(item))
+        extension_values.append(value)
+    extensions = [_extension_from_dict(value) for value in extension_values]
+    dynamic_sandbox = {
+        "status": "executed" if args.runtime else "not-requested",
+        "mode": "executed" if args.runtime else "static-only",
+        "execution": "controlled-bubblewrap" if args.runtime else "not-run",
+        "executed": bool(args.runtime),
+        "backend": "bubblewrap" if args.runtime else "external",
+        "runtime_policy": "capability-gated-v1" if args.runtime else "external-evidence",
+        "runtime_runs": runtime_runs,
+        "runtime_required_ids": sorted(runtime_required_ids),
+        "observed_kinds": {
+            extension_id: sorted(kinds)
+            for extension_id, kinds in sorted(observed_kinds.items())
+        },
+        "observation_count": sum(len(kinds) for kinds in observed_kinds.values()),
+    }
     report = _build_report(
         extensions,
         {
@@ -448,6 +497,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         },
         include_posture=args.with_posture,
         intelligence={
+            "dynamic_sandbox": dynamic_sandbox,
             "corpus_execution": {
                 "mode": "isolated-subprocess",
                 "jobs": args.jobs,

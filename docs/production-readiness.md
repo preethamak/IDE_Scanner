@@ -116,10 +116,13 @@ PYTHONPATH=src python scripts/scan_corpus.py \
 ```
 
 Its aggregate report records `runtime_enabled`, checkpoint reuse, and the
-per-artifact runtime status. Checkpoints are only resumed for exact manifest
-rows whose artifact hash and completed analysis still match. A batch is not
-production-complete when required runtime providers are failed, skipped, or
-incomplete.
+per-artifact runtime status. It also retains a bounded `observed_kinds` map
+(`secret_exfil`, `network_attempt`, and similar event types) so a batch gate
+can prove that runtime instrumentation observed a behavior without copying
+raw paths or commands into aggregate metadata. Checkpoints are only resumed
+for exact manifest rows whose artifact hash, scanner context, and runtime
+evidence schema still match. A batch is not production-complete when required
+runtime providers are failed, skipped, or incomplete.
 
 # Current hardening increment: archive isolation
 
