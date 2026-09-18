@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-07-22.2",
+  "snapshot_version": "2026-09-18.1",
   "entries": [
     {
       "extension_id": "formulahendry.code-runner",
@@ -12,6 +12,28 @@
       "policy_action": "block",
       "source": "https://nvd.nist.gov/vuln/detail/CVE-2025-65715",
       "summary": "The configurable executor command reaches shell-enabled process execution, allowing arbitrary command execution when configuration is attacker-controlled."
+    },
+    {
+      "extension_id": "noellee-doc.flint-debug",
+      "version": "0.1.1",
+      "artifact_sha256": "3aa31999398e7f80231c03d7137ffdb554a84b83dbcffc59ce16c9a65f9e5d58",
+      "advisory_id": "SOCKET-GLASSWASM-2026-FLINT-DEBUG",
+      "severity": "CRITICAL",
+      "published_at": "2026-06-15T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
+      "summary": "Socket reported this exact Open VSX artifact as a trojanized extension containing an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
+    },
+    {
+      "extension_id": "exargd.vsblack",
+      "version": "0.0.1",
+      "artifact_sha256": "1e283327ad048bea39f4a8501770858a20f3555e87fe3e202274f2e87f8a3c25",
+      "advisory_id": "SOCKET-GLASSWASM-2026-VSBLACK",
+      "severity": "CRITICAL",
+      "published_at": "2026-06-15T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
+      "summary": "Socket reported this exact Open VSX artifact as a trojanized theme carrying an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
     }
   ]
 }

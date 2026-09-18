@@ -1494,6 +1494,23 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("known-vulnerable-extension", {finding["rule_id"] for finding in scanned["findings"]})
         self.assertEqual(report["intelligence"]["extension_advisories"]["snapshot_version"], "unit-test.1")
 
+    def test_bundled_advisory_snapshot_contains_exact_glasswasm_artifacts(self) -> None:
+        from ide_scanner.scanner import _load_extension_advisories
+
+        bundle = _load_extension_advisories()
+        entries = {
+            (entry["extension_id"], entry["version"]): entry
+            for entry in bundle["entries"]
+        }
+        self.assertEqual(
+            entries[("noellee-doc.flint-debug", "0.1.1")]["artifact_sha256"],
+            "3aa31999398e7f80231c03d7137ffdb554a84b83dbcffc59ce16c9a65f9e5d58",
+        )
+        self.assertEqual(
+            entries[("exargd.vsblack", "0.0.1")]["artifact_sha256"],
+            "1e283327ad048bea39f4a8501770858a20f3555e87fe3e202274f2e87f8a3c25",
+        )
+
     def test_missing_required_extension_advisory_snapshot_fails_closed(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "extension"
