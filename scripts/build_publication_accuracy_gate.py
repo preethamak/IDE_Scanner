@@ -122,6 +122,7 @@ def build_publication_accuracy_gate(
     for key, expected_value in holdout_summary.items():
         if summary.get(key) != expected_value:
             raise ValueError(f"The publication holdout summary field {key!r} does not match its result rows")
+    holdout_rule_matrix = _holdout_rule_matrix(holdout_gate, artifacts)
 
     return {
         "schema_version": "1.0",
@@ -145,7 +146,16 @@ def build_publication_accuracy_gate(
             "label_counts": label_counts,
             "required_pass_rate": _number(summary.get("required_pass_rate")),
             "safe_block_rate": _number(summary.get("safe_block_rate")),
+            "safe_reviewed": _number(summary.get("safe_reviewed")),
+            "safe_review_rate": _number(summary.get("safe_review_rate")),
             "malicious_allow_rate": _number(summary.get("malicious_allow_rate")),
+            "malicious_blocked": _number(summary.get("malicious_blocked")),
+            "malicious_block_rate": _number(summary.get("malicious_block_rate")),
+            "malicious_reviewed": _number(summary.get("malicious_reviewed")),
+            "malicious_review_rate": _number(summary.get("malicious_review_rate")),
+            "malicious_detected": _number(summary.get("malicious_detected")),
+            "malicious_detection_rate": _number(summary.get("malicious_detection_rate")),
+            "rule_matrix": holdout_rule_matrix,
             "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
         },
@@ -262,8 +272,12 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
     seen: set[tuple[str, str]] = set()
     safe_evaluated = 0
     safe_blocks = 0
+    safe_reviewed = 0
     malicious_evaluated = 0
     malicious_allows = 0
+    malicious_blocked = 0
+    malicious_reviewed = 0
+    malicious_detected = 0
     required_passed = 0
     for index, result in enumerate(results):
         if not isinstance(result, dict):
@@ -296,6 +310,8 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
             )
         if artifact.get("label") == "known_safe":
             safe_evaluated += 1
+            if _review_or_higher(actual):
+                safe_reviewed += 1
             if decision == "block" or verdict == "malicious":
                 safe_blocks += 1
                 raise ValueError(f"Known-safe holdout artifact {key[0]}@{key[1]} was blocked or classified malicious")
@@ -303,6 +319,12 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
             malicious_evaluated += 1
             if decision == "allow" or verdict == "clean":
                 malicious_allows += 1
+            if decision == "block":
+                malicious_blocked += 1
+            if decision == "review":
+                malicious_reviewed += 1
+            if _review_or_higher(actual):
+                malicious_detected += 1
             if decision != "block" or verdict not in {"suspicious", "malicious"}:
                 raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} was not blocked with a risk verdict")
         expected_sha256 = str(_object(artifact.get("artifact")).get("sha256") or "").lower()
@@ -322,11 +344,49 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
         "safe_evaluated": safe_evaluated,
         "safe_blocks": safe_blocks,
         "safe_block_rate": round(safe_blocks / safe_evaluated, 4) if safe_evaluated else 0.0,
+        "safe_reviewed": safe_reviewed,
+        "safe_review_rate": round(safe_reviewed / safe_evaluated, 4) if safe_evaluated else 0.0,
         "malicious_evaluated": malicious_evaluated,
         "malicious_allows": malicious_allows,
         "malicious_allow_rate": round(malicious_allows / malicious_evaluated, 4) if malicious_evaluated else 0.0,
+        "malicious_blocked": malicious_blocked,
+        "malicious_block_rate": round(malicious_blocked / malicious_evaluated, 4) if malicious_evaluated else 0.0,
+        "malicious_reviewed": malicious_reviewed,
+        "malicious_review_rate": round(malicious_reviewed / malicious_evaluated, 4) if malicious_evaluated else 0.0,
+        "malicious_detected": malicious_detected,
+        "malicious_detection_rate": round(malicious_detected / malicious_evaluated, 4) if malicious_evaluated else 0.0,
         "incomplete_required": 0,
     }
+
+
+def _holdout_rule_matrix(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Recompute per-rule labelled fire counts from retained holdout rows."""
+    labels = {
+        (str(item.get("extension_id") or "").lower(), str(item.get("version") or "")): str(item.get("label") or "")
+        for item in corpus_artifacts
+    }
+    matrix: dict[str, dict[str, int]] = {}
+    for result in gate.get("artifacts") or []:
+        if not isinstance(result, dict):
+            continue
+        key = (str(result.get("extension_id") or "").lower(), str(result.get("version") or ""))
+        label = labels.get(key)
+        actual = result.get("actual") if isinstance(result.get("actual"), dict) else {}
+        if not label or actual.get("analysis_status") != "complete":
+            continue
+        for rule_id in actual.get("rule_ids") or []:
+            if not isinstance(rule_id, str) or not rule_id:
+                continue
+            cell = matrix.setdefault(rule_id, {"fired_on_known_safe": 0, "fired_on_known_malicious": 0})
+            cell[f"fired_on_{label}"] += 1
+    return dict(sorted(matrix.items()))
+
+
+def _review_or_higher(actual: dict[str, Any]) -> bool:
+    return (
+        str(actual.get("decision") or "") in {"review", "block"}
+        or str(actual.get("verdict") or "") in {"review", "suspicious", "malicious"}
+    )
 
 
 def _runtime_contract_errors(contract: dict[str, Any]) -> list[str]:

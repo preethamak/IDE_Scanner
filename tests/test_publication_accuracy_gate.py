@@ -37,9 +37,17 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
             "safe_evaluated": safe,
             "safe_blocks": 0,
             "safe_block_rate": 0.0,
+            "safe_reviewed": 0,
+            "safe_review_rate": 0.0,
             "malicious_evaluated": malicious,
             "malicious_allows": 0,
             "malicious_allow_rate": 0.0,
+            "malicious_blocked": malicious,
+            "malicious_block_rate": 1.0,
+            "malicious_reviewed": 0,
+            "malicious_review_rate": 0.0,
+            "malicious_detected": malicious,
+            "malicious_detection_rate": 1.0,
             "incomplete_required": 0,
         },
         "rule_matrix": {},
@@ -110,6 +118,7 @@ def holdout_gate() -> dict:
                 "analysis_status": "complete",
                 "verdict": "clean",
                 "decision": "allow",
+                "rule_ids": ["filesystem-access"],
                 "artifact_sha256": f"{index + 1:x}" * 64,
                 "runtime_contract": {
                     "coverage_status": "complete",
@@ -135,6 +144,7 @@ def holdout_gate() -> dict:
                 "analysis_status": "complete",
                 "verdict": "suspicious",
                 "decision": "block",
+                "rule_ids": ["download-and-execute"],
                 "artifact_sha256": f"{index + 11:x}" * 64,
                 "runtime_contract": {
                     "coverage_status": "complete",
@@ -168,6 +178,9 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         self.assertEqual(result["holdout"]["status"], "fresh-labeled")
         self.assertTrue(result["holdout"]["complete"])
         self.assertEqual(result["holdout"]["label_counts"], {"known_safe": 5, "known_malicious": 5})
+        self.assertEqual(result["holdout"]["safe_review_rate"], 0.0)
+        self.assertEqual(result["holdout"]["malicious_detection_rate"], 1.0)
+        self.assertEqual(result["holdout"]["rule_matrix"]["download-and-execute"]["fired_on_known_malicious"], 5)
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
 
     def test_rejects_fixture_only_holdout(self) -> None:
@@ -294,6 +307,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             invalid = holdout_gate()
             invalid["summary"]["malicious_allows"] = 1
             with self.assertRaisesRegex(ValueError, "summary field 'malicious_allows'"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_tampered_noise_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["summary"]["safe_review_rate"] = 1.0
+            with self.assertRaisesRegex(ValueError, "summary field 'safe_review_rate'"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),
