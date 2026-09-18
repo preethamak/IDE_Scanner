@@ -98,6 +98,37 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
             frozen = next(output_dir.glob("*.vsix"))
             self.assertEqual(frozen.read_bytes(), b"retained-vsix")
 
+    def test_freezer_falls_back_to_pinned_download_when_private_cache_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"downloaded-vsix"
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "3",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [{
+                    **self._source_artifact("download.ext", "1.0.0", "known_safe", payload),
+                    "local_path": "missing/private-cache.vsix",
+                }],
+            }), encoding="utf-8")
+            output_dir = root / "artifacts"
+            corpus = root / "holdout-corpus.json"
+            manifest = root / "corpus-manifest.json"
+
+            def fake_acquire(_url: str, expected: str, destination: Path) -> Path:
+                self.assertEqual(expected, hashlib.sha256(payload).hexdigest())
+                downloaded = destination / "downloaded.vsix"
+                downloaded.write_bytes(payload)
+                return downloaded
+
+            with patch("scripts.freeze_accuracy_holdout.acquire_https_vsix", side_effect=fake_acquire) as acquire:
+                freeze_holdout(source, output_dir, corpus, manifest)
+
+            acquire.assert_called_once()
+            self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), payload)
+
     @staticmethod
     def _source_artifact(extension_id: str, version: str, label: str, payload: bytes) -> dict[str, object]:
         return {

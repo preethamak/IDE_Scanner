@@ -162,13 +162,18 @@ def _acquire_or_verify(
         candidate = Path(str(local_path)).expanduser()
         if not candidate.is_absolute() and source_root is not None:
             candidate = source_root / candidate
-        if not candidate.is_file() or candidate.is_symlink():
+        # A private local cache is optional. Clean CI checkouts do not carry
+        # the retained bytes, so a missing cache must fall through to the
+        # pinned HTTPS acquisition path below. Existing-but-unsafe or
+        # hash-mismatched bytes remain hard failures.
+        if candidate.is_symlink() or (candidate.exists() and not candidate.is_file()):
             raise ValueError(f"local holdout artifact is not a regular file: {candidate}")
-        candidate = candidate.resolve()
-        if _sha256(candidate) != expected_sha256:
-            raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {candidate}")
-        shutil.copyfile(candidate, target)
-        return
+        if candidate.is_file():
+            candidate = candidate.resolve()
+            if _sha256(candidate) != expected_sha256:
+                raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {candidate}")
+            shutil.copyfile(candidate, target)
+            return
     try:
         temporary = acquire_https_vsix(url, expected_sha256, destination)
     except ArtifactInputError as exc:
