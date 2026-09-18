@@ -21,6 +21,8 @@ jobs:
       - name: Unit and integration tests
         run: python -m pytest -q
       - name: Scan deterministic production fixtures
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
         run: |
           python -m ide_scanner scan \
             --fixtures \

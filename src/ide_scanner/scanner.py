@@ -1101,11 +1101,18 @@ def scan_marketplace_extension(
                     runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
                         item for item in items if isinstance(item, dict)
                     ]
+                    runtime_failed = any(
+                        isinstance(item, dict)
+                        and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+                        for item in items
+                    )
                     run_record.update({
-                        "status": "completed",
+                        "status": "failed" if runtime_failed else "completed",
                         "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
                         "observation_count": len(items),
                     })
+                    if runtime_failed:
+                        run_record["error"] = "Runtime execution did not complete successfully."
                 except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
                     runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
                         "kind": "sandbox_error",
@@ -2173,17 +2180,23 @@ def _add_code_findings(
             [rel],
             "Require a product reason and user-visible flow for reading credential files.",
         ))
-    if secret_refs and has_file_read and has_network and _features_nearby(text, [secret_regex, FILE_READ_RE, NETWORK_SINK_RE]):
+    # Credential text, a file read, and a network call in one source file are
+    # common in legitimate authenticated clients and bundled agent tools. A
+    # verdict-driving exfiltration chain requires the value itself to reach the
+    # network sink; proximity remains a separate exposure note below.
+    direct_credential_network_flow = bool(identifier_credential_flow) or _has_direct_credential_network_flow(text, secret_regex)
+    if secret_refs and has_file_read and has_network and direct_credential_network_flow:
         findings.append(_finding(
             extension_id,
             version,
             "credential-exfiltration-chain",
             "credential-access",
             "HIGH",
-            0.9,
-            "Code combines credential references, local file reads, and outbound network writes.",
+            0.94,
+            "A credential-file value reaches an outbound network write through a bounded local data flow.",
             [rel],
-            "Remove or block this extension until the data flow is manually verified.",
+            "Verify the exact credential source, destination, and user-authorized purpose before allowing the extension.",
+            {"evidence_class": "correlated", "correlation": "proven-local-value-flow"},
         ))
     if has_destructive and has_encode and has_network and _features_nearby(text, [DESTRUCTIVE_RE, ENCODE_ARCHIVE_RE, NETWORK_SINK_RE]):
         findings.append(_finding(

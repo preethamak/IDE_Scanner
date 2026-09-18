@@ -243,12 +243,17 @@ def _execute_entrypoint(
             check=False,
         )
         combined = f"{result.stdout}\n{result.stderr}"
+        succeeded = result.returncode == 0
         observations: list[dict[str, Any]] = [{
-            "kind": "entrypoint_executed",
+            "kind": "entrypoint_executed" if succeeded else "sandbox_error",
+            "phase": "activation" if not succeeded else None,
             "returncode": result.returncode,
             "stdout_bytes": len(result.stdout.encode("utf-8", errors="replace")),
             "stderr_bytes": len(result.stderr.encode("utf-8", errors="replace")),
         }]
+        observations[0] = {key: value for key, value in observations[0].items() if value is not None}
+        if result.returncode != 0 and result.stderr:
+            observations[0]["stderr_excerpt"] = result.stderr[:500]
         if CANARY_VALUE in combined:
             observations.append({
                 "kind": "secret_exfil",

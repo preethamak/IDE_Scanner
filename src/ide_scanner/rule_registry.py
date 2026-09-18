@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.17-policy-v3-calibration.13"
+RULESET_VERSION = "2026.09.18-policy-v3-calibration.14"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -68,9 +68,9 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "category": "credential-access",
         "evidence_class": "correlated",
         "default_severity": "HIGH",
-        "description": "Detects code paths combining credential references, local file reads, and outbound transfer.",
-        "recommendation": "Review source and remove the extension if behavior is unexpected.",
-        "false_positive_notes": "May trigger on legitimate cloud tooling or credential helpers.",
+        "description": "Detects a credential-file value reaching an outbound request through a bounded local data flow.",
+        "recommendation": "Verify the exact credential source, destination, and user-authorized purpose before allowing the extension.",
+        "false_positive_notes": "Authenticated cloud tooling may intentionally send user-authorized credentials; proximity without value flow is not sufficient for this rule.",
         "benchmark_tags": ["credential", "filesystem", "network"],
     },
     "credential-harvesting-exfiltration": {

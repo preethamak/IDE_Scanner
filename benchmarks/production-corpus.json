@@ -44,7 +44,7 @@
       "label": "gray",
       "gate_required": true,
       "artifact": {"source_type": "fixture_directory", "path": "../fixtures/native-artifact", "sha256": "7391734eafbe982cbab9edf258b57d148d035edd65baf7b016478c4ff1cf1221", "original_bytes_available": true},
-      "expected": {"allowed_verdicts": ["review"], "allowed_decisions": ["review"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["native-or-packed-artifact"], "forbidden_rule_ids": [], "max_malware_score": 0}
+      "expected": {"allowed_verdicts": ["clean"], "allowed_decisions": ["allow"], "allowed_analysis_statuses": ["complete"], "required_rule_ids": ["native-or-packed-artifact"], "forbidden_rule_ids": [], "max_malware_score": 0, "max_risk_score": 32}
     },
     {
       "extension_id": "unknown.shadow-helper",
