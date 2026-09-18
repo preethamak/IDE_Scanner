@@ -210,6 +210,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "corpus.json", corpus),
                 )
 
+    def test_rejects_threat_report_as_known_safe_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = holdout_corpus()
+            corpus["artifacts"][0]["label_evidence"]["source_type"] = "independent_threat_report"
+            with self.assertRaisesRegex(ValueError, "known_safe label requires independent safety evidence"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", corpus),
+                )
+
     def test_rejects_static_only_holdout_from_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -38,6 +38,18 @@ LABEL_EVIDENCE_SOURCE_TYPES = {
     "trusted_threat_feed_and_independent_hash_report",
     "malware_removal_and_independent_hash_report",
 }
+SAFE_LABEL_EVIDENCE_SOURCE_TYPES = {
+    "independent_adjudication",
+    "independent_review",
+    "independent_hash_report_and_official_release",
+}
+MALICIOUS_LABEL_EVIDENCE_SOURCE_TYPES = {
+    "independent_adjudication",
+    "independent_threat_report",
+    "maintainer_advisory_and_independent_hash_report",
+    "trusted_threat_feed_and_independent_hash_report",
+    "malware_removal_and_independent_hash_report",
+}
 # A two-artifact holdout can only catch a catastrophic regression.  Public
 # classification needs a small, independently labelled sample on both sides
 # before it is allowed to represent ecosystem accuracy.
@@ -202,7 +214,7 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
         seen.add(key)
         if artifact.get("gate_required") is not True or artifact.get("label") not in LABELS:
             raise ValueError(f"Holdout artifact {index} must be a required known_safe or known_malicious label")
-        _validate_label_evidence(artifact.get("label_evidence"), index)
+        _validate_label_evidence(artifact.get("label_evidence"), index, str(artifact.get("label") or ""))
         identity = _object(artifact.get("artifact"))
         source_type = str(identity.get("source_type") or "")
         if source_type == "fixture_directory" or not source_type:
@@ -211,7 +223,7 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
             raise ValueError(f"Holdout artifact {index} requires retained exact bytes and a SHA-256")
 
 
-def _validate_label_evidence(value: Any, index: int) -> None:
+def _validate_label_evidence(value: Any, index: int, label: str | None = None) -> None:
     """Require auditable evidence instead of an operator-written label claim."""
     if not isinstance(value, dict):
         raise ValueError(f"Holdout artifact {index} requires structured label evidence")
@@ -224,6 +236,10 @@ def _validate_label_evidence(value: Any, index: int) -> None:
         raise ValueError(
             f"Holdout artifact {index} label evidence requires an approved independent source_type"
         )
+    if label == "known_safe" and source_type not in SAFE_LABEL_EVIDENCE_SOURCE_TYPES:
+        raise ValueError(f"Holdout artifact {index} known_safe label requires independent safety evidence")
+    if label == "known_malicious" and source_type not in MALICIOUS_LABEL_EVIDENCE_SOURCE_TYPES:
+        raise ValueError(f"Holdout artifact {index} known_malicious label requires threat evidence")
     parsed = urlparse(source_url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError(f"Holdout artifact {index} label evidence requires a public HTTPS source URL")

@@ -8,6 +8,8 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "--source benchmarks/holdouts/real-evidence-2026-source.json" in workflow
     assert "--profile deep" in workflow
     assert "--runtime" in workflow
+    assert "--jobs 1" in workflow
+    assert "--timeout 180" in workflow
     assert "benchmark holdout" in workflow
     assert "build_publication_accuracy_gate.py" in workflow
     assert "activate-scan-publication" not in workflow

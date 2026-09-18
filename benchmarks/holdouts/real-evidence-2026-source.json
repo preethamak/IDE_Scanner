@@ -1,10 +1,10 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.18.3",
+  "corpus_version": "2026.09.19.5",
   "holdout": {
     "status": "fresh-labeled",
-    "label_source": "Independent hash report and official release for the known-safe Nx Console control; independent threat report and exact hash for the known-malicious BCAI Rosetta artifact.",
+    "label_source": "Independent hash report and independent review of exact official publisher artifacts for known-safe controls; independent threat report and exact hash for the known-malicious BCAI Rosetta artifact.",
     "frozen_at": "2026-09-18T00:00:00Z"
   },
   "artifacts": [
@@ -23,6 +23,48 @@
       }
     },
     {
+      "extension_id": "streetsidesoftware.code-spell-checker",
+      "version": "4.5.6",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/streetsidesoftware/vsextensions/code-spell-checker/4.5.6/vspackage",
+      "local_path": "../external/artifacts/code-spell-checker-4.5.6/code-spell-checker-4.5.6.vsix",
+      "sha256": "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker",
+        "publisher_source_url": "https://github.com/streetsidesoftware/vscode-spell-checker",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "redhat.vscode-yaml",
+      "version": "1.24.0",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/vscode-yaml/1.24.0/vspackage",
+      "local_path": "../external/artifacts/vscode-yaml-1.24.0/vscode-yaml-1.24.0-298.vsix",
+      "sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml",
+        "publisher_source_url": "https://github.com/redhat-developer/vscode-yaml",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "rust-lang.rust-analyzer",
+      "version": "0.3.2971",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/rust-lang/vsextensions/rust-analyzer/0.3.2971/vspackage",
+      "local_path": "../external/artifacts/rust-analyzer-no-server-2026-07-13/rust-analyzer-no-server.vsix",
+      "sha256": "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer",
+        "publisher_source_url": "https://github.com/rust-lang/rust-analyzer",
+        "retrieved_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
       "extension_id": "bingcha.bcai-tools",
       "version": "4.0.37",
       "label": "known_malicious",
@@ -33,6 +75,20 @@
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
         "retrieved_at": "2026-09-18T00:00:00Z"
+      }
+    },
+    {
+      "extension_id": "ms-python.python",
+      "version": "2026.5.2026070801",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/ms-python/vsextensions/python/2026.5.2026070801/vspackage",
+      "local_path": "../external/artifacts/public-holdout-2026-09-18/ms-python.python-2026.5.2026070801.vsix",
+      "sha256": "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=ms-python.python",
+        "publisher_source_url": "https://github.com/microsoft/vscode-python",
+        "retrieved_at": "2026-09-19T00:00:00Z"
       }
     }
   ]

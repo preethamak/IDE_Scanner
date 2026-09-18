@@ -77,13 +77,16 @@ jobs:
         env:
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
         run: |
+          # Keep the accuracy gate serialized: exact third-party artifacts can
+          # invoke semgrep and the runtime backend, and parallel workers can
+          # turn a healthy artifact into a timeout through host contention.
           python scripts/scan_corpus.py \
             --manifest holdout-manifest.json \
             --profile deep \
             --runtime \
             --runtime-timeout 20 \
-            --jobs 2 \
-            --timeout 120 \
+            --jobs 1 \
+            --timeout 180 \
             --out holdout-scan.json
           python -m ide_scanner benchmark holdout \
             --corpus holdout-corpus.json \

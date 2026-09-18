@@ -63,7 +63,7 @@ def freeze_holdout(
         sha256 = str(item.get("sha256") or "").strip().lower()
         if not SHA256_RE.fullmatch(sha256):
             raise ValueError(f"source artifact {index} requires a 64-character SHA-256")
-        _validate_label_evidence(item.get("label_evidence"), index)
+        _validate_label_evidence(item.get("label_evidence"), index, str(label))
 
         filename = f"{_safe_name(extension_id)}-{_safe_name(version)}-{sha256[:16]}.vsix"
         target = destination / filename
