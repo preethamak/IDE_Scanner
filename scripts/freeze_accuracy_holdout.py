@@ -38,10 +38,12 @@ def freeze_holdout(
     output_dir: Path | str,
     corpus_path: Path | str,
     manifest_path: Path | str,
+    artifact_vault: Path | str | None = None,
 ) -> dict[str, Any]:
     source = _read_source(Path(source_path))
     destination = Path(output_dir).resolve()
     manifest_root = Path(manifest_path).resolve().parent
+    vault_root = Path(artifact_vault).expanduser().resolve() if artifact_vault else None
     destination.mkdir(parents=True, exist_ok=True)
     artifacts: list[dict[str, Any]] = []
     manifest_artifacts: list[dict[str, str]] = []
@@ -68,7 +70,15 @@ def freeze_holdout(
         filename = f"{_safe_name(extension_id)}-{_safe_name(version)}-{sha256[:16]}.vsix"
         target = destination / filename
         local_path = item.get("local_path")
-        _acquire_or_verify(source_url, sha256, target, destination, local_path=local_path, source_root=Path(source_path).resolve().parent)
+        _acquire_or_verify(
+            source_url,
+            sha256,
+            target,
+            destination,
+            local_path=local_path,
+            source_root=Path(source_path).resolve().parent,
+            artifact_vault=vault_root,
+        )
         artifacts.append({
             "extension_id": extension_id,
             "version": version,
@@ -155,15 +165,23 @@ def _acquire_or_verify(
     *,
     local_path: Any = None,
     source_root: Path | None = None,
+    artifact_vault: Path | None = None,
 ) -> None:
     if target.exists():
         if target.is_file() and _sha256(target) == expected_sha256:
             return
         raise ValueError(f"refusing to overwrite an existing non-matching holdout artifact: {target}")
     if local_path is not None and str(local_path).strip():
-        candidate = Path(str(local_path)).expanduser()
-        if not candidate.is_absolute() and source_root is not None:
-            candidate = source_root / candidate
+        raw_candidate = Path(str(local_path)).expanduser()
+        if artifact_vault is not None:
+            candidate = raw_candidate if raw_candidate.is_absolute() else artifact_vault / raw_candidate
+            resolved_candidate = candidate.resolve()
+            if artifact_vault not in (resolved_candidate, *resolved_candidate.parents):
+                raise ValueError(f"local holdout artifact escapes the private artifact vault: {candidate}")
+        else:
+            candidate = raw_candidate
+            if not candidate.is_absolute() and source_root is not None:
+                candidate = source_root / candidate
         # A private local cache is optional. Clean CI checkouts do not carry
         # the retained bytes, so a missing cache must fall through to the
         # pinned HTTPS acquisition path below. Existing-but-unsafe or
@@ -171,10 +189,10 @@ def _acquire_or_verify(
         if candidate.is_symlink() or (candidate.exists() and not candidate.is_file()):
             raise ValueError(f"local holdout artifact is not a regular file: {candidate}")
         if candidate.is_file():
-            candidate = candidate.resolve()
-            if _sha256(candidate) != expected_sha256:
-                raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {candidate}")
-            shutil.copyfile(candidate, target)
+            resolved_candidate = candidate.resolve()
+            if _sha256(resolved_candidate) != expected_sha256:
+                raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {resolved_candidate}")
+            shutil.copyfile(resolved_candidate, target)
             return
     try:
         temporary = acquire_https_vsix(url, expected_sha256, destination)
@@ -226,9 +244,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", required=True, type=Path, help="Private directory for retained VSIX bytes.")
     parser.add_argument("--corpus", required=True, type=Path, help="Output fresh holdout corpus JSON.")
     parser.add_argument("--manifest", required=True, type=Path, help="Output scan_corpus manifest JSON.")
+    parser.add_argument(
+        "--artifact-vault",
+        type=Path,
+        help="Optional private vault root for local_path entries; relative paths are confined to this directory.",
+    )
     args = parser.parse_args(argv)
     try:
-        result = freeze_holdout(args.source, args.output_dir, args.corpus, args.manifest)
+        result = freeze_holdout(args.source, args.output_dir, args.corpus, args.manifest, artifact_vault=args.artifact_vault)
     except ValueError as exc:
         parser.error(str(exc))
     print(json.dumps(result, sort_keys=True))

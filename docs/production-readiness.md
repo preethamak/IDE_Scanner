@@ -81,6 +81,23 @@ private artifact vault. The source spec must still carry the public HTTPS
 artifact URL, exact expected SHA-256, and independent label evidence; the local
 bytes are copied only after their digest matches. This supports offline or
 restricted production workers without turning local fixtures into holdout truth.
+For a worker-local vault, pass `--artifact-vault /secure/guardrails/holdout`;
+relative `local_path` values are confined to that directory and path escapes are
+rejected. Keep the vault outside the repository and make it available only to
+the isolated holdout worker:
+
+```bash
+PYTHONPATH=src python scripts/freeze_accuracy_holdout.py \
+  --source benchmarks/holdouts/real-evidence-2026-source.json \
+  --artifact-vault /secure/guardrails/holdout \
+  --output-dir /secure/guardrails/holdout-frozen \
+  --corpus /secure/guardrails/holdout-corpus.json \
+  --manifest /secure/guardrails/holdout-manifest.json
+```
+
+The command still requires the public source URL and exact digest for every
+row. A rebuilt package, source checkout, or artifact with a different digest is
+rejected rather than used as a substitute.
 
 ## Dynamic runtime coverage
 

@@ -129,6 +129,54 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
             acquire.assert_called_once()
             self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), payload)
 
+    def test_freezer_resolves_relative_paths_inside_an_explicit_artifact_vault(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "private-vault"
+            vault.mkdir()
+            artifact = vault / "retained.vsix"
+            artifact.write_bytes(b"vault-vsix")
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "4",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [{
+                    **self._source_artifact("vault.ext", "1.0.0", "known_safe", b"vault-vsix"),
+                    "local_path": "retained.vsix",
+                }],
+            }), encoding="utf-8")
+            output_dir = root / "artifacts"
+            corpus = root / "holdout-corpus.json"
+            manifest = root / "corpus-manifest.json"
+
+            with patch("scripts.freeze_accuracy_holdout.acquire_https_vsix") as acquire:
+                freeze_holdout(source, output_dir, corpus, manifest, artifact_vault=vault)
+
+            acquire.assert_not_called()
+            self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), b"vault-vsix")
+
+    def test_freezer_rejects_private_vault_path_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "private-vault"
+            vault.mkdir()
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "5",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [{
+                    **self._source_artifact("escape.ext", "1.0.0", "known_safe", b"vault-vsix"),
+                    "local_path": "../outside.vsix",
+                }],
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "escapes the private artifact vault"):
+                freeze_holdout(source, root / "artifacts", root / "holdout.json", root / "manifest.json", artifact_vault=vault)
+
     @staticmethod
     def _source_artifact(extension_id: str, version: str, label: str, payload: bytes) -> dict[str, object]:
         return {
