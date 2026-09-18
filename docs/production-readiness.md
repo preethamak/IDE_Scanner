@@ -104,7 +104,7 @@ The isolated corpus runner exposes the same control for batch work:
 ```bash
 PYTHONPATH=src python scripts/scan_corpus.py \
   --manifest corpus.json \
-  --profile benchmark \
+  --profile deep \
   --runtime \
   --runtime-timeout 20 \
   --jobs 4 \
