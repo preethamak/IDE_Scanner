@@ -114,6 +114,32 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].evidence["occurrence_count"], 2)
 
+    def test_repeated_weak_encoded_execution_matches_are_aggregated_as_context(self) -> None:
+        findings = [
+            Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="encoded-dynamic-execution",
+                category="code",
+                severity="HIGH",
+                confidence=0.68,
+                score=40,
+                evidence_type="static-provider",
+                evidence_summary="YARA rule ide_scanner_encoded_dynamic_execution matched encoded dynamic-execution markers in executable code.",
+                file_refs=[path],
+                recommendation="Use this as supporting context.",
+                evidence={"provider": "yara", "evidence_class": "weak"},
+            )
+            for path in ("dist/a.js", "node_modules/pkg/b.js")
+        ]
+
+        result = _dedupe_findings(findings)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "node_modules/pkg/b.js"])
+
     def test_local_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "agent.vsix"

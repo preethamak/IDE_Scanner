@@ -4478,6 +4478,7 @@ _GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-s
 _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
     "dynamic-code-loading",
     "dynamic-shell-execution",
+    "encoded-dynamic-execution",
     "filesystem-access",
     "network-access",
     "obfuscation",

@@ -125,7 +125,8 @@ the worker is not capable of producing valid dynamic evidence.
 ## Contextual finding noise
 
 Ordinary `network-access`, `filesystem-access`, `process-execution`,
-`dynamic-code-loading`, and generic `obfuscation` signals are capability notes,
+`dynamic-code-loading`, generic `obfuscation`, and weak encoded-execution YARA
+matches are capability notes,
 not abuse-path evidence. When the same rule appears in multiple files, the
 report emits one contextual finding with the complete file list and an
 `evidence.occurrence_count`. Correlated, observed, provenance, and AST
