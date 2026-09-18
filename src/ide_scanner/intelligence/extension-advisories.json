@@ -1,6 +1,17 @@
 {
-  "snapshot_version": "2026-09-19.1",
+  "snapshot_version": "2026-09-19.2",
   "entries": [
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.95.0",
+      "artifact_sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+      "advisory_id": "GHSA-c9j4-9m59-847w",
+      "severity": "CRITICAL",
+      "published_at": "2026-05-18T00:00:00Z",
+      "policy_action": "block",
+      "source": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
+      "summary": "Nx maintainers reported this exact VS Code artifact as compromised; the malicious release harvested developer credentials and established persistence before removal."
+    },
     {
       "extension_id": "formulahendry.code-runner",
       "version": "0.12.2",
