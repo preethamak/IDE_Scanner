@@ -197,3 +197,15 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "holdout.json", invalid),
                     self.write(root, "corpus.json", holdout_corpus()),
                 )
+
+    def test_rejects_falsified_holdout_label_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["summary"]["malicious_evaluated"] = 6
+            with self.assertRaisesRegex(ValueError, "summary label counts"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )

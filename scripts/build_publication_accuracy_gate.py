@@ -80,6 +80,15 @@ def build_publication_accuracy_gate(
             f"{MIN_FRESH_HOLDOUT_SAFE} known-safe and "
             f"{MIN_FRESH_HOLDOUT_MALICIOUS} known-malicious artifacts."
         )
+    label_counts = {
+        "known_safe": sum(1 for artifact in artifacts if artifact.get("label") == "known_safe"),
+        "known_malicious": sum(1 for artifact in artifacts if artifact.get("label") == "known_malicious"),
+    }
+    if (
+        _number(summary.get("safe_evaluated")) != label_counts["known_safe"]
+        or _number(summary.get("malicious_evaluated")) != label_counts["known_malicious"]
+    ):
+        raise ValueError("The publication holdout summary label counts do not match the frozen corpus.")
     _validate_holdout_results(holdout_gate, artifacts)
 
     return {
@@ -101,6 +110,7 @@ def build_publication_accuracy_gate(
             "artifact_count": len(artifacts),
             "safe_evaluated": _number(summary.get("safe_evaluated")),
             "malicious_evaluated": _number(summary.get("malicious_evaluated")),
+            "label_counts": label_counts,
             "required_pass_rate": _number(summary.get("required_pass_rate")),
             "safe_block_rate": _number(summary.get("safe_block_rate")),
             "malicious_allow_rate": _number(summary.get("malicious_allow_rate")),
