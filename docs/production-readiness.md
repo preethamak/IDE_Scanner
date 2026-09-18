@@ -103,12 +103,15 @@ PYTHONPATH=src python scripts/scan_corpus.py \
   --runtime-timeout 20 \
   --jobs 4 \
   --timeout 90 \
+  --checkpoint-dir /secure/guardrails-corpus-v1/checkpoints \
   --out corpus-runtime.json
 ```
 
-Its aggregate report records `runtime_enabled` and the per-artifact runtime
-status. A batch is not production-complete when required runtime providers are
-failed, skipped, or incomplete.
+Its aggregate report records `runtime_enabled`, checkpoint reuse, and the
+per-artifact runtime status. Checkpoints are only resumed for exact manifest
+rows whose artifact hash and completed analysis still match. A batch is not
+production-complete when required runtime providers are failed, skipped, or
+incomplete.
 
 # Current hardening increment: archive isolation
 

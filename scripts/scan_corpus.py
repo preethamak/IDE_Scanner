@@ -43,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", choices=["quick", "standard", "benchmark"], default="quick", help="Static scan profile label.")
     parser.add_argument("--runtime", action="store_true", help="Run the required dynamic providers in an isolated Bubblewrap sandbox for each artifact.")
     parser.add_argument("--runtime-timeout", type=int, default=20, help="Dynamic runtime budget per artifact in seconds, from 1 to 120.")
+    parser.add_argument("--checkpoint-dir", type=Path, help="Private directory for per-artifact JSON checkpoints; enables resumable manifest scans.")
     parser.add_argument("--with-posture", action="store_true", help="Include local IDE/client posture once in the aggregate report.")
     parser.add_argument("--out", "--output", required=True, help="Aggregate JSON report path.")
     return parser
@@ -241,6 +242,71 @@ def _worker_command(path: Path, profile: str, output: Path, *, runtime: bool, ru
     return command
 
 
+def _checkpoint_path(checkpoint_dir: Path, target: dict[str, str]) -> Path:
+    identity = json.dumps(
+        {
+            "path": str(Path(target["path"]).resolve()),
+            "extension_id": target.get("manifest_expected_extension_id", ""),
+            "version": target.get("manifest_expected_version", ""),
+            "sha256": target.get("manifest_expected_sha256", ""),
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    return checkpoint_dir / f"{hashlib.sha256(identity).hexdigest()}.json"
+
+
+def _load_checkpoint(checkpoint_dir: Path | None, target: dict[str, str]) -> dict[str, Any] | None:
+    if checkpoint_dir is None or not target.get("manifest_expected_sha256"):
+        return None
+    path = _checkpoint_path(checkpoint_dir, target)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    expected_target = {
+        "path": str(Path(target["path"]).resolve()),
+        "extension_id": target.get("manifest_expected_extension_id", ""),
+        "version": target.get("manifest_expected_version", ""),
+        "sha256": target.get("manifest_expected_sha256", ""),
+    }
+    if not isinstance(payload, dict) or payload.get("schema_version") != "guardrails.corpus-checkpoint.v1" or payload.get("target") != expected_target:
+        return None
+    extension = payload.get("extension")
+    if not isinstance(extension, dict) or extension.get("analysis_status") != "complete":
+        return None
+    actual = str(extension.get("artifact_hash") or (extension.get("artifact_identity") or {}).get("sha256") or "").lower()
+    if actual != str(target.get("manifest_expected_sha256") or "").lower():
+        return None
+    return extension
+
+
+def _write_checkpoint(checkpoint_dir: Path | None, target: dict[str, str], extension: dict[str, Any]) -> None:
+    if checkpoint_dir is None or not target.get("manifest_expected_sha256"):
+        return
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    target_identity = {
+        "path": str(Path(target["path"]).resolve()),
+        "extension_id": target.get("manifest_expected_extension_id", ""),
+        "version": target.get("manifest_expected_version", ""),
+        "sha256": target.get("manifest_expected_sha256", ""),
+    }
+    path = _checkpoint_path(checkpoint_dir, target)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({
+        "schema_version": "guardrails.corpus-checkpoint.v1",
+        "target": target_identity,
+        "extension": extension,
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _scan_one_safe(target: dict[str, str], *, timeout: int, profile: str, runtime: bool, runtime_timeout: int) -> dict[str, Any]:
+    try:
+        return _scan_one(target, timeout=timeout, profile=profile, runtime=runtime, runtime_timeout=runtime_timeout)
+    except Exception as exc:  # noqa: BLE001 - one hostile artifact must not abort a corpus
+        return _worker_error(Path(target["path"]), target.get("type", "vscode"), target, f"Corpus worker raised an isolated error: {exc}")
+
+
 def _canonical_artifact_sha256(path: Path) -> str:
     """Hash the same canonical VSIX bytes used for scanner artifact identity.
 
@@ -296,25 +362,47 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("timeout must be at least 1 second")
     if not 1 <= args.runtime_timeout <= 120:
         raise ValueError("runtime-timeout must be between 1 and 120 seconds")
+    if args.checkpoint_dir and not args.manifest:
+        raise ValueError("checkpoint-dir requires --manifest so exact artifact identity can be resumed safely")
     targets = _targets(args)
     if not targets:
         raise ValueError("no extension artifacts were discovered")
 
+    checkpoint_dir = args.checkpoint_dir.resolve() if args.checkpoint_dir else None
     extensions_by_index: dict[int, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=min(args.jobs, len(targets))) as executor:
-        futures = {
-            executor.submit(
-                _scan_one,
-                target,
-                timeout=args.timeout,
-                profile=args.profile,
-                runtime=args.runtime,
-                runtime_timeout=args.runtime_timeout,
-            ): index
-            for index, target in enumerate(targets)
-        }
+    pending: dict[int, dict[str, str]] = {}
+    for index, target in enumerate(targets):
+        cached = _load_checkpoint(checkpoint_dir, target)
+        if cached is not None:
+            extensions_by_index[index] = cached
+            print(json.dumps({"completed": len(extensions_by_index), "total": len(targets), "source": "checkpoint", "path": target["path"]}), file=sys.stderr, flush=True)
+        else:
+            pending[index] = target
+
+    executor = ThreadPoolExecutor(max_workers=min(args.jobs, max(1, len(pending))))
+    futures = {
+        executor.submit(
+            _scan_one_safe,
+            target,
+            timeout=args.timeout,
+            profile=args.profile,
+            runtime=args.runtime,
+            runtime_timeout=args.runtime_timeout,
+        ): index
+        for index, target in pending.items()
+    }
+    try:
         for future in as_completed(futures):
-            extensions_by_index[futures[future]] = future.result()
+            index = futures[future]
+            result = future.result()
+            extensions_by_index[index] = result
+            _write_checkpoint(checkpoint_dir, targets[index], result)
+            print(json.dumps({"completed": len(extensions_by_index), "total": len(targets), "source": "scan", "path": targets[index]["path"], "analysis_status": result.get("analysis_status", "incomplete")}), file=sys.stderr, flush=True)
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
 
     extensions = [_extension_from_dict(extensions_by_index[index]) for index in range(len(targets))]
     report = _build_report(
@@ -347,6 +435,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     if isinstance(item.artifact_inventory.get("corpus_manifest"), dict)
                     and item.artifact_inventory["corpus_manifest"].get("verified") is True
                 ) if args.manifest else 0,
+                "checkpoint_dir": str(checkpoint_dir) if checkpoint_dir else "",
+                "resumed_count": len(targets) - len(pending),
             }
         },
     )
