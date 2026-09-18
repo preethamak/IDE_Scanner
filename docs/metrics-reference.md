@@ -386,6 +386,26 @@ wrapped VSIX it is the hash of the unwrapped VSIX bytes, matching
 row is checked against the scanned extension identity and canonical artifact
 hash; a mismatch is an explicit incomplete result and is never routed as clean.
 
+For public registry activation, the deterministic production gate is only the
+regression half of the evidence. Build a publication gate from that result and
+a separate, frozen, exact-artifact holdout:
+
+```bash
+PYTHONPATH=src python scripts/build_publication_accuracy_gate.py \
+  --regression-gate production-gate.json \
+  --holdout-gate holdout-gate.json \
+  --holdout-corpus holdout-corpus.json \
+  --out publication-accuracy-gate.json
+```
+
+The holdout manifest must be frozen before scanning, retain original bytes and
+SHA-256 values, document artifact-specific label evidence, contain both
+`known_safe` and `known_malicious` exact artifacts, and use non-fixture source
+types. The script requires every holdout artifact to scan completely under one
+full scanner build and rejects an `unknown` build. The website publication
+scripts consume this combined artifact and will not activate a regression-only
+gate.
+
 The corpus runner isolates each artifact in a killable subprocess. A timeout is
 recorded as `decision=incomplete`, never as clean. The audit reports findings,
 affected extensions, completed-versus-incomplete routing, evidence classes,
