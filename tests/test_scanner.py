@@ -16,7 +16,7 @@ from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
-from ide_scanner.sandbox_runner import _execute_entrypoint, _observations_from_trace, _prepare_target, run_sandbox
+from ide_scanner.sandbox_runner import _execute_entrypoint, _extension_main, _observations_from_trace, _prepare_target, run_sandbox
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
@@ -315,6 +315,13 @@ class ScannerTests(unittest.TestCase):
             "phase": "activation",
             "evidence": "manifest declares no Node activation entrypoint",
         }])
+
+    def test_browser_entrypoint_is_used_when_desktop_main_is_absent(self) -> None:
+        self.assertEqual(_extension_main({"browser": "./dist/browser.js"}), "./dist/browser.js")
+        self.assertEqual(
+            _extension_main({"main": "./dist/desktop.js", "browser": "./dist/browser.js"}),
+            "./dist/desktop.js",
+        )
 
     def test_range_derived_advisory_is_context_until_version_is_resolved(self) -> None:
         finding = Finding(

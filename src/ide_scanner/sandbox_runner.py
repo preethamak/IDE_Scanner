@@ -159,7 +159,11 @@ def _planned_commands(manifest: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _extension_main(manifest: dict[str, Any]) -> str | None:
-    main = str(manifest.get("main") or "").strip()
+    # Desktop extensions normally declare `main`; browser-targeted VS Code
+    # extensions declare `browser`. Execute the latter through the same
+    # instrumented Node harness so a capability-heavy web extension cannot be
+    # reported as dynamically covered while its only entrypoint was skipped.
+    main = str(manifest.get("main") or manifest.get("browser") or "").strip()
     return main or None
 
 
