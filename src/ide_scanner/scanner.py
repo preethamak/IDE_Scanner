@@ -966,15 +966,22 @@ def _scan_discovered_targets(
         return []
     if jobs <= 1 or len(targets) == 1:
         return [_scan_discovered_target(target, known_bad_hashes) for target in targets]
-    with ProcessPoolExecutor(max_workers=min(jobs, len(targets))) as executor:
-        return list(
-            executor.map(
-                _scan_discovered_target,
-                targets,
-                repeat(known_bad_hashes),
-                chunksize=1,
+    try:
+        with ProcessPoolExecutor(max_workers=min(jobs, len(targets))) as executor:
+            return list(
+                executor.map(
+                    _scan_discovered_target,
+                    targets,
+                    repeat(known_bad_hashes),
+                    chunksize=1,
+                )
             )
-        )
+    except PermissionError:
+        # Some managed runtimes deny the forkserver socket even though the
+        # per-artifact scanners and their provider subprocesses are usable.
+        # Preserve a truthful scan by retrying sequentially; this is a
+        # capacity fallback, not a relaxation of analysis or isolation.
+        return [_scan_discovered_target(target, known_bad_hashes) for target in targets]
 
 
 def _local_error_extension(path: Path, source: str, message: str) -> ExtensionReport:

@@ -19,14 +19,19 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
         "report_identity": {"scanner_build": BUILD, "policy_version": "policy", "ruleset_version": "rules"},
         "gate": {"passed": True, "checks": {"required": True}},
         "summary": {
+            "total_artifacts": safe + malicious,
+            "scanned_artifacts": safe + malicious,
+            "not_scanned": 0,
             "required_artifacts": safe + malicious,
             "required_passed": safe + malicious,
+            "required_failed": 0,
             "required_pass_rate": 1.0,
             "safe_evaluated": safe,
+            "safe_blocks": 0,
             "safe_block_rate": 0.0,
             "malicious_evaluated": malicious,
+            "malicious_allows": 0,
             "malicious_allow_rate": 0.0,
-            "not_scanned": 0,
             "incomplete_required": 0,
         },
         "rule_matrix": {},
@@ -93,7 +98,12 @@ def holdout_gate() -> dict:
             "scanned": True,
             "passed": True,
             "gate_passed": True,
-            "actual": {"analysis_status": "complete", "artifact_sha256": f"{index + 1:x}" * 64},
+            "actual": {
+                "analysis_status": "complete",
+                "verdict": "clean",
+                "decision": "allow",
+                "artifact_sha256": f"{index + 1:x}" * 64,
+            },
         })
     for index in range(5):
         result["artifacts"].append({
@@ -104,7 +114,12 @@ def holdout_gate() -> dict:
             "scanned": True,
             "passed": True,
             "gate_passed": True,
-            "actual": {"analysis_status": "complete", "artifact_sha256": f"{index + 11:x}" * 64},
+            "actual": {
+                "analysis_status": "complete",
+                "verdict": "suspicious",
+                "decision": "block",
+                "artifact_sha256": f"{index + 11:x}" * 64,
+            },
         })
     return result
 
@@ -217,6 +232,30 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             invalid = holdout_gate()
             invalid["summary"]["malicious_evaluated"] = 6
             with self.assertRaisesRegex(ValueError, "summary label counts"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_holdout_row_without_classification_outcome(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["artifacts"][0]["actual"].pop("verdict")
+            with self.assertRaisesRegex(ValueError, "valid verdict and decision"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_holdout_summary_not_derived_from_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["summary"]["malicious_allows"] = 1
+            with self.assertRaisesRegex(ValueError, "summary field 'malicious_allows'"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),

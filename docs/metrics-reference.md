@@ -461,7 +461,9 @@ runtime path was enabled. The publication holdout must contain at least five
 independently labelled safe artifacts and five independently labelled harmful
 artifacts; a two-item spot check is not treated as ecosystem accuracy. The
 `--allow-static-only` option exists only for offline calibration and must not
-feed the publication gate.
+feed the publication gate. The final publication combiner revalidates each
+row's verdict, decision, completion state, and artifact hash, then recomputes
+summary rates from those rows instead of trusting an operator-edited summary.
 
 The production Deep Scan workflow supports 1, 4, 8, or 16 isolated worker
 shards. Scheduled runs use the 16-worker profile; an exact manual `job_id`

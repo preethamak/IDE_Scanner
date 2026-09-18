@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 LABELS = {"known_safe", "known_malicious"}
+VERDICTS = {"clean", "review", "suspicious", "malicious"}
+DECISIONS = {"allow", "review", "block", "incomplete"}
 LABEL_EVIDENCE_SOURCE_TYPES = {
     "independent_adjudication",
     "independent_review",
@@ -98,7 +100,10 @@ def build_publication_accuracy_gate(
         or _number(summary.get("malicious_evaluated")) != label_counts["known_malicious"]
     ):
         raise ValueError("The publication holdout summary label counts do not match the frozen corpus.")
-    _validate_holdout_results(holdout_gate, artifacts)
+    holdout_summary = _validate_holdout_results(holdout_gate, artifacts)
+    for key, expected_value in holdout_summary.items():
+        if summary.get(key) != expected_value:
+            raise ValueError(f"The publication holdout summary field {key!r} does not match its result rows")
 
     return {
         "schema_version": "1.0",
@@ -208,7 +213,7 @@ def _validate_label_evidence(value: Any, index: int) -> None:
         raise ValueError(f"Holdout artifact {index} label evidence retrieved_at must be ISO-8601") from exc
 
 
-def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> None:
+def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> dict[str, int | float]:
     results = gate.get("artifacts")
     if not isinstance(results, list) or len(results) != len(corpus_artifacts):
         raise ValueError("The holdout gate must retain one result row for every frozen artifact.")
@@ -217,6 +222,11 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
         for item in corpus_artifacts
     }
     seen: set[tuple[str, str]] = set()
+    safe_evaluated = 0
+    safe_blocks = 0
+    malicious_evaluated = 0
+    malicious_allows = 0
+    required_passed = 0
     for index, result in enumerate(results):
         if not isinstance(result, dict):
             raise ValueError(f"Holdout gate result {index} is not an object")
@@ -225,16 +235,54 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
             raise ValueError(f"Holdout gate result {index} has an unexpected or duplicate artifact identity")
         seen.add(key)
         artifact = expected[key]
-        if result.get("label") != artifact.get("label") or result.get("gate_required") is not True:
+        if (
+            result.get("label") != artifact.get("label")
+            or result.get("gate_required") is not True
+            or result.get("scanned") is not True
+            or result.get("passed") is not True
+            or result.get("gate_passed") is not True
+        ):
             raise ValueError(f"Holdout gate result {index} does not preserve the frozen label")
-        if result.get("scanned") is not True or result.get("passed") is not True or result.get("gate_passed") is not True:
-            raise ValueError(f"Holdout artifact {key[0]}@{key[1]} did not pass its required gate")
         actual = _object(result.get("actual"))
         if actual.get("analysis_status") != "complete":
             raise ValueError(f"Holdout artifact {key[0]}@{key[1]} was not completely analyzed")
+        verdict = str(actual.get("verdict") or "")
+        decision = str(actual.get("decision") or "")
+        if verdict not in VERDICTS or decision not in DECISIONS:
+            raise ValueError(f"Holdout artifact {key[0]}@{key[1]} is missing a valid verdict and decision")
+        if artifact.get("label") == "known_safe":
+            safe_evaluated += 1
+            if decision == "block" or verdict == "malicious":
+                safe_blocks += 1
+                raise ValueError(f"Known-safe holdout artifact {key[0]}@{key[1]} was blocked or classified malicious")
+        else:
+            malicious_evaluated += 1
+            if decision == "allow" or verdict == "clean":
+                malicious_allows += 1
+            if decision != "block" or verdict not in {"suspicious", "malicious"}:
+                raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} was not blocked with a risk verdict")
         expected_sha256 = str(_object(artifact.get("artifact")).get("sha256") or "").lower()
         if str(actual.get("artifact_sha256") or "").lower() != expected_sha256:
             raise ValueError(f"Holdout artifact {key[0]}@{key[1]} does not retain the scanned artifact hash")
+        required_passed += 1
+
+    total = len(corpus_artifacts)
+    return {
+        "total_artifacts": total,
+        "scanned_artifacts": total,
+        "not_scanned": 0,
+        "required_artifacts": total,
+        "required_passed": required_passed,
+        "required_failed": total - required_passed,
+        "required_pass_rate": round(required_passed / total, 4) if total else 0.0,
+        "safe_evaluated": safe_evaluated,
+        "safe_blocks": safe_blocks,
+        "safe_block_rate": round(safe_blocks / safe_evaluated, 4) if safe_evaluated else 0.0,
+        "malicious_evaluated": malicious_evaluated,
+        "malicious_allows": malicious_allows,
+        "malicious_allow_rate": round(malicious_allows / malicious_evaluated, 4) if malicious_evaluated else 0.0,
+        "incomplete_required": 0,
+    }
 
 
 def _identity(value: dict[str, Any]) -> dict[str, str]:
