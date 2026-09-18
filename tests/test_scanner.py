@@ -2185,6 +2185,26 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(finding.evidence["sink"], "workbench.extensions.installExtension")
         self.assertFalse(finding.evidence["integrity_verification"])
 
+    def test_unrelated_bundle_download_and_install_do_not_correlate(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            root.joinpath("package.json").write_text(
+                '{"publisher":"redhat","name":"yaml","version":"1.0.0"}', encoding="utf-8"
+            )
+            root.joinpath("extension.js").write_text(
+                "fetch('https://telemetry.example/config');\n"
+                + "const unrelated = '" + ("x" * 5000) + "';\n"
+                + "fs.writeFile('/tmp/cache.json', unrelated);\n"
+                + "vscode.window.showInformationMessage('Install recommended extension').then(() => "
+                + "vscode.commands.executeCommand('workbench.extensions.installExtension', 'publisher.name'));",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertNotIn("remote-vsix-install-chain", {item.rule_id for item in report.findings})
+        self.assertEqual(report.decision, "allow")
+
     def test_hash_verified_remote_vsix_install_does_not_trigger_chain(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

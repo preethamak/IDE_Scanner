@@ -2077,11 +2077,11 @@ def _add_code_findings(
     has_configured_cli = has_exec_file and bool(re.search(r"getConfiguration\(|config\.get\(|executablePath|cliPath", text))
     has_editor_input = bool(re.search(r"activeTextEditor|document\.getText|selection|workspace\.workspaceFolders|uri\.fsPath|fileName", text))
     has_persistence = bool(re.search(r"(\.bashrc|\.zshrc|\.profile|crontab|launchagents|runonce|scheduledtask|systemd|update_rc|startup\s*folder)", text, re.I))
-    has_remote_vsix_install = bool(re.search(
+    remote_vsix_install_re = re.compile(
         r"(?:workbench\.extensions\.installExtension|commands\.executeCommand\s*\(\s*['\"]workbench\.extensions\.installExtension)",
-        text,
         re.I,
-    ))
+    )
+    has_remote_vsix_install = bool(remote_vsix_install_re.search(text))
     has_integrity_verification = has_integrity_gate(text)
     # A standalone "mcp" token is common in documentation, error messages, and
     # word lists. Require an actual agent API or protocol identifier before using
@@ -2133,7 +2133,18 @@ def _add_code_findings(
             },
         ))
 
-    if has_remote_vsix_install and has_download and has_file_write and not has_integrity_verification:
+    # Generated bundles routinely contain a generic fetch helper, workspace
+    # writes, and a user-confirmed `installExtension` command in unrelated
+    # modules.  File-wide co-occurrence turned that shape into a high-severity
+    # updater finding (for example Red Hat YAML), even though no VSIX ever
+    # crossed the three stages.  Require the three legs to be locally connected
+    # around the install sink; the directed module-flow pass handles genuinely
+    # split updater implementations separately.
+    has_connected_remote_vsix_install = _features_nearby(
+        text,
+        [remote_vsix_install_re, DOWNLOAD_RE, FILE_WRITE_RE],
+    )
+    if has_connected_remote_vsix_install and not has_integrity_verification:
         findings.append(_finding(
             extension_id,
             version,
