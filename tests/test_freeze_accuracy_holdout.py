@@ -68,6 +68,36 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
             self.assertEqual(len(manifest_value["artifacts"]), 2)
             self.assertTrue(all((output_dir / row["path"]).is_file() for row in manifest_value["artifacts"]))
 
+    def test_freezer_can_verify_already_retained_private_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "retained.vsix"
+            artifact.write_bytes(b"retained-vsix")
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "2",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [
+                    {
+                        **self._source_artifact("retained.ext", "1.0.0", "known_safe", b"retained-vsix"),
+                        "local_path": artifact.name,
+                    },
+                ],
+            }), encoding="utf-8")
+            output_dir = root / "artifacts"
+            corpus = root / "holdout-corpus.json"
+            manifest = root / "corpus-manifest.json"
+
+            with patch("scripts.freeze_accuracy_holdout.acquire_https_vsix") as acquire:
+                result = freeze_holdout(source, output_dir, corpus, manifest)
+
+            acquire.assert_not_called()
+            self.assertEqual(result["artifacts"], 1)
+            frozen = next(output_dir.glob("*.vsix"))
+            self.assertEqual(frozen.read_bytes(), b"retained-vsix")
+
     @staticmethod
     def _source_artifact(extension_id: str, version: str, label: str, payload: bytes) -> dict[str, object]:
         return {

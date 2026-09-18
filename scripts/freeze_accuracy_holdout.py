@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -64,7 +65,8 @@ def freeze_holdout(
 
         filename = f"{_safe_name(extension_id)}-{_safe_name(version)}-{sha256[:16]}.vsix"
         target = destination / filename
-        _acquire_or_verify(source_url, sha256, target, destination)
+        local_path = item.get("local_path")
+        _acquire_or_verify(source_url, sha256, target, destination, local_path=local_path, source_root=Path(source_path).resolve().parent)
         artifacts.append({
             "extension_id": extension_id,
             "version": version,
@@ -143,11 +145,30 @@ def _read_source(path: Path) -> dict[str, Any]:
     }
 
 
-def _acquire_or_verify(url: str, expected_sha256: str, target: Path, destination: Path) -> None:
+def _acquire_or_verify(
+    url: str,
+    expected_sha256: str,
+    target: Path,
+    destination: Path,
+    *,
+    local_path: Any = None,
+    source_root: Path | None = None,
+) -> None:
     if target.exists():
         if target.is_file() and _sha256(target) == expected_sha256:
             return
         raise ValueError(f"refusing to overwrite an existing non-matching holdout artifact: {target}")
+    if local_path is not None and str(local_path).strip():
+        candidate = Path(str(local_path)).expanduser()
+        if not candidate.is_absolute() and source_root is not None:
+            candidate = source_root / candidate
+        if not candidate.is_file() or candidate.is_symlink():
+            raise ValueError(f"local holdout artifact is not a regular file: {candidate}")
+        candidate = candidate.resolve()
+        if _sha256(candidate) != expected_sha256:
+            raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {candidate}")
+        shutil.copyfile(candidate, target)
+        return
     try:
         temporary = acquire_https_vsix(url, expected_sha256, destination)
     except ArtifactInputError as exc:

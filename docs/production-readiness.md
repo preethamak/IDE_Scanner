@@ -76,6 +76,12 @@ limits match/error output, and returns bounded JSON. Worker crashes, timeouts,
 resource exhaustion, malformed output, or per-file errors fail the YARA
 provider closed while preserving the parent scan and its other evidence.
 
+The holdout freezer also accepts `local_path` for an already-retained VSIX in a
+private artifact vault. The source spec must still carry the public HTTPS
+artifact URL, exact expected SHA-256, and independent label evidence; the local
+bytes are copied only after their digest matches. This supports offline or
+restricted production workers without turning local fixtures into holdout truth.
+
 ## Dynamic runtime coverage
 
 `scan --runtime` applies the Bubblewrap runner to both local inputs (VSIX files,
