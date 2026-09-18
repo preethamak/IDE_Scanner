@@ -351,7 +351,8 @@ def _scan_request(
         unique[target["path"]] = target
 
     known_bad_hashes = _load_known_bad_hashes(request.known_bad_hashes_file)
-    extensions = _scan_discovered_targets(list(unique.values()), known_bad_hashes, jobs=jobs)
+    local_targets = list(unique.values())
+    extensions = _scan_discovered_targets(local_targets, known_bad_hashes, jobs=jobs)
     extensions.extend(_registry_only_extension(extension_id) for extension_id in request.extension_ids)
     runtime_bundle: dict[str, Any] = {
         "schema_version": "0.1.0",
@@ -360,6 +361,13 @@ def _scan_request(
         "runs": [],
         "required_extension_ids": [],
     }
+    if request.dynamic_runtime and local_targets:
+        _apply_local_dynamic_runtime(
+            local_targets,
+            extensions[:len(local_targets)],
+            runtime_bundle,
+            request.runtime_timeout_seconds,
+        )
     for identifier in request.marketplace_scan_ids:
         extensions.append(scan_marketplace_extension(
             identifier,
@@ -1010,14 +1018,11 @@ def _local_error_extension(path: Path, source: str, message: str) -> ExtensionRe
 
 
 _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
-    "activation",
     "agentic",
     "credential_commands",
     "credential_configuration",
     "credential_input",
     "dynamic_code",
-    "filesystem",
-    "ide_contributions",
     "lifecycle_scripts",
     "network",
     "process_execution",
@@ -1025,13 +1030,77 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
 
 
 def _runtime_required_for_report(report: ExtensionReport) -> bool:
-    """Apply the runtime policy without treating themes as executable code."""
+    """Require runtime coverage for behavior that static capability labels cannot settle.
+
+    Activation hooks, ordinary filesystem reads, and IDE contributions are
+    common in themes and regular extensions. They remain visible static
+    evidence, but do not by themselves justify executing an artifact. Agent,
+    credential, lifecycle, network, process, and dynamic-code surfaces do.
+    """
     capability_ids = {
         str(item.get("id") or "")
         for item in report.capabilities
         if isinstance(item, dict)
     }
     return bool(capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES)
+
+
+def _apply_local_dynamic_runtime(
+    targets: list[dict[str, str]],
+    extensions: list[ExtensionReport],
+    runtime_bundle: dict[str, Any],
+    timeout_seconds: int,
+) -> None:
+    """Run the same capability-gated sandbox for local VSIX and directory inputs.
+
+    Marketplace scans already use this path in ``scan_marketplace_extension``.
+    Keeping local artifacts on the same runtime path prevents ``--runtime`` from
+    being a misleading no-op for uploaded VSIX files and installed extensions.
+    """
+    for target, report in zip(targets, extensions, strict=False):
+        required = _runtime_required_for_report(report)
+        run_record: dict[str, Any] = {
+            "extension_id": report.extension_id,
+            "version": report.version,
+            "required": required,
+            "artifact_sha256": report.artifact_hash,
+            "status": "not-applicable" if not required else "failed",
+        }
+        if required:
+            runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
+            try:
+                runtime = run_sandbox(
+                    Path(target["path"]),
+                    allow_execute=True,
+                    timeout_seconds=timeout_seconds,
+                )
+                observed = runtime.get("extensions", {}) if isinstance(runtime, dict) else {}
+                items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
+                if not isinstance(items, list):
+                    items = []
+                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                    item for item in items if isinstance(item, dict)
+                ]
+                runtime_failed = any(
+                    isinstance(item, dict)
+                    and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+                    for item in items
+                )
+                run_record.update({
+                    "status": "failed" if runtime_failed else "completed",
+                    "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
+                    "observation_count": len(items),
+                })
+                if runtime_failed:
+                    run_record["error"] = "Runtime execution did not complete successfully."
+            except Exception as exc:  # noqa: BLE001 - runtime failure is disclosed and fail-closed
+                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
+                    "kind": "sandbox_error",
+                    "phase": "runtime",
+                    "evidence": str(exc)[:500],
+                }]
+                run_record["error"] = str(exc)[:500]
+        runtime_bundle.setdefault("runs", []).append(run_record)
 
 
 def scan_marketplace_extension(

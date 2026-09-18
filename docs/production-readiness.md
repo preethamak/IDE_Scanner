@@ -76,6 +76,23 @@ limits match/error output, and returns bounded JSON. Worker crashes, timeouts,
 resource exhaustion, malformed output, or per-file errors fail the YARA
 provider closed while preserving the parent scan and its other evidence.
 
+## Dynamic runtime coverage
+
+`scan --runtime` applies the Bubblewrap runner to both local inputs (VSIX files,
+installed extension directories, and uploaded artifacts) and exact Marketplace
+downloads. The runtime pass is capability-gated: agent, credential, lifecycle,
+network, process, and dynamic-code surfaces require execution coverage; ordinary
+activation, IDE contributions, and filesystem capability alone remain static
+review context. Themes therefore do not receive a meaningless runtime verdict,
+while an agentic or process-capable artifact cannot be published as complete
+when Bubblewrap fails, times out, or returns malformed observations.
+
+The website Deep Scan workflow invokes the same path with `--profile deep
+--runtime`; its callback and publication checks require complete required-provider
+coverage. Local environments without namespace permission must report the
+runtime provider as failed/incomplete, never silently fall back to host
+execution or claim dynamic coverage.
+
 # Current hardening increment: archive isolation
 
 Untrusted gzip unwrapping, ZIP-member extraction, and complete artifact hashing now execute

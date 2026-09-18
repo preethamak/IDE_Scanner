@@ -22,6 +22,7 @@ from ide_scanner.scanner import (
     _classify_findings,
     _build_report,
     _add_ast_findings,
+    _apply_local_dynamic_runtime,
     _apply_sandbox_provider,
     _find_sensitive_api_text,
     _is_generated_code_blob,
@@ -38,6 +39,46 @@ from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_local_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "agent.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.agent"
+            report.version = "1.0.0"
+            report.artifact_hash = "a" * 64
+            report.capabilities = [{"id": "agentic", "evidence": ["package.json"]}]
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            runtime = {"mode": "executed", "extensions": {"publisher.agent": [{"kind": "process_exec"}]}}
+            with patch("ide_scanner.scanner.run_sandbox", return_value=runtime) as sandbox:
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            sandbox.assert_called_once_with(artifact, allow_execute=True, timeout_seconds=7)
+            self.assertEqual(runtime_bundle["required_extension_ids"], ["publisher.agent"])
+            self.assertEqual(runtime_bundle["extensions"]["publisher.agent"][0]["kind"], "process_exec")
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "completed")
+
+    def test_local_runtime_does_not_execute_theme_capability_only_artifact(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "theme.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.theme"
+            report.version = "1.0.0"
+            report.artifact_hash = "b" * 64
+            report.capabilities = [{"id": "filesystem", "evidence": ["dist/theme.js"]}]
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox") as sandbox:
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            sandbox.assert_not_called()
+            self.assertEqual(runtime_bundle["required_extension_ids"], [])
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
+
     def test_ast_dynamic_call_targets_are_aggregated_per_file(self) -> None:
         findings: list[Finding] = []
         with patch(
