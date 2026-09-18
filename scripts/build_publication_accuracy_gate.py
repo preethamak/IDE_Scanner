@@ -35,6 +35,13 @@ def build_publication_accuracy_gate(
     _validate_gate(regression, "regression")
     _validate_gate(holdout_gate, "holdout")
     _validate_holdout_corpus(holdout_corpus)
+    runtime_evidence = _object(holdout_gate.get("runtime_evidence"))
+    if (
+        runtime_evidence.get("required") is not True
+        or runtime_evidence.get("runtime_enabled") is not True
+        or str(runtime_evidence.get("profile") or "") != "deep"
+    ):
+        raise ValueError("Publication holdout must prove a required deep runtime scan")
 
     regression_identity = _identity(regression)
     holdout_identity = _identity(holdout_gate)
