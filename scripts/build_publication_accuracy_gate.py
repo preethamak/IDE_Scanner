@@ -23,6 +23,12 @@ BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 LABELS = {"known_safe", "known_malicious"}
 VERDICTS = {"clean", "review", "suspicious", "malicious"}
 DECISIONS = {"allow", "review", "block", "incomplete"}
+REQUIRED_GATE_CHECKS = {
+    "required_pass_rate",
+    "safe_block_rate",
+    "malicious_allow_rate",
+    "incomplete_required",
+}
 LABEL_EVIDENCE_SOURCE_TYPES = {
     "independent_adjudication",
     "independent_review",
@@ -145,15 +151,31 @@ def _validate_gate(gate: dict[str, Any], name: str) -> None:
     if _object(gate.get("gate")).get("passed") is not True:
         raise ValueError(f"{name} gate did not pass")
     checks = _object(gate.get("gate")).get("checks")
-    if not isinstance(checks, dict) or not checks or any(value is not True for value in checks.values()):
+    if (
+        not isinstance(checks, dict)
+        or not REQUIRED_GATE_CHECKS.issubset(checks)
+        or any(value is not True for value in checks.values())
+    ):
         raise ValueError(f"{name} gate contains a failed or missing check")
     identity = _identity(gate)
     if not BUILD_RE.fullmatch(identity["scanner_build"]):
         raise ValueError(f"{name} gate requires a full 40-character scanner build")
     summary = _object(gate.get("summary"))
-    if _number(summary.get("required_pass_rate")) < 1:
+    for key in ("required_pass_rate", "safe_block_rate", "malicious_allow_rate"):
+        value = summary.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ValueError(f"{name} gate summary {key} must be a number between 0 and 1")
+    for key in ("required_artifacts", "required_passed", "required_failed", "incomplete_required"):
+        value = summary.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} gate summary {key} must be a non-negative integer")
+    if summary["required_artifacts"] < 1 or summary["required_passed"] != summary["required_artifacts"] or summary["required_failed"] != 0:
+        raise ValueError(f"{name} gate required artifacts are incomplete")
+    if summary["incomplete_required"] != 0:
+        raise ValueError(f"{name} gate contains incomplete required artifacts")
+    if summary["required_pass_rate"] < 1:
         raise ValueError(f"{name} gate required pass rate is below 100 percent")
-    if _number(summary.get("safe_block_rate")) > 0 or _number(summary.get("malicious_allow_rate")) > 0:
+    if summary["safe_block_rate"] > 0 or summary["malicious_allow_rate"] > 0:
         raise ValueError(f"{name} gate contains a safe block or malicious allow")
 
 

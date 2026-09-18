@@ -17,7 +17,15 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
         "corpus_id": corpus_id,
         "corpus_version": version,
         "report_identity": {"scanner_build": BUILD, "policy_version": "policy", "ruleset_version": "rules"},
-        "gate": {"passed": True, "checks": {"required": True}},
+        "gate": {
+            "passed": True,
+            "checks": {
+                "required_pass_rate": True,
+                "safe_block_rate": True,
+                "malicious_allow_rate": True,
+                "incomplete_required": True,
+            },
+        },
         "summary": {
             "total_artifacts": safe + malicious,
             "scanned_artifacts": safe + malicious,
@@ -259,5 +267,29 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_gate_with_missing_required_check(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            regression = gate("regression")
+            regression["gate"]["checks"].pop("incomplete_required")
+            with self.assertRaisesRegex(ValueError, "missing check"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", regression),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_gate_with_missing_rate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            regression = gate("regression")
+            del regression["summary"]["safe_block_rate"]
+            with self.assertRaisesRegex(ValueError, "safe_block_rate must be a number"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", regression),
+                    self.write(root, "holdout.json", holdout_gate()),
                     self.write(root, "corpus.json", holdout_corpus()),
                 )
