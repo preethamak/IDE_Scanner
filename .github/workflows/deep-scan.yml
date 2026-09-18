@@ -116,6 +116,9 @@ jobs:
       - name: Install analyzers
         if: steps.claim.outputs.has_job == 'true'
         run: python -m pip install -e '.[analysis]'
+      - name: Verify scanner runtime preflight
+        if: steps.claim.outputs.has_job == 'true'
+        run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
       - name: Scan exact artifact
         id: analyze
         if: steps.claim.outputs.has_job == 'true'
@@ -173,6 +176,7 @@ jobs:
           name: deep-scan-${{ steps.claim.outputs.job_id }}
           path: |
             scan-bundle.json
+            runtime-preflight.json
             ${{ runner.temp }}/ide-scanner-artifacts
           retention-days: 90
           if-no-files-found: ignore

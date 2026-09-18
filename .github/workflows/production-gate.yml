@@ -85,6 +85,8 @@ jobs:
             -- /usr/bin/true
       - name: Install scanner and analyzers
         run: python -m pip install -e '.[analysis]'
+      - name: Verify scanner runtime preflight
+        run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
       - name: Execute deep runtime smoke corpus
         env:
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
@@ -125,6 +127,8 @@ jobs:
         if: always()
         with:
           name: scanner-runtime-smoke
-          path: runtime-smoke.json
+          path: |
+            runtime-preflight.json
+            runtime-smoke.json
           retention-days: 30
           if-no-files-found: warn

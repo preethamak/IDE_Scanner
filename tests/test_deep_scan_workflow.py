@@ -25,6 +25,7 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert "--path fixtures/credential-exfil" in workflow
     assert "--profile deep" in workflow
     assert "--runtime" in workflow
+    assert "sandbox-preflight" in workflow
     assert '"secret_exfil" not in observed_kinds.get("unknown.shadow-helper", [])' in workflow
     assert 'provider.get("status") != "completed"' in workflow
 
