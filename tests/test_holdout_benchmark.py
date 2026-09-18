@@ -21,6 +21,9 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertEqual(result["summary"]["required_pass_rate"], 1.0)
             self.assertTrue(result["runtime_evidence"]["runtime_enabled"])
             self.assertEqual(result["rule_matrix"]["trusted-threat-feed-hit"]["fired_on_known_malicious"], 1)
+            self.assertEqual(result["summary"]["safe_review_rate"], 0.0)
+            self.assertEqual(result["summary"]["malicious_detection_rate"], 1.0)
+            self.assertEqual(result["summary"]["malicious_block_rate"], 1.0)
 
     def test_holdout_fails_when_malicious_artifact_is_only_reviewed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -34,6 +37,9 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertFalse(result["gate"]["passed"])
             malicious = result["artifacts"][1]
             self.assertTrue(any("not blocked" in item for item in malicious["violations"]))
+            self.assertEqual(result["summary"]["malicious_detection_rate"], 1.0)
+            self.assertEqual(result["summary"]["malicious_block_rate"], 0.0)
+            self.assertEqual(result["summary"]["malicious_review_rate"], 1.0)
 
     def test_holdout_fails_when_runtime_evidence_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

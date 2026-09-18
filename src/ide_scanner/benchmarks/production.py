@@ -275,7 +275,11 @@ def _holdout_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     safe = [row for row in rows if row["scanned"] and row["label"] == "known_safe"]
     malicious = [row for row in rows if row["scanned"] and row["label"] == "known_malicious"]
     safe_blocks = sum(1 for row in safe if row["actual"].get("decision") == "block" or row["actual"].get("verdict") == "malicious")
+    safe_reviewed = sum(1 for row in safe if _is_review_or_higher(row["actual"]))
     malicious_allows = sum(1 for row in malicious if row["actual"].get("decision") == "allow" or row["actual"].get("verdict") == "clean")
+    malicious_blocked = sum(1 for row in malicious if row["actual"].get("decision") == "block")
+    malicious_reviewed = sum(1 for row in malicious if row["actual"].get("decision") == "review")
+    malicious_detected = sum(1 for row in malicious if _is_review_or_higher(row["actual"]))
     required_passed = sum(1 for row in rows if row["passed"])
     return {
         "total_artifacts": len(rows),
@@ -288,9 +292,17 @@ def _holdout_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "safe_evaluated": len(safe),
         "safe_blocks": safe_blocks,
         "safe_block_rate": round(safe_blocks / len(safe), 4) if safe else 0.0,
+        "safe_reviewed": safe_reviewed,
+        "safe_review_rate": round(safe_reviewed / len(safe), 4) if safe else 0.0,
         "malicious_evaluated": len(malicious),
         "malicious_allows": malicious_allows,
         "malicious_allow_rate": round(malicious_allows / len(malicious), 4) if malicious else 0.0,
+        "malicious_blocked": malicious_blocked,
+        "malicious_block_rate": round(malicious_blocked / len(malicious), 4) if malicious else 0.0,
+        "malicious_reviewed": malicious_reviewed,
+        "malicious_review_rate": round(malicious_reviewed / len(malicious), 4) if malicious else 0.0,
+        "malicious_detected": malicious_detected,
+        "malicious_detection_rate": round(malicious_detected / len(malicious), 4) if malicious else 0.0,
         "incomplete_required": sum(
             1 for row in rows
             if not row["scanned"] or row["actual"].get("analysis_status") != "complete"
@@ -308,6 +320,13 @@ def _holdout_rule_matrix(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]
             cell = matrix.setdefault(rule_id, {"fired_on_known_safe": 0, "fired_on_known_malicious": 0})
             cell[label_key] = cell.get(label_key, 0) + 1
     return dict(sorted(matrix.items()))
+
+
+def _is_review_or_higher(actual: dict[str, Any]) -> bool:
+    return (
+        str(actual.get("decision") or "") in {"review", "block"}
+        or str(actual.get("verdict") or "") in {"review", "suspicious", "malicious"}
+    )
 
 
 def _verdict_confusion(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
@@ -479,7 +498,11 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     safe = [row for row in rows if row["scanned"] and row["label"] == "known_safe"]
     malicious = [row for row in rows if row["scanned"] and row["label"] == "known_malicious"]
     safe_blocks = sum(1 for row in safe if row["actual"].get("decision") == "block" or row["actual"].get("verdict") == "malicious")
+    safe_reviewed = sum(1 for row in safe if _is_review_or_higher(row["actual"]))
     malicious_allows = sum(1 for row in malicious if row["actual"].get("decision") == "allow")
+    malicious_blocked = sum(1 for row in malicious if row["actual"].get("decision") == "block")
+    malicious_reviewed = sum(1 for row in malicious if row["actual"].get("decision") == "review")
+    malicious_detected = sum(1 for row in malicious if _is_review_or_higher(row["actual"]))
     incomplete_required = sum(
         1 for row in required
         if not row["scanned"] or row["actual"].get("analysis_status") != "complete"
@@ -496,9 +519,17 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "safe_evaluated": len(safe),
         "safe_blocks": safe_blocks,
         "safe_block_rate": round(safe_blocks / len(safe), 4) if safe else 0.0,
+        "safe_reviewed": safe_reviewed,
+        "safe_review_rate": round(safe_reviewed / len(safe), 4) if safe else 0.0,
         "malicious_evaluated": len(malicious),
         "malicious_allows": malicious_allows,
         "malicious_allow_rate": round(malicious_allows / len(malicious), 4) if malicious else 0.0,
+        "malicious_blocked": malicious_blocked,
+        "malicious_block_rate": round(malicious_blocked / len(malicious), 4) if malicious else 0.0,
+        "malicious_reviewed": malicious_reviewed,
+        "malicious_review_rate": round(malicious_reviewed / len(malicious), 4) if malicious else 0.0,
+        "malicious_detected": malicious_detected,
+        "malicious_detection_rate": round(malicious_detected / len(malicious), 4) if malicious else 0.0,
         "incomplete_required": incomplete_required,
     }
 
