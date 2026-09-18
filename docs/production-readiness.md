@@ -108,6 +108,18 @@ coverage. Local environments without namespace permission must report the
 runtime provider as failed/incomplete, never silently fall back to host
 execution or claim dynamic coverage.
 
+## Contextual finding noise
+
+Ordinary `network-access`, `filesystem-access`, `process-execution`,
+`dynamic-code-loading`, and generic `obfuscation` signals are capability notes,
+not abuse-path evidence. When the same rule appears in multiple files, the
+report emits one contextual finding with the complete file list and an
+`evidence.occurrence_count`. Correlated, observed, provenance, and AST
+evidence is never folded into this presentation layer. This keeps reports
+reviewable without changing the rule IDs or hiding the locations needed for
+investigation; a finding only becomes review/block relevant when the policy
+promotes its evidence class or a higher-specificity rule establishes a chain.
+
 The isolated corpus runner exposes the same control for batch work. Its
 `deep` profile requires `--runtime`; use `standard` when intentionally
 running a static-only diagnostic corpus:
