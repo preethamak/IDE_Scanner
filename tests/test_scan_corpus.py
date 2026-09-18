@@ -182,6 +182,25 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertFalse(result["artifact_inventory"]["corpus_manifest"]["verified"])
         self.assertIn("artifact could not be hashed", result["artifact_inventory"]["skipped_reason"])
 
+    def test_manifest_worker_failure_preserves_expected_identity(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "example.vsix"
+            artifact.write_bytes(b"artifact")
+            target = {
+                "path": str(artifact),
+                "type": "vsix",
+                "manifest_expected_extension_id": "example.manifest",
+                "manifest_expected_version": "1.0.0",
+                "manifest_expected_sha256": "0" * 64,
+            }
+            with patch("scripts.scan_corpus._canonical_artifact_sha256", side_effect=OSError("read failed")):
+                result = _scan_one(target, timeout=30, profile="quick")
+
+        self.assertEqual(result["extension_id"], "example.manifest")
+        self.assertEqual(result["version"], "1.0.0")
+        self.assertEqual(result["decision"], "incomplete")
+
     def test_manifest_hash_uses_unwrapped_vsix_identity(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

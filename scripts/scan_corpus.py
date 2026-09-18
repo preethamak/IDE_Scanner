@@ -388,6 +388,14 @@ def _worker_error(path: Path, source: str, target: dict[str, str], message: str)
 
 def _manifest_failure(path: Path, source: str, target: dict[str, str], message: str) -> dict[str, Any]:
     error = _local_error_extension(path, source, message)
+    expected_id = str(target.get("manifest_expected_extension_id") or "").strip()
+    expected_version = str(target.get("manifest_expected_version") or "").strip()
+    if expected_id:
+        error.extension_id = expected_id
+        error.name = expected_id.rsplit(".", 1)[-1]
+        error.publisher = expected_id.split(".", 1)[0]
+    if expected_version:
+        error.version = expected_version
     error.artifact_inventory["corpus_manifest"] = {
         "verified": False,
         "expected_extension_id": target.get("manifest_expected_extension_id", ""),
