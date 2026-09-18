@@ -65,6 +65,33 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
     }
 
 
+def holdout_gate() -> dict:
+    result = gate("fresh-holdout", safe=1, malicious=1, version="2026.09.18.1")
+    result["artifacts"] = [
+        {
+            "extension_id": "safe.extension",
+            "version": "1.0.0",
+            "gate_required": True,
+            "label": "known_safe",
+            "scanned": True,
+            "passed": True,
+            "gate_passed": True,
+            "actual": {"analysis_status": "complete", "artifact_sha256": "b" * 64},
+        },
+        {
+            "extension_id": "bad.extension",
+            "version": "9.9.9",
+            "gate_required": True,
+            "label": "known_malicious",
+            "scanned": True,
+            "passed": True,
+            "gate_passed": True,
+            "actual": {"analysis_status": "complete", "artifact_sha256": "c" * 64},
+        },
+    ]
+    return result
+
+
 class PublicationAccuracyGateTests(unittest.TestCase):
     def write(self, root: Path, name: str, value: dict) -> Path:
         path = root / name
@@ -77,7 +104,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             regression = gate("regression")
             result = build_publication_accuracy_gate(
                 self.write(root, "regression.json", regression),
-                self.write(root, "holdout.json", gate("fresh-holdout", safe=1, malicious=1, version="2026.09.18.1")),
+                self.write(root, "holdout.json", holdout_gate()),
                 self.write(root, "corpus.json", holdout_corpus()),
             )
         self.assertEqual(result["holdout"]["status"], "fresh-labeled")
@@ -90,7 +117,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "synthetic fixture"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
-                    self.write(root, "holdout.json", gate("fresh-holdout", safe=1, malicious=1, version="2026.09.18.1")),
+                    self.write(root, "holdout.json", holdout_gate()),
                     self.write(root, "corpus.json", holdout_corpus("fixture_directory")),
                 )
 
@@ -102,6 +129,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "full 40-character scanner build"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", regression),
-                    self.write(root, "holdout.json", gate("fresh-holdout", safe=1, malicious=1, version="2026.09.18.1")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_summary_without_exact_holdout_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            del invalid["artifacts"]
+            with self.assertRaisesRegex(ValueError, "one result row"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
                     self.write(root, "corpus.json", holdout_corpus()),
                 )

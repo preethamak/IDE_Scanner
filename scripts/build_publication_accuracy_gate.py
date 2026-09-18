@@ -59,6 +59,7 @@ def build_publication_accuracy_gate(
         raise ValueError("The publication holdout contains a labelled routing mismatch.")
     if _number(summary.get("safe_evaluated")) < 1 or _number(summary.get("malicious_evaluated")) < 1:
         raise ValueError("The publication holdout must contain known-safe and known-malicious artifacts.")
+    _validate_holdout_results(holdout_gate, artifacts)
 
     return {
         "schema_version": "1.0",
@@ -141,6 +142,35 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
             raise ValueError(f"Holdout artifact {index} cannot use a synthetic fixture source")
         if identity.get("original_bytes_available") is not True or not SHA256_RE.fullmatch(str(identity.get("sha256") or "")):
             raise ValueError(f"Holdout artifact {index} requires retained exact bytes and a SHA-256")
+
+
+def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> None:
+    results = gate.get("artifacts")
+    if not isinstance(results, list) or len(results) != len(corpus_artifacts):
+        raise ValueError("The holdout gate must retain one result row for every frozen artifact.")
+    expected = {
+        (str(item.get("extension_id") or "").lower(), str(item.get("version") or "")): item
+        for item in corpus_artifacts
+    }
+    seen: set[tuple[str, str]] = set()
+    for index, result in enumerate(results):
+        if not isinstance(result, dict):
+            raise ValueError(f"Holdout gate result {index} is not an object")
+        key = (str(result.get("extension_id") or "").lower(), str(result.get("version") or ""))
+        if key not in expected or key in seen:
+            raise ValueError(f"Holdout gate result {index} has an unexpected or duplicate artifact identity")
+        seen.add(key)
+        artifact = expected[key]
+        if result.get("label") != artifact.get("label") or result.get("gate_required") is not True:
+            raise ValueError(f"Holdout gate result {index} does not preserve the frozen label")
+        if result.get("scanned") is not True or result.get("passed") is not True or result.get("gate_passed") is not True:
+            raise ValueError(f"Holdout artifact {key[0]}@{key[1]} did not pass its required gate")
+        actual = _object(result.get("actual"))
+        if actual.get("analysis_status") != "complete":
+            raise ValueError(f"Holdout artifact {key[0]}@{key[1]} was not completely analyzed")
+        expected_sha256 = str(_object(artifact.get("artifact")).get("sha256") or "").lower()
+        if str(actual.get("artifact_sha256") or "").lower() != expected_sha256:
+            raise ValueError(f"Holdout artifact {key[0]}@{key[1]} does not retain the scanned artifact hash")
 
 
 def _identity(value: dict[str, Any]) -> dict[str, str]:
