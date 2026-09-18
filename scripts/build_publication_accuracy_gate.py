@@ -21,6 +21,15 @@ from urllib.parse import urlparse
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 LABELS = {"known_safe", "known_malicious"}
+LABEL_EVIDENCE_SOURCE_TYPES = {
+    "independent_adjudication",
+    "independent_review",
+    "independent_threat_report",
+    "independent_hash_report_and_official_release",
+    "maintainer_advisory_and_independent_hash_report",
+    "trusted_threat_feed_and_independent_hash_report",
+    "malware_removal_and_independent_hash_report",
+}
 # A two-artifact holdout can only catch a catastrophic regression.  Public
 # classification needs a small, independently labelled sample on both sides
 # before it is allowed to represent ecosystem accuracy.
@@ -184,6 +193,10 @@ def _validate_label_evidence(value: Any, index: int) -> None:
     retrieved_at = str(value.get("retrieved_at") or "").strip()
     if not source_type or not source_url or not retrieved_at:
         raise ValueError(f"Holdout artifact {index} label evidence requires source_type, source_url, and retrieved_at")
+    if source_type not in LABEL_EVIDENCE_SOURCE_TYPES:
+        raise ValueError(
+            f"Holdout artifact {index} label evidence requires an approved independent source_type"
+        )
     parsed = urlparse(source_url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError(f"Holdout artifact {index} label evidence requires a public HTTPS source URL")

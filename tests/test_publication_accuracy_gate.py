@@ -175,6 +175,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "corpus.json", corpus),
                 )
 
+    def test_rejects_unapproved_label_evidence_source_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = holdout_corpus()
+            corpus["artifacts"][0]["label_evidence"]["source_type"] = "operator_assertion"
+            with self.assertRaisesRegex(ValueError, "approved independent source_type"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", corpus),
+                )
+
     def test_rejects_static_only_holdout_from_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

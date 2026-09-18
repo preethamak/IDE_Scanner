@@ -414,7 +414,10 @@ PYTHONPATH=src python scripts/build_publication_accuracy_gate.py \
 The holdout manifest must be frozen before scanning, retain original bytes and
 SHA-256 values, document artifact-specific label evidence, contain both
 `known_safe` and `known_malicious` exact artifacts, and use non-fixture source
-types. The script requires every holdout artifact to scan completely under one
+types. Label evidence must use an approved independent source type such as
+`independent_review`, `independent_threat_report`, or a maintainer/advisory
+source paired with an independent hash report; an operator assertion alone is
+not admissible. The script requires every holdout artifact to scan completely under one
 full scanner build and rejects an `unknown` build. The website publication
 scripts consume this combined artifact and will not activate a regression-only
 gate.
