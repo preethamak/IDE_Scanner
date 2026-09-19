@@ -35,6 +35,12 @@ verdict, decision, coverage, rule, score, or artifact identity constraints. It
 also enforces corpus-wide thresholds for safe blocking, malicious allows, and
 incomplete required scans.
 
+The CI production gate additionally acquires the independently reported BCAI
+Rosetta 4.0.37 VSIX by its pinned Open VSX URL and SHA-256 before running the
+real-artifact calibration tests. A clean source checkout may skip those two
+tests when the private artifact is not provisioned; the production-gate job
+does not skip them because it provisions and verifies the exact bytes first.
+
 ## Promotion checklist
 
 Before changing an optional real-world artifact to `gate_required=true`:
