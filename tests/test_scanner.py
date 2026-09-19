@@ -619,7 +619,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.3")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.4")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
@@ -1681,6 +1681,42 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["malware_score"], 0)
         self.assertIn("known-vulnerable-extension", {finding["rule_id"] for finding in scanned["findings"]})
         self.assertEqual(report["intelligence"]["extension_advisories"]["snapshot_version"], "unit-test.1")
+
+    def test_exact_malicious_extension_advisory_is_confirmed_malware(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "extension"
+            root.mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"compromised","version":"1.2.3","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+            artifact_hash = scan_extension(root).artifact_hash
+            feed = Path(tmp) / "advisories.json"
+            feed.write_text(json.dumps({
+                "snapshot_version": "unit-test.2",
+                "entries": [{
+                    "extension_id": "example.compromised",
+                    "version": "1.2.3",
+                    "artifact_sha256": artifact_hash,
+                    "advisory_id": "MALWARE-TEST-1",
+                    "severity": "CRITICAL",
+                    "policy_action": "block",
+                    "threat_classification": "malicious",
+                    "source": "https://example.invalid/MALWARE-TEST-1",
+                }],
+            }), encoding="utf-8")
+
+            report = scan_targets(paths=[root], extension_advisories_file=feed)
+
+        scanned = report["extensions"][0]
+        self.assertEqual(scanned["decision"], "block")
+        self.assertEqual(scanned["verdict"], "malicious")
+        self.assertEqual(scanned["malware_authority"], "authoritative")
+        self.assertEqual(scanned["malware_score"], 100)
+        self.assertEqual(scanned["public_outcome"], "confirmed_threat")
+        finding = next(item for item in scanned["findings"] if item["rule_id"] == "known-malicious-extension")
+        self.assertEqual(finding["evidence_class"], "confirmed")
 
     def test_bundled_advisory_snapshot_contains_exact_glasswasm_artifacts(self) -> None:
         from ide_scanner.scanner import _load_extension_advisories

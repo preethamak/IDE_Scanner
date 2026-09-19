@@ -73,6 +73,7 @@ Allowed evidence:
 - OSV `MAL-*` malicious package
 - trusted malware feed match
 - known-bad VSIX/package hash
+- exact compromised extension artifact/version/hash from an authoritative advisory
 - exact artifact/version from internal confirmed corpus
 
 Static behavior alone should not produce `malicious`.
@@ -424,8 +425,9 @@ scripts consume this combined artifact and will not activate a regression-only
 gate.
 
 For reproducible acquisition, prepare a private source specification with
-`guardrails.holdout-source.v1`, one exact HTTPS URL and SHA-256 per artifact, and
-structured evidence (`source_type`, `source_url`, `retrieved_at`) for each label:
+`guardrails.holdout-source.v1`, one exact HTTPS URL (plus optional exact-byte
+mirrors) and SHA-256 per artifact, and structured evidence (`source_type`,
+`source_url`, `retrieved_at`) for each label:
 
 ```bash
 PYTHONPATH=src python scripts/freeze_accuracy_holdout.py \

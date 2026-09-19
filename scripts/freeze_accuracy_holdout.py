@@ -62,6 +62,7 @@ def freeze_holdout(
             raise ValueError(f"source artifact {index} duplicates {extension_id}@{version}")
         seen.add(key)
         source_url = _https_url(item.get("artifact_url"), f"source artifact {index} artifact_url")
+        mirror_urls = _artifact_mirrors(item.get("artifact_mirrors"), index)
         sha256 = str(item.get("sha256") or "").strip().lower()
         if not SHA256_RE.fullmatch(sha256):
             raise ValueError(f"source artifact {index} requires a 64-character SHA-256")
@@ -71,7 +72,7 @@ def freeze_holdout(
         target = destination / filename
         local_path = item.get("local_path")
         _acquire_or_verify(
-            source_url,
+            [source_url, *mirror_urls],
             sha256,
             target,
             destination,
@@ -158,7 +159,7 @@ def _read_source(path: Path) -> dict[str, Any]:
 
 
 def _acquire_or_verify(
-    url: str,
+    urls: list[str],
     expected_sha256: str,
     target: Path,
     destination: Path,
@@ -194,11 +195,32 @@ def _acquire_or_verify(
                 raise ValueError(f"local holdout artifact SHA-256 does not match the required digest: {resolved_candidate}")
             shutil.copyfile(resolved_candidate, target)
             return
-    try:
-        temporary = acquire_https_vsix(url, expected_sha256, destination)
-    except ArtifactInputError as exc:
-        raise ValueError(f"could not acquire {url}: {exc}") from exc
-    temporary.replace(target)
+    failures: list[str] = []
+    for url in urls:
+        try:
+            temporary = acquire_https_vsix(url, expected_sha256, destination)
+        except ArtifactInputError as exc:
+            failures.append(f"{url}: {exc}")
+            continue
+        if not temporary.is_file() or _sha256(temporary) != expected_sha256:
+            failures.append(f"{url}: acquisition backend returned bytes with the wrong SHA-256")
+            continue
+        temporary.replace(target)
+        return
+    raise ValueError("could not acquire any exact holdout artifact source: " + " | ".join(failures))
+
+
+def _artifact_mirrors(value: Any, index: int) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"source artifact {index} artifact_mirrors must be a non-empty array when present")
+    mirrors: list[str] = []
+    for mirror_index, mirror in enumerate(value):
+        url = _https_url(mirror, f"source artifact {index} artifact_mirrors[{mirror_index}]")
+        if url not in mirrors:
+            mirrors.append(url)
+    return mirrors
 
 
 def _https_url(value: Any, label: str) -> str:

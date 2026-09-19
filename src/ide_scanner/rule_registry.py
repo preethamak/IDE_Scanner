@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.19-policy-v3-calibration.22"
+RULESET_VERSION = "2026.09.19-policy-v3-calibration.23"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -197,6 +197,16 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "description": "Exact extension identity, version, and artifact hash matched a versioned vulnerability advisory.",
         "recommendation": "Follow the advisory policy action for this exact artifact.",
         "benchmark_tags": ["vulnerability", "advisory", "exact-artifact"],
+    },
+    "known-malicious-extension": {
+        "title": "Known malicious extension artifact",
+        "category": "confirmed-intelligence",
+        "evidence_class": "confirmed",
+        "default_severity": "CRITICAL",
+        "description": "Exact extension identity, version, and artifact hash matched an authoritative advisory reporting the artifact as malicious or compromised.",
+        "recommendation": "Block and remove the exact artifact. Rotate any credentials or tokens that may have been exposed while it was installed.",
+        "false_positive_notes": "This rule is emitted only for an exact artifact hash in the signed/bundled advisory snapshot; an advisory describing a vulnerability remains a separate vulnerability finding.",
+        "benchmark_tags": ["threat-intelligence", "advisory", "exact-artifact", "malware"],
     },
     "marketplace-removed-package": {
         "title": "Marketplace removed package",
@@ -568,7 +578,7 @@ def _engine_for(rule_id: str, tags: list[str]) -> str:
         return "yara"
     if rule_id.startswith("ast-"):
         return "javascript-ast"
-    if rule_id in {"known-bad-artifact", "marketplace-removed-package"}:
+    if rule_id in {"known-bad-artifact", "known-malicious-extension", "marketplace-removed-package"}:
         return "threat-intelligence"
     if rule_id in {"malicious-npm-dependency", "vulnerable-npm-dependency"}:
         return "dependency-intelligence"

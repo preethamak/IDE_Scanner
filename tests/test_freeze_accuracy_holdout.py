@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ide_scanner.artifact_input import ArtifactInputError
 from scripts.freeze_accuracy_holdout import _read_source, freeze_holdout
 
 
@@ -128,6 +129,81 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
 
             acquire.assert_called_once()
             self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), payload)
+
+    def test_freezer_tries_exact_artifact_mirrors_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"mirrored-vsix"
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "3-mirror",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [{
+                    **self._source_artifact("mirror.ext", "1.0.0", "known_safe", payload),
+                    "artifact_mirrors": ["https://mirror.example.test/package.vsix"],
+                }],
+            }), encoding="utf-8")
+            output_dir = root / "artifacts"
+
+            def fake_acquire(url: str, expected: str, destination: Path) -> Path:
+                if url == "https://artifacts.example.test/package.vsix":
+                    raise ArtifactInputError("primary unavailable")
+                self.assertEqual(url, "https://mirror.example.test/package.vsix")
+                self.assertEqual(expected, hashlib.sha256(payload).hexdigest())
+                downloaded = destination / "mirror.vsix"
+                downloaded.write_bytes(payload)
+                return downloaded
+
+            with patch("scripts.freeze_accuracy_holdout.acquire_https_vsix", side_effect=fake_acquire) as acquire:
+                freeze_holdout(source, output_dir, root / "holdout.json", root / "manifest.json")
+
+            self.assertEqual(
+                [call.args[0] for call in acquire.call_args_list],
+                ["https://artifacts.example.test/package.vsix", "https://mirror.example.test/package.vsix"],
+            )
+            self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), payload)
+
+    def test_source_rejects_invalid_artifact_mirrors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "3-invalid-mirror",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [{
+                    **self._source_artifact("mirror.ext", "1.0.0", "known_safe", b"mirror"),
+                    "artifact_mirrors": ["http://mirror.example.test/package.vsix"],
+                }],
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, r"artifact_mirrors\[0\].*public HTTPS"):
+                freeze_holdout(source, root / "artifacts", root / "holdout.json", root / "manifest.json")
+
+    def test_freezer_rejects_backend_result_with_wrong_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"expected-vsix"
+            source = root / "source.json"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "3-wrong-backend-digest",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [self._source_artifact("wrong.ext", "1.0.0", "known_safe", payload)],
+            }), encoding="utf-8")
+
+            def fake_acquire(_url: str, _expected: str, destination: Path) -> Path:
+                wrong = destination / "wrong.vsix"
+                wrong.write_bytes(b"not-the-pinned-bytes")
+                return wrong
+
+            with patch("scripts.freeze_accuracy_holdout.acquire_https_vsix", side_effect=fake_acquire):
+                with self.assertRaisesRegex(ValueError, "wrong SHA-256"):
+                    freeze_holdout(source, root / "artifacts", root / "holdout.json", root / "manifest.json")
 
     def test_freezer_resolves_relative_paths_inside_an_explicit_artifact_vault(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

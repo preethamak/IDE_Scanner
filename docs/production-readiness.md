@@ -79,8 +79,11 @@ provider closed while preserving the parent scan and its other evidence.
 The holdout freezer also accepts `local_path` for an already-retained VSIX in a
 private artifact vault. The source spec must still carry the public HTTPS
 artifact URL, exact expected SHA-256, and independent label evidence; the local
-bytes are copied only after their digest matches. This supports offline or
-restricted production workers without turning local fixtures into holdout truth.
+bytes are copied only after their digest matches. A source may additionally
+declare an ordered `artifact_mirrors` array when a registry has removed an
+artifact. Each mirror is accepted only when its downloaded bytes match the same
+expected digest; a mirror is never a substitute package. This supports offline
+or restricted production workers without turning local fixtures into holdout truth.
 For a worker-local vault, pass `--artifact-vault /secure/guardrails/holdout`;
 relative `local_path` values are confined to that directory and path escapes are
 rejected. Keep the vault outside the repository and make it available only to

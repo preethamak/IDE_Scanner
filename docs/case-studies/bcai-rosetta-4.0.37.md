@@ -36,9 +36,12 @@ scanner identifies a realistic abuse path and requires review, but does not
 call the artifact confirmed malware without independent intelligence.
 
 With the bundled exact hash advisory enabled, the same artifact becomes
-`block` through `known-vulnerable-extension`, with risk score `100`. That
-separation keeps the decision explainable: behavior evidence and authoritative
-artifact intelligence are not conflated.
+`block` through `known-malicious-extension`, with verdict `malicious`,
+`malware_score=100`, and public outcome `confirmed_threat`. That separation
+keeps the decision explainable: behavior evidence and authoritative artifact
+intelligence are not conflated. An exact advisory that describes only a
+vulnerability still uses `known-vulnerable-extension` and does not receive a
+malware label.
 
 ## Reproduction
 

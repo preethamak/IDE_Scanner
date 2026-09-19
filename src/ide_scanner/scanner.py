@@ -126,7 +126,13 @@ MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 100
 SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
-CONFIRMED_RULES = {"known-bad-artifact", "marketplace-removed-malware", "malicious-npm-dependency", "trusted-threat-feed-hit"}
+CONFIRMED_RULES = {
+    "known-bad-artifact",
+    "known-malicious-extension",
+    "marketplace-removed-malware",
+    "malicious-npm-dependency",
+    "trusted-threat-feed-hit",
+}
 OBSERVED_RULES = {
     "observed-secret-exfil",
     "observed-download-execute",
@@ -3208,18 +3214,21 @@ def _apply_extension_advisories(extensions: list[ExtensionReport], bundle: dict[
             severity = str(entry.get("severity") or "HIGH").upper()
             if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
                 severity = "HIGH"
+            threat_classification = str(entry.get("threat_classification") or "").strip().lower()
+            confirmed_malware = threat_classification == "malicious"
             evidence = dict(entry)
             evidence.update({
-                "evidence_class": "vulnerability",
+                "evidence_class": "confirmed" if confirmed_malware else "vulnerability",
                 "snapshot_version": str(bundle.get("snapshot_version") or "unknown"),
                 "snapshot_sha256": str(bundle.get("sha256") or ""),
                 "exact": True,
             })
+            rule_id = "known-malicious-extension" if confirmed_malware else "known-vulnerable-extension"
             extension.findings.append(_finding(
                 extension.extension_id,
                 extension.version,
-                "known-vulnerable-extension",
-                "vulnerability",
+                rule_id,
+                "confirmed-intelligence" if confirmed_malware else "vulnerability",
                 severity,
                 0.98,
                 str(entry.get("summary") or "Exact extension artifact matched a vulnerability advisory."),
@@ -5087,13 +5096,14 @@ def _finding_evidence_class(finding: Finding) -> str:
 
 
 def _is_confirmed_malware_finding(finding: Finding) -> bool:
-    if finding.rule_id == "known-bad-artifact":
+    # The evidence class is the source of truth for intelligence-backed
+    # findings. This keeps exact malicious advisory matches aligned with the
+    # same confirmed-malware path as hash and threat-feed matches while
+    # leaving ordinary vulnerability advisories reviewable/blockable without a
+    # malware label.
+    if _finding_evidence_class(finding) == "confirmed":
         return True
-    if finding.rule_id == "malicious-npm-dependency":
-        return True
-    if finding.rule_id == "trusted-threat-feed-hit":
-        return True
-    if finding.rule_id == "marketplace-removed-malware":
+    if finding.rule_id in CONFIRMED_RULES:
         return True
     return finding.rule_id == "marketplace-removed-package" and _is_removed_malware(finding.evidence)
 

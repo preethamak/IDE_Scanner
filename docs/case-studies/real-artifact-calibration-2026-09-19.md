@@ -31,3 +31,14 @@ This snapshot does not justify a 10,000-extension accuracy claim. The next
 promotion gate still requires the fresh labelled holdout, at least five safe
 and five malicious exact artifacts, deep runtime evidence, zero safe blocks,
 zero malicious allows, and complete required-provider coverage.
+
+## Latest canonical diagnostic replay
+
+After the exact-hash advisory snapshot was refreshed, the current canonical
+engine was replayed against eight retained real-world VSIX artifacts (seven
+ordinary controls and the exact BCAI artifact). All eight scans completed; the
+seven controls were `allow`/`clean` (six with risk `0`; CMake Tools carried a
+low hardening risk of `32`), and BCAI was `block`/`malicious` with authoritative
+malware score and risk score `100`. This is useful evidence that capability
+signals remain contextual on this small cohort, but it is still a diagnostic
+replay rather than an independently adjudicated ecosystem accuracy claim.

@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-19.3",
+  "snapshot_version": "2026-09-19.4",
   "entries": [
     {
       "extension_id": "nrwl.angular-console",
@@ -9,6 +9,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-05-18T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
       "source_secondary": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
       "summary": "The official Nx Console advisory identifies version 18.95.0 as compromised; Phoenix Security independently published this exact VSIX hash and reported credential harvesting and persistence."
@@ -33,6 +34,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-06-15T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
       "summary": "Socket reported this exact Open VSX artifact as a trojanized extension containing an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
     },
@@ -44,6 +46,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-06-15T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
       "summary": "Socket reported this exact Open VSX artifact as a trojanized theme carrying an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
     },
@@ -55,6 +58,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-05-20T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
       "summary": "Knostic reported this exact Open VSX artifact as malicious after source validation, including Google OAuth refresh-token theft, full GCP scope access, and proxying of AI API use."
     },
@@ -66,6 +70,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-06-02T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/new-malicious-vs-code-extension-backdoor-remote-text-fetcher",
       "summary": "Knostic reported this exact Marketplace artifact as a startup backdoor that fetches operator-controlled text, decodes it, and executes it through child_process.exec."
     },
@@ -77,6 +82,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-06-29T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
       "summary": "Knostic reported this exact Marketplace artifact as a source/binary-divergent startup backdoor with hidden remote command retrieval and child_process.exec."
     },
@@ -88,6 +94,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-05-20T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
       "summary": "Knostic reported this exact Marketplace artifact as an auto-starting environment-data exfiltration and remote-eval backdoor."
     },
@@ -99,6 +106,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-05-20T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
       "summary": "Knostic reported this exact Marketplace artifact as an environment-exfiltration backdoor with hidden encrypted second-stage execution."
     },
@@ -110,6 +118,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-07-21T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/analyzing-two-malicious-vs-code-extensions-hidden-behind-a-wordpress-tool",
       "summary": "Knostic reported this exact Marketplace artifact as an auto-starting downloader that launches an external MSI installer."
     },
@@ -121,6 +130,7 @@
       "severity": "CRITICAL",
       "published_at": "2026-07-21T00:00:00Z",
       "policy_action": "block",
+      "threat_classification": "malicious",
       "source": "https://www.knostic.ai/blog/analyzing-two-malicious-vs-code-extensions-hidden-behind-a-wordpress-tool",
       "summary": "Knostic reported this exact Marketplace artifact as an auto-starting downloader that launches an external MSI installer."
     }
