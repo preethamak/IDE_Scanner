@@ -3414,6 +3414,7 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
     mapping = {
         "secret_read": ("observed-secret-read", "MEDIUM", 0.78, "Sandbox observed reads of canary or sensitive credential paths."),
         "secret_exfil": ("observed-secret-exfil", "HIGH", 0.9, "Sandbox observed canary or sensitive data leaving the process."),
+        "canary_exposed": ("runtime-canary-exposed", "INFO", 0.35, "Sandbox observed the synthetic canary in process output; this does not establish external transfer."),
         "download_execute": ("observed-download-execute", "HIGH", 0.86, "Sandbox observed downloaded content being executed or loaded."),
         "persistence": ("observed-persistence", "HIGH", 0.84, "Sandbox observed persistence or autorun behavior."),
         "destructive": ("observed-destructive-behavior", "HIGH", 0.88, "Sandbox observed destructive file behavior."),
@@ -3440,7 +3441,7 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         evidence_class = "weak"
     elif kind in mapping:
         rule_id, severity, confidence, summary = mapping[kind]
-        evidence_class = "weak" if kind in {"network_attempt", "unexpected_network", "process_exec", "filesystem_write"} else "observed"
+        evidence_class = "weak" if kind in {"network_attempt", "unexpected_network", "process_exec", "filesystem_write", "canary_exposed"} else "observed"
     else:
         return None
     evidence = dict(item)

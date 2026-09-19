@@ -9,7 +9,7 @@ class RuleRegistryTests(unittest.TestCase):
     def test_all_rules_publish_engine_and_decision_semantics(self) -> None:
         rules = rule_registry()
 
-        self.assertEqual(len(rules), 89)
+        self.assertEqual(len(rules), 95)
         self.assertTrue(all(rule.engine for rule in rules))
         self.assertTrue(all(rule.decision_effect for rule in rules))
         self.assertTrue(all(rule.confidence_basis for rule in rules))
@@ -29,6 +29,8 @@ class RuleRegistryTests(unittest.TestCase):
         self.assertEqual(rules["network-access"].decision_effect, "review-context")
         self.assertEqual(rules["sandbox-runtime-timeout"].decision_effect, "review-context")
         self.assertEqual(rules["sandbox-runtime-error"].decision_effect, "review-context")
+        self.assertEqual(rules["observed-secret-exfil"].decision_effect, "review-or-block-by-policy")
+        self.assertEqual(rules["runtime-canary-exposed"].decision_effect, "review-context")
 
     def test_rules_json_is_self_describing(self) -> None:
         payload = rules_json()

@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.19-policy-v3-calibration.28"
+RULESET_VERSION = "2026.09.19-policy-v3-calibration.29-dynamic-catalog"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -504,10 +504,16 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "repo-binary-artifacts": ("repository-posture", "posture", "LOW", "The package contains a committed native binary artifact."),
     "repo-url-missing": ("reputation", "reputation", "LOW", "The extension manifest does not declare a source repository."),
     "runtime-filesystem-write": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed a filesystem write; this confirms capability, not malicious intent."),
+    "runtime-canary-exposed": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed the synthetic canary in process output; this does not establish external transfer."),
     "runtime-network-attempt": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed an attempted network request; isolation does not establish that it completed."),
     "runtime-process-execution": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed process execution; this confirms capability, not malicious intent."),
     "sandbox-runtime-error": ("coverage", "weak", "INFO", "The runtime sandbox could not complete one execution phase, so dynamic coverage is incomplete."),
     "sandbox-runtime-timeout": ("coverage", "weak", "INFO", "The runtime sandbox timed out during one execution phase, so dynamic coverage is incomplete."),
+    "observed-secret-read": ("dynamic-sandbox", "observed", "MEDIUM", "The sandbox observed reads of a synthetic canary or sensitive credential path."),
+    "observed-secret-exfil": ("dynamic-sandbox", "observed", "HIGH", "The sandbox observed a synthetic canary or sensitive value in a network request body."),
+    "observed-download-execute": ("dynamic-sandbox", "observed", "HIGH", "The sandbox observed downloaded content being executed or loaded."),
+    "observed-persistence": ("dynamic-sandbox", "observed", "HIGH", "The sandbox observed writes to a persistence or autorun location."),
+    "observed-destructive-behavior": ("dynamic-sandbox", "observed", "HIGH", "The sandbox observed destructive file behavior."),
     "security-policy-missing": ("repository-posture", "reputation", "LOW", "The packaged artifact does not include a recognized security policy."),
     "sensitive-activation": ("activation", "capability", "LOW", "The extension activates on a security-sensitive IDE event."),
     "startup-activation": ("activation", "capability", "LOW", "The extension activates automatically after IDE startup."),
@@ -606,7 +612,7 @@ def _decision_effect(evidence_class: str) -> str:
         return "block-by-default"
     if evidence_class == "vulnerability":
         return "review-or-block-by-policy"
-    if evidence_class in {"correlated", "dependency", "provenance"}:
+    if evidence_class in {"correlated", "dependency", "observed", "provenance"}:
         return "review-or-block-by-policy"
     if evidence_class in {"capability", "exposure"}:
         return "review-by-policy"

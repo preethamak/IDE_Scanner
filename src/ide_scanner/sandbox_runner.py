@@ -308,10 +308,10 @@ def _execute_planned_commands(
             })
             if CANARY_VALUE in combined:
                 observations.append({
-                    "kind": "secret_exfil",
+                    "kind": "canary_exposed",
                     "script": command["name"],
                     "destination": "stdout-or-stderr",
-                    "evidence": "canary appeared in process output",
+                    "evidence": "synthetic canary appeared in process output; no external transfer was observed",
                 })
         except subprocess.TimeoutExpired:
             observations.append({
@@ -375,9 +375,9 @@ def _execute_entrypoint(
             observations[0]["stderr_excerpt"] = result.stderr[:500]
         if CANARY_VALUE in combined:
             observations.append({
-                "kind": "secret_exfil",
+                "kind": "canary_exposed",
                 "destination": "stdout-or-stderr",
-                "evidence": "canary appeared in entrypoint process output",
+                "evidence": "synthetic canary appeared in process output; no external transfer was observed",
             })
         return observations
     except FileNotFoundError:

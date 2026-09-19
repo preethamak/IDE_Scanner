@@ -2836,6 +2836,30 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("network_attempt", kinds)
         self.assertNotIn("secret_exfil", kinds)
 
+    def test_sandbox_canary_in_process_output_is_not_exfiltration(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"canary-output","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            finding = _sandbox_observation_finding(
+                extension,
+                {
+                    "kind": "canary_exposed",
+                    "destination": "stdout-or-stderr",
+                    "evidence": "synthetic canary appeared in process output; no external transfer was observed",
+                },
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.rule_id, "runtime-canary-exposed")
+        self.assertEqual(finding.evidence["evidence_class"], "weak")
+        self.assertEqual(finding.to_dict()["actionability"], "contextual")
+        self.assertEqual(finding.to_dict()["effective_severity"], "INFO")
+
     def test_sandbox_timeout_is_visible_but_not_decision_relevant(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
