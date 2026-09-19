@@ -22,7 +22,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 BUILD_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 LABELS = {"known_safe", "known_malicious"}
 VERDICTS = {"clean", "review", "suspicious", "malicious"}
-DECISIONS = {"allow", "review", "block", "incomplete"}
+DECISIONS = {"allow", "review", "block"}
 REQUIRED_GATE_CHECKS = {
     "required_pass_rate",
     "safe_block_rate",

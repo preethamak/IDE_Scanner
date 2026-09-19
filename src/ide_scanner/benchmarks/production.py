@@ -12,7 +12,7 @@ HOLDOUT_CORPUS_SCHEMA_VERSION = "1.0"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 LABELS = {"known_safe", "gray", "known_malicious"}
 VERDICTS = {"clean", "review", "suspicious", "malicious"}
-DECISIONS = {"allow", "review", "block", "incomplete"}
+DECISIONS = {"allow", "review", "block"}
 ANALYSIS_STATUSES = {"complete", "incomplete", "failed"}
 
 
