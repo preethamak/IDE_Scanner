@@ -2646,6 +2646,32 @@ def _has_content_download(text: str) -> bool:
     return bool(_content_download_offsets(text) or _DOWNLOADER_PROCESS_RE.search(text))
 
 
+def _call_end(text: str, opening_parenthesis: int) -> int | None:
+    """Return the matching close parenthesis for a bounded source call."""
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(opening_parenthesis, len(text)):
+        char = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
 def _has_download_execute_chain(text: str, process_exec_re: re.Pattern[str]) -> bool:
     """Require an actual downloader leg to be near a distinct process sink.
 
@@ -2659,8 +2685,21 @@ def _has_download_execute_chain(text: str, process_exec_re: re.Pattern[str]) -> 
         return False
     window_chars = max(45 * 72, 240)
     for anchor in _content_download_offsets(text):
-        if any(abs(anchor - process.start()) <= window_chars for process in process_matches):
-            return True
+        opening_parenthesis = text.find("(", anchor)
+        call_end = _call_end(text, opening_parenthesis) if opening_parenthesis >= 0 else None
+        for process in process_matches:
+            if process.start() < anchor or process.start() > anchor + window_chars:
+                continue
+            # The strongest shape is a process sink in the request callback,
+            # e.g. https.get(url, response => execFile(...)).
+            if call_end is not None and process.start() <= call_end:
+                return True
+            # A promise/response handoff is also meaningful, unlike a health
+            # check followed by an unrelated process call elsewhere in the
+            # file. Keep this list deliberately narrow and explainable.
+            handoff = text[call_end + 1 if call_end is not None else anchor: process.start()]
+            if re.search(r"\b(?:then|arrayBuffer|text|json|body|pipe|writeFile|createWriteStream)\b", handoff, re.I):
+                return True
     direct = _DIRECT_DOWNLOAD_EXEC_RE.search(text)
     if direct is not None:
         return True

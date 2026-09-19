@@ -2442,6 +2442,26 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process-execution", rule_ids)
         self.assertNotIn("download-and-execute", rule_ids)
 
+    def test_health_check_and_unrelated_shell_helper_do_not_create_download_execute(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"remote-shell","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const {spawn}=require('child_process'); const http=require('http');"
+                "function isApiRunning(url){return new Promise(resolve=>{http.get(url,()=>resolve(true));});}"
+                "function runCommand(command,args){return spawn(command,args,{shell:true});}",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("process-execution", rule_ids)
+        self.assertNotIn("download-and-execute", rule_ids)
+
     def test_remote_credential_broker_requires_review_without_calling_it_malware(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
