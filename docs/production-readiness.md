@@ -67,7 +67,7 @@ continues in this order:
 1. finish artifact-processing worker isolation; executable source is now
    processed sequentially, AST input is capped at 32 MiB per file, the Node
    heap is capped at 1 GiB, and Semgrep/YARA execute with process, timeout,
-   memory, and output-file boundaries;
+   memory, and bounded stdout/stderr boundaries;
 2. uploaded, installed, archived, and pinned-source acquisition;
 3. versioned extension classification and capability contracts;
 4. cross-file and interprocedural data flow;

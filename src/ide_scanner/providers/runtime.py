@@ -289,6 +289,7 @@ def semgrep_diagnostic() -> dict[str, Any]:
         "version": version,
         "rules_path": str(SEMGREP_RULES),
         "ruleset_hash": ruleset_hash,
+        "output_limit_bytes": PROVIDER_OUTPUT_LIMIT_BYTES,
         "error": "; ".join(missing),
         "required": False,
     }
@@ -316,6 +317,7 @@ def yara_diagnostic() -> dict[str, Any]:
         "version": version,
         "rules_path": str(YARA_RULES),
         "ruleset_hash": ruleset_hash,
+        "output_limit_bytes": PROVIDER_OUTPUT_LIMIT_BYTES,
         "error": "; ".join(missing),
         "required": False,
     }
