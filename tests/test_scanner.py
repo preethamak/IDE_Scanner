@@ -326,6 +326,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].rule_id, "ast-dynamic-call-target")
         self.assertEqual(findings[0].evidence["count"], 2)
+        self.assertEqual(findings[0].evidence["evidence_class"], "weak")
         self.assertIn("2 computed call target(s)", findings[0].evidence_summary)
 
     def test_incomplete_artifact_is_not_counted_as_clean(self) -> None:

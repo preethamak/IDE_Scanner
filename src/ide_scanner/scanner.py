@@ -191,7 +191,6 @@ CAPABILITY_RULES = {
     "agent-prompt-injection-sink",
     "agent-shell-tool",
     "agentic-tooling",
-    "ast-dynamic-call-target",
     "ast-bracket-notation-sensitive-access",
     "ast-constructed-dynamic-argument",
     "broad-activation",
@@ -4881,6 +4880,7 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
         evidence["occurrence_count"] = occurrence_counts[key]
         evidence["occurrence_files"] = list(first.file_refs)
         if first.rule_id == "ast-dynamic-call-target":
+            evidence["count"] = observation_counts[key]
             evidence["target_count"] = observation_counts[key]
             first.evidence_summary = (
                 f"AST found {observation_counts[key]} computed call target(s) in "
