@@ -22,18 +22,20 @@ reproducible against bytes, not only an extension name or version.
 The artifact was scanned with the bundled exact-artifact advisory snapshot
 replaced by an empty snapshot. The scanner still returned:
 
-- verdict: `suspicious`
+- verdict: `review`
 - decision: `review`
-- risk score: `85`
+- risk score: `55`
 - malware score: `0` (no authoritative intelligence was supplied for this run)
-- high-specificity finding: `download-and-execute`
+- high-specificity exposure finding: `remote-credential-broker`
 - contextual supporting evidence: broad activation, credential-oriented input,
   network access, filesystem access, process execution, shell execution, and
   environment-file references
 
 This is the correct conservative outcome for static-only corroboration: the
-scanner identifies a realistic abuse path and requires review, but does not
-call the artifact confirmed malware without independent intelligence.
+scanner identifies a remote token-broker trust boundary and requires review,
+but does not call the artifact confirmed malware or claim exfiltration without
+independent intelligence. The shipped connectivity probes and local proxy
+registry reads are not mislabeled as a download-and-execute chain.
 
 With the bundled exact hash advisory enabled, the same artifact becomes
 `block` through `known-malicious-extension`, with verdict `malicious`,
@@ -62,9 +64,9 @@ Safe wording:
 
 > GuardRails reproduced and corroborated the published BCAI Rosetta 4.0.37
 > incident from the exact Open VSX artifact. Without threat intelligence, its
-> static analysis independently flagged a download-and-execute path and routed
-> the release to review; with the verified exact-hash advisory, it blocked the
-> artifact.
+> static analysis independently flagged a remote credential-broker trust
+> boundary and routed the release to review; with the verified exact-hash
+> advisory, it blocked the artifact.
 
 Avoid saying “GuardRails discovered” or implying that the static scan alone
 proved every behavior described by the independent report. Runtime execution

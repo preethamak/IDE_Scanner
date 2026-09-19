@@ -12,13 +12,13 @@ static-only and used an empty advisory snapshot for behavior calibration.
 | `redhat.vscode-yaml@1.24.0` | known safe | allow | clean | 0 | contextual capabilities only |
 | `rust-lang.rust-analyzer@0.3.2971` | known safe | allow | clean | 0 | contextual capabilities only |
 | `ms-python.python@2026.5.2026070801` | known safe | allow | clean | 0 | agent/process/network capabilities remained contextual |
-| `bingcha.bcai-tools@4.0.37` | known malicious | review | suspicious | 85 | correlated download-and-execute evidence without intelligence |
+| `bingcha.bcai-tools@4.0.37` | known malicious | review | review | 55 | remote credential-broker exposure without intelligence |
 
 Observed rates in this snapshot:
 
 - known-safe block rate: `0/5 = 0%`
 - known-safe review rate: `0/5 = 0%`
-- malicious detection rate: `1/1 = 100%` (`suspicious/review`)
+- malicious detection rate: `1/1 = 100%` (`review/review`)
 - malicious prevention rate without intelligence: `0/1 = 0%` (the policy correctly refused to convert static corroboration into a malware block)
 - malicious prevention rate with the exact BCAI advisory: `1/1 = 100%`
 
