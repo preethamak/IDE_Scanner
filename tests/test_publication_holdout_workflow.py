@@ -5,6 +5,10 @@ from pathlib import Path
 def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> None:
     workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "publication-holdout.yml").read_text(encoding="utf-8")
 
+    assert 'workflows: ["Scanner production gate"]' in workflow
+    assert "types: [completed]" in workflow
+    assert "workflow_run.head_sha || github.sha" in workflow
+    assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert "scripts/freeze_accuracy_holdout.py" in workflow
     assert "--source benchmarks/holdouts/real-evidence-2026-source.json" in workflow
     assert "--profile deep" in workflow
