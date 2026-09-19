@@ -349,7 +349,7 @@ Current `ide-scanner` behavior already matches the most important safety rules:
 
 - `known-bad-artifact`, `marketplace-removed-malware`, and `malicious-npm-dependency` are `confirmed`.
 - non-malware `marketplace-removed-package` findings are `provenance`.
-- `credential-exfiltration-chain`, `destructive-transfer-chain`, and `download-and-execute` are `correlated`.
+- `credential-exfiltration-chain`, `destructive-transfer-chain`, and `download-and-execute` are `correlated`. `download-and-execute` requires an actual content download or invoked downloader near a process sink; explicit POST telemetry, connectivity probes, and user-facing `curl`/`wget` strings are not enough.
 - `remote-credential-broker` is `exposure`: multiple same-file indicators identify a bearer-token trust boundary, but the rule routes to review and does not claim exfiltration or malicious intent.
 - `agentic-tooling`, lifecycle scripts, native artifacts, broad/startup/sensitive activation, and powerful IDE contributions are `capability`.
 - vulnerable runtime dependencies, mutable dependency sources, and unpinned dependencies are `dependency`.

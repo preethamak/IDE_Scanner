@@ -361,7 +361,7 @@ blind spot without treating ordinary single-credential API clients as exfiltrati
 | `obfuscation-execution-network` | `execution` | `correlated` | HIGH | Code combines obfuscation, dynamic execution, and network behavior. |
 | `persistence-chain` | `persistence` | `correlated` | HIGH | Code modifies persistence locations and executes or communicates externally. |
 | `agent-data-exfil-chain` | `agentic` | `correlated` | HIGH | Agent-facing code combines sensitive references with outbound network behavior. |
-| `download-and-execute` | `execution` | `correlated` | HIGH | Code can download content and execute local processes from the same file. |
+| `download-and-execute` | `execution` | `correlated` | HIGH | Code has an actual content download (GET/content request or invoked curl/wget) near a local process sink; POST telemetry, connectivity probes, and user-facing install-command strings are excluded. |
 | `remote-credential-broker` | `cross-extension-exposure` | `exposure` | HIGH | Code appears to obtain or forward bearer tokens through a separately configured remote token broker; review the trust boundary without treating it as proof of exfiltration. |
 | `supply-chain-dropper-chain` | `supply-chain` | `correlated` | HIGH | Remote download + archive extraction + dynamic load of code from a computed path without integrity verification. |
 
