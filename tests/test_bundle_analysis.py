@@ -78,6 +78,18 @@ def test_obfuscation_without_collection_or_exfiltration_does_not_invent_chain() 
     assert profile["harvesting_exfiltration"] is False
 
 
+def test_bundle_chain_requires_local_collection_to_network_linkage() -> None:
+    source = _obfuscator_shell(
+        "var targets=['/.ssh/id_rsa','/.aws/credentials','/.npmrc','wallet.dat'];"
+        "var collection=['homedir','readdir','readFile'];"
+    ) + ("x" * 20_000) + "var outbound=['request','write','form-data'];"
+
+    profile = analyze_generated_bundle(source)
+
+    assert profile["strong_obfuscation"] is True
+    assert profile["harvesting_exfiltration"] is False
+
+
 def test_alternate_obfuscator_without_hex_identifier_names_is_detected() -> None:
     numeric_table = ",".join(hex(index) for index in range(100))
     computed = ",".join(f"obj[key{index}]" for index in range(30))

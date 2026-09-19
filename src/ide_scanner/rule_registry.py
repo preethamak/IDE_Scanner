@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.19-policy-v3-calibration.26"
+RULESET_VERSION = "2026.09.19-policy-v3-calibration.27"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -88,9 +88,9 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "category": "credential-access",
         "evidence_class": "correlated",
         "default_severity": "HIGH",
-        "description": "Detects a generated executable bundle that combines systematic obfuscation, multi-family credential targets, filesystem collection, payload packaging, and outbound transfer semantics.",
+        "description": "Detects a generated executable bundle whose bounded local code window combines systematic obfuscation, multi-family credential targets, filesystem collection, payload packaging, and outbound transfer semantics.",
         "recommendation": "Prevent execution and investigate the credential targets, collection APIs, and outbound destination.",
-        "false_positive_notes": "Legitimate migration or backup products may collect multiple credential families, but obfuscated IDE entrypoints should not do so without independently verifiable source and explicit user intent.",
+        "false_positive_notes": "Legitimate migration or backup products may collect multiple credential families, but whole-bundle keyword proximity is insufficient; this rule requires the collection and outbound stages to be locally linked and still needs independently verifiable source and explicit user intent.",
         "benchmark_tags": ["credential", "filesystem", "network", "obfuscation", "bundle"],
     },
     "executable-heavy-obfuscation": {
