@@ -237,6 +237,8 @@ def _evaluate_holdout_artifact(
     verdict = str(actual.get("verdict") or "missing")
     if analysis_status != "complete":
         violations.append(f"analysis_status {analysis_status!r} is not complete")
+    if decision not in {"allow", "review", "block"}:
+        violations.append(f"decision {decision!r} is not a publishable complete decision")
     runtime_contract = _runtime_contract(actual)
     if require_runtime:
         violations.extend(_runtime_contract_violations(runtime_contract))

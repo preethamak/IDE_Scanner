@@ -41,6 +41,20 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertEqual(result["summary"]["malicious_block_rate"], 0.0)
             self.assertEqual(result["summary"]["malicious_review_rate"], 1.0)
 
+    def test_holdout_rejects_incomplete_decision_even_for_known_safe_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            report["extensions"][0]["decision"] = "incomplete"
+
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertTrue(any("not a publishable complete decision" in item for item in result["artifacts"][0]["violations"]))
+
     def test_holdout_fails_when_runtime_evidence_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

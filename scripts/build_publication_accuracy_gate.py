@@ -300,7 +300,7 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
             raise ValueError(f"Holdout artifact {key[0]}@{key[1]} was not completely analyzed")
         verdict = str(actual.get("verdict") or "")
         decision = str(actual.get("decision") or "")
-        if verdict not in VERDICTS or decision not in DECISIONS:
+        if verdict not in VERDICTS or decision not in {"allow", "review", "block"}:
             raise ValueError(f"Holdout artifact {key[0]}@{key[1]} is missing a valid verdict and decision")
         runtime_errors = _runtime_contract_errors(_object(actual.get("runtime_contract")))
         if runtime_errors:
