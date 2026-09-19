@@ -367,6 +367,19 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "corpus.json", holdout_corpus()),
                 )
 
+    def test_rejects_holdout_without_rule_level_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            for result in invalid["artifacts"]:
+                result["actual"]["rule_ids"] = []
+            with self.assertRaisesRegex(ValueError, "at least one labelled rule firing"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
     def test_rejects_gate_with_missing_required_check(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

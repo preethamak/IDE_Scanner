@@ -133,6 +133,7 @@ def build_publication_accuracy_gate(
         if summary.get(key) != expected_value:
             raise ValueError(f"The publication holdout summary field {key!r} does not match its result rows")
     holdout_rule_matrix = _holdout_rule_matrix(holdout_gate, artifacts)
+    _validate_rule_matrix(holdout_rule_matrix, label_counts)
 
     return {
         "schema_version": "1.0",
@@ -395,6 +396,23 @@ def _holdout_rule_matrix(gate: dict[str, Any], corpus_artifacts: list[dict[str, 
             cell = matrix.setdefault(rule_id, {"fired_on_known_safe": 0, "fired_on_known_malicious": 0})
             cell[f"fired_on_{label}"] += 1
     return dict(sorted(matrix.items()))
+
+
+def _validate_rule_matrix(matrix: dict[str, dict[str, int]], label_counts: dict[str, int]) -> None:
+    """Require auditable per-rule evidence for the public accuracy claim."""
+    if not matrix:
+        raise ValueError("The publication holdout must retain at least one labelled rule firing")
+    for rule_id, counts in matrix.items():
+        if not isinstance(rule_id, str) or not rule_id.strip() or not isinstance(counts, dict):
+            raise ValueError("The publication holdout rule matrix contains an invalid rule row")
+        for label in LABELS:
+            value = counts.get(f"fired_on_{label}")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"The publication holdout rule matrix has an invalid {label} count")
+            if value > label_counts[label]:
+                raise ValueError(f"The publication holdout rule matrix overcounts {label} artifacts")
+        if set(counts) != {"fired_on_known_safe", "fired_on_known_malicious"}:
+            raise ValueError("The publication holdout rule matrix contains unexpected fields")
 
 
 def _review_or_higher(actual: dict[str, Any]) -> bool:

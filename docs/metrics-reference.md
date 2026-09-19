@@ -469,8 +469,11 @@ feed the publication gate. The final publication combiner revalidates each
 row's verdict, decision, completion state, and artifact hash, then recomputes
 safe-review, malicious-detection, malicious-block, and per-rule labelled
 fire-rate metrics from those rows instead of trusting an operator-edited
-summary. A safe review remains a measured triage-noise signal, not an
-automatic block; policy changes require adjudicated evidence.
+summary. It also requires at least one labelled rule firing and rejects
+malformed or over-counted rule rows, so a release cannot hide behind aggregate
+rates without retaining the evidence that produced them. A safe review remains
+a measured triage-noise signal, not an automatic block; policy changes require
+adjudicated evidence.
 
 The production Deep Scan workflow supports 1, 4, 8, or 16 isolated worker
 shards. Scheduled runs use the 16-worker profile; an exact manual `job_id`
