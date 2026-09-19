@@ -6,6 +6,7 @@
   "thresholds": {
     "required_pass_rate": 1.0,
     "max_safe_block_rate": 0.0,
+    "max_safe_review_rate": 0.2,
     "max_malicious_allow_rate": 0.0,
     "max_incomplete_required": 0
   },

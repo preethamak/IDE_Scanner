@@ -26,6 +26,7 @@ DECISIONS = {"allow", "review", "block"}
 REQUIRED_GATE_CHECKS = {
     "required_pass_rate",
     "safe_block_rate",
+    "safe_review_rate",
     "malicious_allow_rate",
     "incomplete_required",
 }
@@ -55,6 +56,7 @@ MALICIOUS_LABEL_EVIDENCE_SOURCE_TYPES = {
 # before it is allowed to represent ecosystem accuracy.
 MIN_FRESH_HOLDOUT_SAFE = 5
 MIN_FRESH_HOLDOUT_MALICIOUS = 5
+MAX_SAFE_REVIEW_RATE = 0.2
 
 
 def build_publication_accuracy_gate(
@@ -148,6 +150,7 @@ def build_publication_accuracy_gate(
             "safe_block_rate": _number(summary.get("safe_block_rate")),
             "safe_reviewed": _number(summary.get("safe_reviewed")),
             "safe_review_rate": _number(summary.get("safe_review_rate")),
+            "max_safe_review_rate": MAX_SAFE_REVIEW_RATE,
             "malicious_allow_rate": _number(summary.get("malicious_allow_rate")),
             "malicious_blocked": _number(summary.get("malicious_blocked")),
             "malicious_block_rate": _number(summary.get("malicious_block_rate")),
@@ -183,7 +186,7 @@ def _validate_gate(gate: dict[str, Any], name: str) -> None:
     if not BUILD_RE.fullmatch(identity["scanner_build"]):
         raise ValueError(f"{name} gate requires a full 40-character scanner build")
     summary = _object(gate.get("summary"))
-    for key in ("required_pass_rate", "safe_block_rate", "malicious_allow_rate"):
+    for key in ("required_pass_rate", "safe_block_rate", "safe_review_rate", "malicious_allow_rate"):
         value = summary.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
             raise ValueError(f"{name} gate summary {key} must be a number between 0 and 1")
@@ -199,6 +202,8 @@ def _validate_gate(gate: dict[str, Any], name: str) -> None:
         raise ValueError(f"{name} gate required pass rate is below 100 percent")
     if summary["safe_block_rate"] > 0 or summary["malicious_allow_rate"] > 0:
         raise ValueError(f"{name} gate contains a safe block or malicious allow")
+    if summary["safe_review_rate"] > MAX_SAFE_REVIEW_RATE:
+        raise ValueError(f"{name} gate safe review rate exceeds the {MAX_SAFE_REVIEW_RATE:.0%} noise ceiling")
 
 
 def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:

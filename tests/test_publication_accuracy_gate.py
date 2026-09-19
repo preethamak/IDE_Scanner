@@ -22,6 +22,7 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
             "checks": {
                 "required_pass_rate": True,
                 "safe_block_rate": True,
+                "safe_review_rate": True,
                 "malicious_allow_rate": True,
                 "incomplete_required": True,
             },
@@ -330,7 +331,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             root = Path(directory)
             invalid = holdout_gate()
             invalid["summary"]["safe_review_rate"] = 1.0
-            with self.assertRaisesRegex(ValueError, "summary field 'safe_review_rate'"):
+            with self.assertRaisesRegex(ValueError, "safe review rate exceeds"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),

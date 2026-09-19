@@ -14,6 +14,10 @@ LABELS = {"known_safe", "gray", "known_malicious"}
 VERDICTS = {"clean", "review", "suspicious", "malicious"}
 DECISIONS = {"allow", "review", "block"}
 ANALYSIS_STATUSES = {"complete", "incomplete", "failed"}
+# A known-safe artifact routed to REVIEW is a false-positive/noise signal even
+# when it is not blocked. Keep the publication SLO explicit: at most one in
+# five independently labelled safe artifacts may require review.
+MAX_SAFE_REVIEW_RATE = 0.2
 
 
 def load_production_corpus(path: Path | str) -> dict[str, Any]:
@@ -37,7 +41,7 @@ def validate_production_corpus(data: Any) -> None:
     thresholds = data.get("thresholds")
     if not isinstance(thresholds, dict):
         raise ValueError("Production corpus requires thresholds")
-    for key in ("required_pass_rate", "max_safe_block_rate", "max_malicious_allow_rate"):
+    for key in ("required_pass_rate", "max_safe_block_rate", "max_safe_review_rate", "max_malicious_allow_rate"):
         value = thresholds.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
             raise ValueError(f"Production corpus threshold {key} must be between 0 and 1")
@@ -63,6 +67,7 @@ def evaluate_production_corpus(corpus_path: Path | str, report_path: Path | str)
     gate_checks = {
         "required_pass_rate": summary["required_pass_rate"] >= thresholds["required_pass_rate"],
         "safe_block_rate": summary["safe_block_rate"] <= thresholds["max_safe_block_rate"],
+        "safe_review_rate": summary["safe_review_rate"] <= thresholds["max_safe_review_rate"],
         "malicious_allow_rate": summary["malicious_allow_rate"] <= thresholds["max_malicious_allow_rate"],
         "incomplete_required": summary["incomplete_required"] <= thresholds["max_incomplete_required"],
     }
@@ -124,6 +129,7 @@ def evaluate_holdout_corpus(
     checks = {
         "required_pass_rate": summary["required_pass_rate"] == 1.0,
         "safe_block_rate": summary["safe_block_rate"] == 0.0,
+        "safe_review_rate": summary["safe_review_rate"] <= MAX_SAFE_REVIEW_RATE,
         "malicious_allow_rate": summary["malicious_allow_rate"] == 0.0,
         "incomplete_required": summary["incomplete_required"] == 0,
         "runtime_enabled": runtime_enabled if require_runtime else True,
@@ -146,6 +152,7 @@ def evaluate_holdout_corpus(
             "thresholds": {
                 "required_pass_rate": 1.0,
                 "max_safe_block_rate": 0.0,
+                "max_safe_review_rate": MAX_SAFE_REVIEW_RATE,
                 "max_malicious_allow_rate": 0.0,
                 "max_incomplete_required": 0,
             },
