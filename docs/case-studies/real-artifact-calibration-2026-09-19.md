@@ -43,18 +43,18 @@ that limitation rather than presenting static evidence as dynamic coverage.
 The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
-The current engine replay is `8276643e5ed2f44b003bdc292dc350c2036348c3`.
-The BCAI behavior-only replay remains `REVIEW` without the advisory and the
-exact-hash replay is `BLOCK/MALICIOUS` with the advisory enabled. Neither run
-is a substitute for the required deep-runtime publication holdout.
+The current exact-artifact replay was rerun with scanner build
+`d4507dc7a0968c41888c2019b02827bee89b329a`. The BCAI behavior-only replay
+remains `REVIEW` without the advisory and the exact-hash replay is
+`BLOCK/MALICIOUS` with the advisory enabled. Neither run is a substitute for
+the required deep-runtime publication holdout.
 
 ## Latest canonical diagnostic replay
 
-After the exact-hash advisory snapshot was refreshed, the current canonical
-engine was replayed against eight retained real-world VSIX artifacts (seven
-ordinary controls and the exact BCAI artifact). All eight scans completed; the
-seven controls were `allow`/`clean` (six with risk `0`; CMake Tools carried a
-low hardening risk of `32`), and BCAI was `block`/`malicious` with authoritative
-malware score and risk score `100`. This is useful evidence that capability
-signals remain contextual on this small cohort, but it is still a diagnostic
-replay rather than an independently adjudicated ecosystem accuracy claim.
+The current calibration test suite was rerun against five exact safe controls
+and the exact BCAI artifact. All retained scans completed; the safe controls
+remained `allow`/`clean`, and BCAI was `block`/`malicious` with authoritative
+malware score and risk score `100` when the verified advisory was enabled.
+This is useful evidence that capability signals remain contextual on this small
+cohort, but it is still a diagnostic replay rather than an independently
+adjudicated ecosystem accuracy claim.
