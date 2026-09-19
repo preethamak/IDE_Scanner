@@ -301,6 +301,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "corpus.json", holdout_corpus()),
                 )
 
+    def test_rejects_incomplete_holdout_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["artifacts"][0]["actual"]["decision"] = "incomplete"
+            with self.assertRaisesRegex(ValueError, "valid verdict and decision"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
     def test_rejects_holdout_summary_not_derived_from_rows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
