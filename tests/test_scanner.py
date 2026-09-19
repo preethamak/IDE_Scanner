@@ -183,6 +183,43 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(runtime_bundle["extensions"]["publisher.agent"][0]["kind"], "process_exec")
             self.assertEqual(runtime_bundle["runs"][0]["status"], "completed")
 
+    def test_runtime_trace_metadata_requires_valid_external_trace(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "agent.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.agent"
+            report.version = "1.0.0"
+            report.artifact_hash = "a" * 64
+            report.capabilities = [{"id": "agentic", "evidence": ["package.json"]}]
+            runtime = {
+                "mode": "executed",
+                "plan": {"instrumentation": {"external_syscall_trace": {"requested": True, "available": True}}},
+                "extensions": {"publisher.agent": [{"kind": "entrypoint_executed"}]},
+            }
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox", return_value=runtime):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            self.assertTrue(runtime_bundle["external_syscall_trace"])
+            self.assertTrue(runtime_bundle["external_syscall_trace_available"])
+            self.assertTrue(runtime_bundle["runs"][0]["external_syscall_trace"])
+
+            failed_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            failed_runtime = {
+                **runtime,
+                "extensions": {"publisher.agent": [{"kind": "sandbox_error"}]},
+            }
+            with patch("ide_scanner.scanner.run_sandbox", return_value=failed_runtime):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], failed_bundle, timeout_seconds=7,
+                )
+
+            self.assertFalse(failed_bundle["external_syscall_trace"])
+            self.assertFalse(failed_bundle["runs"][0]["external_syscall_trace"])
+
     def test_local_runtime_does_not_execute_theme_capability_only_artifact(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "theme.vsix"
