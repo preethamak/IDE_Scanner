@@ -124,6 +124,19 @@ The runtime child inherits bounded address space, CPU time, open-file count, and
 file-size limits in addition to the wall-clock timeout. A limit breach is
 reported as failed runtime coverage and cannot become an approval.
 
+Runtime observations use an authenticated per-process event transport over the
+captured stderr channel. The sandbox no longer mounts a writable trace file or
+uses raw extension-written trace data as evidence. Duplicate handshakes,
+forged events, truncated output, and failed Node lifecycle/activation processes
+are treated as incomplete runtime coverage. Captured stdout and stderr are
+bounded so an artifact cannot exhaust the scanning worker by flooding output.
+This authenticates the scanner hook's transport against writable-channel
+spoofing; it is not a claim that JavaScript running in the same Node process is
+tamper-proof. Runtime observations therefore remain corroborating evidence,
+while confirmed malware outcomes still require independent artifact or
+intelligence evidence. A future hardened worker can add an OS-level external
+tracer for native/direct-syscall coverage.
+
 WASM is treated as executable capability rather than malware evidence. A
 `wasm-loader` finding is emitted only when executable text visibly loads or
 instantiates a packaged module; the module itself still requires the controlled

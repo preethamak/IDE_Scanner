@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hmac
 import hashlib
 import json
 import subprocess
+import sys
 import unittest
 import zipfile
 from pathlib import Path
@@ -16,7 +19,21 @@ from ide_scanner.cli import _run_benchmark
 from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
-from ide_scanner.sandbox_runner import _execute_entrypoint, _extension_main, _observations_from_trace, _prepare_target, _write_entrypoint_runner, run_sandbox, sandbox_preflight
+from ide_scanner.sandbox_runner import (
+    RUNTIME_EVENT_HANDSHAKE,
+    RUNTIME_EVENT_OUTPUT_LIMIT_MARKER,
+    RUNTIME_EVENT_PREFIX,
+    MAX_RUNTIME_OUTPUT_BYTES,
+    _execute_entrypoint,
+    _extension_main,
+    _observations_from_trace,
+    _run_bounded_capture,
+    _prepare_target,
+    _verified_runtime_events,
+    _write_entrypoint_runner,
+    run_sandbox,
+    sandbox_preflight,
+)
 from ide_scanner.models import Finding
 from ide_scanner.scanner import (
     _classify_findings,
@@ -2991,6 +3008,57 @@ class ScannerTests(unittest.TestCase):
 
         self.assertIn("network_attempt", {item["kind"] for item in observations})
         self.assertIn("secret_exfil", {item["kind"] for item in observations})
+
+    def test_runtime_event_transport_rejects_forged_events(self) -> None:
+        secret = "a" * 64
+        payload = json.dumps({"kind": "network", "target": "https://example.invalid"}, separators=(",", ":"))
+        encoded = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+        mac = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        valid_output = "\n".join([
+            f"{RUNTIME_EVENT_HANDSHAKE}{secret}",
+            f"{RUNTIME_EVENT_PREFIX}{encoded}.{mac}",
+        ])
+        events, valid = _verified_runtime_events(valid_output)
+        self.assertTrue(valid)
+        self.assertEqual(events[0]["kind"], "network")
+
+        forged_payload = payload.replace("example.invalid", "attacker.invalid")
+        forged_encoded = base64.b64encode(forged_payload.encode("utf-8")).decode("ascii")
+        forged_output = "\n".join([
+            f"{RUNTIME_EVENT_HANDSHAKE}{secret}",
+            f"{RUNTIME_EVENT_PREFIX}{forged_encoded}.{mac}",
+        ])
+        forged_events, forged_valid = _verified_runtime_events(forged_output)
+        self.assertFalse(forged_valid)
+        self.assertEqual(forged_events, [])
+
+    def test_runtime_event_transport_rejects_truncated_output(self) -> None:
+        events, valid = _verified_runtime_events(
+            f"{RUNTIME_EVENT_HANDSHAKE}{'a' * 64}\n{RUNTIME_EVENT_OUTPUT_LIMIT_MARKER}"
+        )
+        self.assertFalse(valid)
+        self.assertEqual(events, [])
+
+    def test_runtime_event_transport_rejects_duplicate_handshake(self) -> None:
+        events, valid = _verified_runtime_events(
+            "\n".join([
+                f"{RUNTIME_EVENT_HANDSHAKE}{'a' * 64}",
+                f"{RUNTIME_EVENT_HANDSHAKE}{'b' * 64}",
+            ])
+        )
+        self.assertFalse(valid)
+        self.assertEqual(events, [])
+
+    def test_runtime_output_is_bounded_and_marks_transport_incomplete(self) -> None:
+        result = _run_bounded_capture(
+            [sys.executable, "-c", "import sys; sys.stdout.write('x' * (4 * 1024 * 1024 + 1))"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        self.assertLessEqual(len(result.stdout.encode("utf-8")), MAX_RUNTIME_OUTPUT_BYTES)
+        self.assertIn(RUNTIME_EVENT_OUTPUT_LIMIT_MARKER, result.stderr)
 
     def test_sandbox_runner_probes_registered_commands_and_webview_messages(self) -> None:
         self._skip_if_runtime_backend_unavailable()

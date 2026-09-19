@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import os
+import selectors
+import signal
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -29,6 +35,11 @@ MAX_RUNTIME_FILE_BYTES = 512 * 1024 * 1024
 MAX_RUNTIME_TIMEOUT_SECONDS = 300
 MAX_RUNTIME_MEMORY_BYTES = 1536 * 1024 * 1024
 MAX_RUNTIME_OPEN_FILES = 4096
+MAX_RUNTIME_OUTPUT_BYTES = 4 * 1024 * 1024
+RUNTIME_OUTPUT_CHUNK_BYTES = 64 * 1024
+RUNTIME_EVENT_HANDSHAKE = "GUARDRAILS_RUNTIME_HANDSHAKE_V1:"
+RUNTIME_EVENT_PREFIX = "GUARDRAILS_RUNTIME_EVENT_V1:"
+RUNTIME_EVENT_OUTPUT_LIMIT_MARKER = "GUARDRAILS_RUNTIME_EVENT_OUTPUT_LIMIT"
 
 
 def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
@@ -146,7 +157,6 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
         hook_file = root / "node-runtime-hook.js"
         entrypoint_runner = root / "activate-entrypoint.js"
         entrypoint = _extension_main(manifest)
-        trace_file.touch()
         home.mkdir()
         workspace.mkdir()
         canaries = _write_canaries(home)
@@ -167,7 +177,8 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
             },
             "sandbox_home": str(home),
             "sandbox_workspace": str(workspace),
-            "trace_file": str(trace_file),
+            "trace_file": None,
+            "runtime_event_transport": "authenticated-stderr-v1",
             "instrumentation": {
                 "node_require_hook": str(hook_file),
                 "entrypoint_runner": str(entrypoint_runner),
@@ -207,6 +218,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 hook_file,
                 trace_file,
                 entrypoint_runner,
+                canaries,
             ))
             observations.extend(_execute_entrypoint(
                 entrypoint_runner,
@@ -217,8 +229,8 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 trace_file,
                 target,
                 entrypoint=entrypoint,
+                canary_files=canaries,
             ))
-            observations.extend(_observations_from_trace(trace_file, canaries))
         return {
             "schema_version": "0.1.0",
             "mode": "executed" if allow_execute else "plan-only",
@@ -279,6 +291,7 @@ def _execute_planned_commands(
     hook_file: Path,
     trace_file: Path,
     entrypoint_runner: Path,
+    canary_files: list[str],
 ) -> list[dict[str, Any]]:
     observations: list[dict[str, Any]] = []
     before = _snapshot(home, workspace, target)
@@ -299,6 +312,23 @@ def _execute_planned_commands(
                 check=False,
             )
             combined = f"{result.stdout}\n{result.stderr}"
+            events, transport_ok = _verified_runtime_events(result.stderr)
+            observations.extend(_observations_from_events(events, canary_files))
+            if _command_uses_node(command["command"]) and not transport_ok:
+                observations.append({
+                    "kind": "sandbox_error",
+                    "phase": "lifecycle",
+                    "script": command["name"],
+                    "evidence": "runtime event transport failed integrity validation",
+                })
+            if result.returncode != 0:
+                observations.append({
+                    "kind": "sandbox_error",
+                    "phase": "lifecycle",
+                    "script": command["name"],
+                    "returncode": result.returncode,
+                    "evidence": "lifecycle script exited unsuccessfully",
+                })
             observations.append({
                 "kind": "lifecycle_executed",
                 "script": command["name"],
@@ -339,6 +369,7 @@ def _execute_entrypoint(
     target: Path,
     *,
     entrypoint: str | None = "./extension.js",
+    canary_files: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not entrypoint:
         return [{
@@ -362,6 +393,7 @@ def _execute_entrypoint(
             check=False,
         )
         combined = f"{result.stdout}\n{result.stderr}"
+        events, transport_ok = _verified_runtime_events(result.stderr)
         succeeded = result.returncode == 0
         observations: list[dict[str, Any]] = [{
             "kind": "entrypoint_executed" if succeeded else "sandbox_error",
@@ -373,6 +405,13 @@ def _execute_entrypoint(
         observations[0] = {key: value for key, value in observations[0].items() if value is not None}
         if result.returncode != 0 and result.stderr:
             observations[0]["stderr_excerpt"] = result.stderr[:500]
+        observations.extend(_observations_from_events(events, canary_files or []))
+        if not transport_ok:
+            observations.append({
+                "kind": "sandbox_error",
+                "phase": "activation",
+                "evidence": "runtime event transport failed integrity validation",
+            })
         if CANARY_VALUE in combined:
             observations.append({
                 "kind": "canary_exposed",
@@ -447,8 +486,6 @@ def _run_isolated(
         "--dir", "/runner",
         "--ro-bind", str(hook_file), "/runner/node-runtime-hook.js",
         "--ro-bind", str(entrypoint_runner), "/runner/activate-entrypoint.js",
-        "--dir", "/trace",
-        "--bind", str(trace_file), "/trace/trace.jsonl",
         "--clearenv",
         "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "--setenv", "HOME", "/home/guardrails",
@@ -456,7 +493,6 @@ def _run_isolated(
         "--setenv", "TMPDIR", "/tmp",
         "--setenv", "IDE_SCANNER_SANDBOX", "1",
         "--setenv", "IDE_SCANNER_CANARY", CANARY_VALUE,
-        "--setenv", "IDE_SCANNER_TRACE_FILE", "/trace/trace.jsonl",
         "--setenv", "VSCODE_CWD", "/workspace",
         "--setenv", "NODE_OPTIONS", "--require=/runner/node-runtime-hook.js",
         "--chdir", cwd,
@@ -466,7 +502,120 @@ def _run_isolated(
     if os.name == "posix":
         timeout = int(kwargs.get("timeout", MAX_RUNTIME_TIMEOUT_SECONDS))
         kwargs["preexec_fn"] = _runtime_resource_limiter(timeout)
-    return subprocess.run(args, **kwargs)
+    return _run_bounded_capture(args, **kwargs)
+
+
+def _run_bounded_capture(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """Capture isolated-process output without allowing unbounded parent memory use."""
+    capture_output = bool(kwargs.pop("capture_output", False))
+    text_output = bool(kwargs.pop("text", False))
+    check = bool(kwargs.pop("check", False))
+    timeout = kwargs.pop("timeout", None)
+    if not capture_output:
+        raise ValueError("Runtime execution requires bounded captured output")
+    if kwargs.pop("input", None) is not None:
+        raise ValueError("Runtime execution does not accept stdin input")
+
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=(os.name == "posix"),
+        **kwargs,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    for stream in streams:
+        os.set_blocking(stream.fileno(), False)
+        selector.register(stream, selectors.EVENT_READ)
+
+    deadline = time.monotonic() + float(timeout) if timeout is not None else None
+    output_limited = False
+    timed_out = False
+
+    def stop_process() -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                return
+            except (ProcessLookupError, PermissionError):
+                pass
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+    try:
+        while selector.get_map():
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if remaining == 0.0:
+                timed_out = True
+                stop_process()
+                break
+            ready = selector.select(remaining)
+            if not ready:
+                timed_out = True
+                stop_process()
+                break
+            for key, _ in ready:
+                stream = key.fileobj
+                try:
+                    chunk = os.read(stream.fileno(), RUNTIME_OUTPUT_CHUNK_BYTES)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(stream)
+                    stream.close()
+                    continue
+                buffer = streams[stream]
+                remaining_bytes = MAX_RUNTIME_OUTPUT_BYTES - len(buffer)
+                if len(chunk) > remaining_bytes:
+                    buffer.extend(chunk[:max(0, remaining_bytes)])
+                    output_limited = True
+                    stop_process()
+                    break
+                buffer.extend(chunk)
+            if output_limited:
+                break
+    finally:
+        if timed_out or output_limited:
+            stop_process()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            stop_process()
+            process.wait(timeout=1)
+        for stream in streams:
+            try:
+                selector.unregister(stream)
+            except KeyError:
+                pass
+            if not stream.closed:
+                stream.close()
+        selector.close()
+
+    stdout_bytes = bytes(streams[process.stdout])
+    stderr_bytes = bytes(streams[process.stderr])
+    if output_limited:
+        stderr_bytes += ("\n" + RUNTIME_EVENT_OUTPUT_LIMIT_MARKER + "\n").encode("utf-8")
+    stdout = stdout_bytes.decode("utf-8", errors="replace") if text_output else stdout_bytes
+    stderr = stderr_bytes.decode("utf-8", errors="replace") if text_output else stderr_bytes
+    if timed_out:
+        raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+    result = subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, command, output=stdout, stderr=stderr)
+    return result
+
+
+def _command_uses_node(command: str) -> bool:
+    words = {"node", "nodejs", "npm", "npx", "yarn", "pnpm"}
+    return any(token in words for token in command.replace(";", " ").split())
 
 
 def _runtime_resource_limiter(timeout_seconds: int):
@@ -512,7 +661,6 @@ def _sandbox_env(home: Path, workspace: Path, hook_file: Path, trace_file: Path)
         "USERPROFILE": str(home),
         "IDE_SCANNER_SANDBOX": "1",
         "IDE_SCANNER_CANARY": CANARY_VALUE,
-        "IDE_SCANNER_TRACE_FILE": str(trace_file),
         "VSCODE_CWD": str(workspace),
         "NODE_OPTIONS": f"{require_hook} {existing_node_options}".strip(),
     })
@@ -523,10 +671,17 @@ def _write_node_hook(path: Path, trace_file: Path, home: Path) -> None:
     path.write_text(
         r"""
 const fs = require('fs');
+const crypto = require('crypto');
 const Module = require('module');
-const traceFile = process.env.IDE_SCANNER_TRACE_FILE;
 const sandboxHome = process.env.HOME || '';
-const traceAppend = fs.appendFileSync.bind(fs);
+const transportWrite = process.stderr.write.bind(process.stderr);
+const transportSecret = crypto.randomBytes(32).toString('hex');
+
+function writeTransport(line) {
+  try { transportWrite(line + '\n'); } catch (_) {}
+}
+
+writeTransport('GUARDRAILS_RUNTIME_HANDSHAKE_V1:' + transportSecret);
 
 function safeString(value) {
   if (typeof value === 'string') return value;
@@ -536,10 +691,9 @@ function safeString(value) {
 }
 
 function record(event) {
-  if (!traceFile) return;
-  try {
-    traceAppend(traceFile, JSON.stringify(Object.assign({ts: Date.now()}, event)) + '\n');
-  } catch (_) {}
+  const payload = JSON.stringify(Object.assign({ts: Date.now()}, event));
+  const mac = crypto.createHmac('sha256', transportSecret).update(payload).digest('hex');
+  writeTransport('GUARDRAILS_RUNTIME_EVENT_V1:' + Buffer.from(payload, 'utf8').toString('base64') + '.' + mac);
 }
 
 const commandHandlers = new Map();
@@ -809,16 +963,74 @@ run().catch((err) => {{
     )
 
 
+def _verified_runtime_events(output: str) -> tuple[list[dict[str, Any]], bool]:
+    """Decode only hook events authenticated by the hook's per-process secret.
+
+    Extension code shares the Node process and can write to stderr. Runtime
+    observations therefore must not trust that raw channel. The hook emits a
+    random handshake before the extension loads and HMACs each event; forged
+    or truncated transport makes the runtime evidence incomplete instead of
+    silently becoming trusted evidence.
+    """
+    secret = ""
+    events: list[dict[str, Any]] = []
+    valid = True
+    for line in output.splitlines():
+        if line.startswith(RUNTIME_EVENT_HANDSHAKE):
+            candidate = line[len(RUNTIME_EVENT_HANDSHAKE):].strip()
+            if secret:
+                valid = False
+                continue
+            if len(candidate) != 64 or any(char not in "0123456789abcdefABCDEF" for char in candidate):
+                valid = False
+                continue
+            secret = candidate
+            continue
+        if RUNTIME_EVENT_OUTPUT_LIMIT_MARKER in line:
+            valid = False
+            continue
+        if not line.startswith(RUNTIME_EVENT_PREFIX):
+            continue
+        if not secret:
+            valid = False
+            continue
+        encoded_mac = line[len(RUNTIME_EVENT_PREFIX):]
+        encoded, separator, supplied_mac = encoded_mac.rpartition(".")
+        if not separator or not supplied_mac:
+            valid = False
+            continue
+        try:
+            payload = base64.b64decode(encoded, validate=True).decode("utf-8")
+            expected_mac = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            event = json.loads(payload)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            valid = False
+            continue
+        if not hmac.compare_digest(expected_mac, supplied_mac) or not isinstance(event, dict):
+            valid = False
+            continue
+        events.append(event)
+    return (events if valid else []), valid
+
+
 def _observations_from_trace(trace_file: Path, canary_files: list[str]) -> list[dict[str, Any]]:
     if not trace_file.exists():
         return []
-    canary_set = {str(Path(item)) for item in canary_files}
-    observations: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     for line in trace_file.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(event, dict):
+            events.append(event)
+    return _observations_from_events(events, canary_files)
+
+
+def _observations_from_events(events: list[dict[str, Any]], canary_files: list[str]) -> list[dict[str, Any]]:
+    canary_set = {str(Path(item)) for item in canary_files}
+    observations: list[dict[str, Any]] = []
+    for event in events:
         kind = event.get("kind")
         if kind == "fs_read":
             path = str(event.get("path") or "")

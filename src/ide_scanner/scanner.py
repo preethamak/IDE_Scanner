@@ -3456,7 +3456,7 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         confidence,
         summary,
         file_refs,
-        "Review the sandbox trace. Dynamic observations are strong evidence but not authoritative malware without confirmed intelligence.",
+        "Review the authenticated runtime evidence. Dynamic observations are strong evidence but not authoritative malware without confirmed intelligence.",
         evidence,
     )
 
