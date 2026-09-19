@@ -52,6 +52,23 @@ class RealArtifactCalibrationTests(unittest.TestCase):
         self.assertIn("dynamic-shell-execution", rule_ids)
         self.assertIn("remote-credential-broker", rule_ids)
 
+    def test_bcai_rosetta_exact_advisory_blocks_the_real_artifact(self) -> None:
+        """The independently reported exact artifact remains a confirmed block."""
+        self.assertTrue(BCAI_ARTIFACT.is_file(), BCAI_ARTIFACT)
+        report = scan_targets(
+            paths=[BCAI_ARTIFACT],
+            online=False,
+            include_posture=False,
+        )
+
+        extension = report["extensions"][0]
+        self.assertEqual(extension["artifact_hash"], BCAI_SHA256)
+        self.assertEqual(extension["decision"], "block")
+        self.assertEqual(extension["verdict"], "malicious")
+        self.assertEqual(extension["malware_score"], 100)
+        self.assertEqual(extension["public_outcome"], "confirmed_threat")
+        self.assertTrue(any(item["rule_id"] == "known-malicious-extension" for item in extension["findings"]))
+
 
 if __name__ == "__main__":
     unittest.main()
