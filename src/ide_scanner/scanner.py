@@ -4792,8 +4792,11 @@ _GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-s
 # even though the classification policy already treats these signals as
 # contextual. Keep the paths and occurrence count, but surface one concise
 # finding. Do not add correlated, observed, provenance, or AST rules here:
-# repeated high-specificity evidence must remain individually reviewable.
+# repeated high-specificity evidence must remain individually reviewable. The
+# AST dynamic-call rule is explicitly weak/contextual, so it is safe to merge
+# its repeated occurrences while retaining all source paths and the count.
 _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
+    "ast-dynamic-call-target",
     "dynamic-code-loading",
     "dynamic-shell-execution",
     "encoded-dynamic-execution",
@@ -4832,15 +4835,21 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
     """
     grouped: dict[tuple[str, str, str, str, str], Finding] = {}
     occurrence_counts: dict[tuple[str, str, str, str, str], int] = {}
+    observation_counts: dict[tuple[str, str, str, str, str], int] = {}
     output: list[Finding] = []
 
     for finding in findings:
+        # The AST dynamic-call summary includes the source path and a
+        # per-file count, so using it as a grouping key would defeat the
+        # aggregation. Other contextual rules intentionally retain distinct
+        # summaries when they describe different evidence.
+        summary_key = "" if finding.rule_id == "ast-dynamic-call-target" else finding.evidence_summary
         key = (
             finding.rule_id,
             finding.category,
             finding.severity,
             finding.evidence_type,
-            finding.evidence_summary,
+            summary_key,
         )
         if (
             finding.rule_id not in _CONTEXTUAL_OCCURRENCE_RULES
@@ -4853,14 +4862,30 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
         if first is None:
             grouped[key] = finding
             occurrence_counts[key] = 1
+            observation_counts[key] = _contextual_observation_count(finding)
+            if finding.rule_id == "ast-dynamic-call-target":
+                evidence = dict(finding.evidence or {})
+                evidence["target_count"] = observation_counts[key]
+                finding.evidence = evidence
+                finding.evidence_summary = (
+                    f"AST found {observation_counts[key]} computed call target(s) in "
+                    f"{len(finding.file_refs)} file(s); see occurrence_files for paths."
+                )
             output.append(finding)
             continue
 
         occurrence_counts[key] += 1
+        observation_counts[key] += _contextual_observation_count(finding)
         first.file_refs = sorted(set(first.file_refs).union(finding.file_refs))
         evidence = dict(first.evidence or {})
         evidence["occurrence_count"] = occurrence_counts[key]
         evidence["occurrence_files"] = list(first.file_refs)
+        if first.rule_id == "ast-dynamic-call-target":
+            evidence["target_count"] = observation_counts[key]
+            first.evidence_summary = (
+                f"AST found {observation_counts[key]} computed call target(s) in "
+                f"{len(first.file_refs)} file(s); see occurrence_files for paths."
+            )
         first.evidence = evidence
         first.finding_id = _stable_id(
             f"{first.extension_id}:{first.version}:{first.rule_id}:"
@@ -4868,6 +4893,21 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
         )
 
     return output
+
+
+def _contextual_observation_count(finding: Finding) -> int:
+    """Return the number represented by one contextual finding.
+
+    Most findings represent one occurrence. The AST dynamic-call rule emits
+    one finding per file and stores the number of computed targets in
+    ``evidence.count``; preserve that total when files are merged.
+    """
+    if finding.rule_id == "ast-dynamic-call-target":
+        try:
+            return max(1, int((finding.evidence or {}).get("count") or 1))
+        except (TypeError, ValueError):
+            return 1
+    return 1
 
 
 def _add_ast_findings(

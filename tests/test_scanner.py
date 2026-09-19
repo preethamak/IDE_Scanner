@@ -88,6 +88,33 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result[0].evidence["occurrence_count"], 2)
         self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "dist/b.js"])
 
+    def test_repeated_weak_ast_dispatch_notes_are_aggregated_without_losing_paths(self) -> None:
+        def finding(path: str) -> Finding:
+            return Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="ast-dynamic-call-target",
+                category="execution",
+                severity="MEDIUM",
+                confidence=0.65,
+                score=45,
+                evidence_type="static",
+                evidence_summary=f"AST found computed call target in {path}.",
+                file_refs=[path],
+                recommendation="Treat computed dispatch as contextual only.",
+                evidence={"evidence_class": "weak", "count": 3 if path.endswith("a.js") else 2},
+            )
+
+        result = _dedupe_findings([finding("dist/a.js"), finding("dist/b.js")])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].file_refs, ["dist/a.js", "dist/b.js"])
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "dist/b.js"])
+        self.assertEqual(result[0].evidence["target_count"], 5)
+        self.assertIn("5 computed call target(s) in 2 file(s)", result[0].evidence_summary)
+
     def test_correlated_findings_are_not_aggregated_as_contextual_notes(self) -> None:
         def finding(path: str) -> Finding:
             return Finding(
