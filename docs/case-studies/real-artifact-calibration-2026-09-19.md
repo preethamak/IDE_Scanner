@@ -44,7 +44,7 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`d4507dc7a0968c41888c2019b02827bee89b329a`. The BCAI behavior-only replay
+`52cbe37a6ac28fd448fb9e23045448c0fc28bb6f`. The BCAI behavior-only replay
 remains `REVIEW` without the advisory and the exact-hash replay is
 `BLOCK/MALICIOUS` with the advisory enabled. Neither run is a substitute for
 the required deep-runtime publication holdout.
