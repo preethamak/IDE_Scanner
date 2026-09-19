@@ -2401,6 +2401,47 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process-execution", rule_ids)
         self.assertNotIn("download-and-execute", rule_ids)
 
+    def test_post_telemetry_and_local_mcp_process_do_not_create_download_execute(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"telemetry-client","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const cp=require('child_process');"
+                "fetch('https://telemetry.example/ingest',{method:'POST',body:JSON.stringify(event)});"
+                "cp.spawn('npx',['-y','some-mcp-server']);",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("process-execution", rule_ids)
+        self.assertNotIn("download-and-execute", rule_ids)
+
+    def test_user_facing_downloader_command_is_not_download_execute(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"cli-helper","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const cp=require('child_process');"
+                "const installCommand='curl -fsSL https://vendor.example/install | bash';"
+                "terminal.sendText(installCommand);"
+                "cp.execFile('zig',['build','fmt']);",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("process-execution", rule_ids)
+        self.assertNotIn("download-and-execute", rule_ids)
+
     def test_remote_credential_broker_requires_review_without_calling_it_malware(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

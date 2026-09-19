@@ -2464,10 +2464,11 @@ def _add_code_findings(
                 "signals": ["remote-token-endpoint", "token-material", "bearer-forwarding", "network-sink"],
             },
         ))
-    if has_content_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
-        _CONTENT_DOWNLOAD_RE,
-        process_exec_re,
-    ]):
+    if (
+        has_content_download
+        and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings)
+        and _has_download_execute_chain(text, process_exec_re)
+    ):
         findings.append(_finding(
             extension_id,
             version,
@@ -2599,22 +2600,76 @@ _SHELL_EXEC_RE = re.compile(
 # sit next to legitimate local ``execSync`` calls. Only treat content-oriented
 # requests as the download leg of the download-and-execute chain; the broader
 # DOWNLOAD_RE remains available for lower-level updater/install correlation.
+#
+# Do not match ``curl``/``wget`` as free text. Extensions often show a
+# user-copied installation command in a notification or README; that is not
+# the extension executing a downloader. Those commands are handled separately
+# only when they are the literal command of a child-process invocation.
 _CONTENT_DOWNLOAD_RE = re.compile(
-    r"(?:\bfetch\s*\(|\bhttps?\.get\b|\baxios\.get\b|\bcurl\s+|\bwget\s+)"
+    r"(?:\bfetch\s*\(|\bhttps?\.get\s*\(|\baxios\.get\s*\()",
+    re.I,
 )
 _REQUEST_CALL_RE = re.compile(r"\bhttps?\.request\s*\(", re.I)
 _REQUEST_METHOD_RE = re.compile(r"\bmethod\s*:\s*['\"]([A-Za-z]+)['\"]", re.I)
+_DOWNLOADER_PROCESS_RE = re.compile(
+    r"\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\(\s*['\"](?:curl|wget)(?:['\"]|\s)",
+    re.I,
+)
+_DIRECT_DOWNLOAD_EXEC_RE = re.compile(
+    r"\b(?:exec|execSync)\s*\(\s*['\"][^'\"]{0,500}\b(?:curl|wget)\b[^'\"]*\|\s*(?:ba)?sh\b",
+    re.I,
+)
 
 
-def _has_content_download(text: str) -> bool:
-    if _CONTENT_DOWNLOAD_RE.search(text):
-        return True
+def _content_download_offsets(text: str) -> list[int]:
+    offsets: list[int] = []
+    for match in _CONTENT_DOWNLOAD_RE.finditer(text):
+        # fetch() is frequently used for POST telemetry or health checks. An
+        # explicit non-GET method is not a content download leg.
+        if match.group(0).lower().startswith("fetch"):
+            window = text[match.start(): match.start() + 1200]
+            method = _REQUEST_METHOD_RE.search(window)
+            if method is not None and method.group(1).upper() != "GET":
+                continue
+        offsets.append(match.start())
     for match in _REQUEST_CALL_RE.finditer(text):
         # Bound the lookahead so a later unrelated object cannot relabel a
         # connectivity request. An omitted method is the Node default GET.
         window = text[match.start(): match.start() + 1200]
         method = _REQUEST_METHOD_RE.search(window)
         if method is None or method.group(1).upper() == "GET":
+            offsets.append(match.start())
+    return offsets
+
+
+def _has_content_download(text: str) -> bool:
+    return bool(_content_download_offsets(text) or _DOWNLOADER_PROCESS_RE.search(text))
+
+
+def _has_download_execute_chain(text: str, process_exec_re: re.Pattern[str]) -> bool:
+    """Require an actual downloader leg to be near a distinct process sink.
+
+    This intentionally does not treat a POST fetch, a health check, or a
+    user-facing ``curl | bash`` string as a download-and-execute chain. The
+    standalone rule remains review-only, but its evidence still needs to be
+    specific enough to be useful to an analyst.
+    """
+    process_matches = list(process_exec_re.finditer(text))
+    if not process_matches:
+        return False
+    window_chars = max(45 * 72, 240)
+    for anchor in _content_download_offsets(text):
+        if any(abs(anchor - process.start()) <= window_chars for process in process_matches):
+            return True
+    direct = _DIRECT_DOWNLOAD_EXEC_RE.search(text)
+    if direct is not None:
+        return True
+    for downloader in _DOWNLOADER_PROCESS_RE.finditer(text):
+        if any(
+            process.start() != downloader.start()
+            and abs(downloader.start() - process.start()) <= window_chars
+            for process in process_matches
+        ):
             return True
     return False
 
