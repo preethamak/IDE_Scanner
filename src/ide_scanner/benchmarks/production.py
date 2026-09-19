@@ -314,6 +314,7 @@ def _runtime_contract(actual: dict[str, Any]) -> dict[str, Any]:
         "execution": str(provider.get("execution") or ""),
         "runtime_policy": str(provider.get("policy") or ""),
         "executed": provider.get("executed") is True,
+        "external_syscall_trace": provider.get("external_syscall_trace") is True,
     }
 
 
@@ -326,6 +327,7 @@ def _runtime_contract_violations(contract: dict[str, Any]) -> list[str]:
             "execution": "controlled-bubblewrap",
             "runtime_policy": "capability-gated-v1",
             "executed": True,
+            "external_syscall_trace": True,
         }
     else:
         expected = {

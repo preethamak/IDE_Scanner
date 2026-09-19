@@ -103,6 +103,47 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertEqual(dynamic["observed_kinds"]["example.runtime"], ["network_attempt", "secret_exfil"])
         self.assertEqual(dynamic["runtime_required_ids"], ["example.runtime"])
         self.assertEqual(dynamic["runtime_runs"][0]["status"], "completed")
+        self.assertFalse(dynamic["external_syscall_trace"])
+
+    def test_runtime_trace_aggregate_requires_each_required_artifact(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"runtime","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            args = _parser().parse_args([
+                "--path", str(root), "--profile", "deep", "--runtime", "--out", str(root / "report.json"),
+            ])
+            extension = {
+                "extension_id": "example.runtime",
+                "version": "1.0.0",
+                "analysis_status": "complete",
+                "decision": "allow",
+                "verdict": "clean",
+                "artifact_hash": "a" * 64,
+                "analysis_coverage": {
+                    "status": "complete",
+                    "coverage_percent": 100,
+                    "providers": {"dynamic_sandbox": {
+                        "required": True,
+                        "external_syscall_trace": False,
+                    }},
+                },
+                "_corpus_dynamic_sandbox": {
+                    "runtime_required_ids": ["example.runtime"],
+                    "runtime_runs": [{"extension_id": "example.runtime", "status": "completed"}],
+                },
+            }
+            with patch("scripts.scan_corpus._scan_one", return_value=extension), patch(
+                "scripts.scan_corpus.sandbox_preflight", return_value={"status": "ready"},
+            ):
+                report = run(args)
+
+        dynamic = report["intelligence"]["dynamic_sandbox"]
+        self.assertFalse(dynamic["external_syscall_trace"])
+        self.assertEqual(dynamic["runtime_traced_count"], 0)
 
     def test_complete_manifest_result_can_be_resumed_from_checkpoint(self) -> None:
         with TemporaryDirectory() as tmp:

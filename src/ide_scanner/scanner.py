@@ -3647,6 +3647,16 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
             "error_count": error_count,
             "required": required,
             "policy": str(metadata.get("runtime_policy") or "external-evidence"),
+            # A runtime request and a host-level strace binary are not enough
+            # to prove evidence. Required artifacts only receive this bit
+            # when the parent-owned trace was available and the run produced
+            # no runtime failure. Non-executable packages are explicitly
+            # not-applicable and therefore do not claim a trace.
+            "external_syscall_trace": bool(
+                required
+                and metadata.get("external_syscall_trace") is True
+                and error_count == 0
+            ),
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
 

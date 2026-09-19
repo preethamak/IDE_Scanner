@@ -41,7 +41,7 @@ from ide_scanner.discovery import discover_from_path, discover_local_installatio
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
 from ide_scanner.classification_policy import POLICY_VERSION  # noqa: E402
 from ide_scanner.rule_registry import RULESET_VERSION  # noqa: E402
-from ide_scanner.sandbox_runner import _external_trace_requested, sandbox_preflight  # noqa: E402
+from ide_scanner.sandbox_runner import external_trace_available, sandbox_preflight  # noqa: E402
 from ide_scanner.scanner import _build_report, _degzip_if_needed, _hash_file, _local_error_extension  # noqa: E402
 
 
@@ -287,7 +287,7 @@ def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_t
         "runtime": bool(runtime),
         "runtime_timeout_seconds": runtime_timeout if runtime else 0,
         "runtime_evidence_version": "2",
-        "runtime_external_trace": bool(runtime and _external_trace_requested()),
+        "runtime_external_trace": bool(runtime and external_trace_available()),
     }
 
 
@@ -569,6 +569,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     observed_kinds: dict[str, set[str]] = {}
     runtime_runs: list[dict[str, Any]] = []
     runtime_required_ids: set[str] = set()
+    runtime_trace_results: list[bool] = []
     extension_values: list[dict[str, Any]] = []
     for index in range(len(targets)):
         value = extensions_by_index[index]
@@ -587,8 +588,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             required_ids = dynamic_sandbox.get("runtime_required_ids")
             if isinstance(required_ids, list):
                 runtime_required_ids.update(str(item) for item in required_ids if str(item))
+        coverage = value.get("analysis_coverage") if isinstance(value.get("analysis_coverage"), dict) else {}
+        providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
+        runtime_provider = providers.get("dynamic_sandbox") if isinstance(providers.get("dynamic_sandbox"), dict) else {}
+        if runtime_provider.get("required") is True:
+            runtime_trace_results.append(runtime_provider.get("external_syscall_trace") is True)
         extension_values.append(value)
     extensions = [_extension_from_dict(value) for value in extension_values]
+    traced_runtime_count = sum(1 for traced in runtime_trace_results if traced)
+    # The environment variable only requests tracing. It is not proof that
+    # every required artifact produced a valid parent-owned trace.
+    external_syscall_trace = bool(
+        args.runtime
+        and runtime_trace_results
+        and traced_runtime_count == len(runtime_trace_results)
+    )
     dynamic_sandbox = {
         "status": "executed" if args.runtime else "not-requested",
         "mode": "executed" if args.runtime else "static-only",
@@ -596,7 +610,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "executed": bool(args.runtime),
         "backend": "bubblewrap" if args.runtime else "external",
         "runtime_policy": "capability-gated-v1" if args.runtime else "external-evidence",
-        "external_syscall_trace": bool(args.runtime and _external_trace_requested()),
+        "external_syscall_trace": external_syscall_trace,
+        "runtime_required_count": len(runtime_trace_results),
+        "runtime_traced_count": traced_runtime_count,
         "runtime_runs": runtime_runs,
         "runtime_required_ids": sorted(runtime_required_ids),
         "observed_kinds": {

@@ -429,6 +429,7 @@ class ScannerTests(unittest.TestCase):
                     "mode": "executed",
                     "execution": "controlled-bubblewrap",
                     "executed": True,
+                    "external_syscall_trace": True,
                     "runtime_policy": "capability-gated-v1",
                     "runtime_required_ids": ["publisher.extension"],
                 },
@@ -438,6 +439,7 @@ class ScannerTests(unittest.TestCase):
         provider = extension.analysis_coverage["providers"]["dynamic_sandbox"]
         self.assertEqual(provider["status"], "completed")
         self.assertTrue(provider["executed"])
+        self.assertTrue(provider["external_syscall_trace"])
 
     def test_failed_runtime_entrypoint_is_not_reported_as_completed(self) -> None:
         failed = subprocess.CompletedProcess(

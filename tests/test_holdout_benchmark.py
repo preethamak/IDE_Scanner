@@ -115,6 +115,19 @@ class HoldoutBenchmarkTests(unittest.TestCase):
         self.assertFalse(result["gate"]["passed"])
         self.assertTrue(any("provider_status" in item for item in result["artifacts"][1]["violations"]))
 
+    def test_holdout_fails_when_required_artifact_trace_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            report["extensions"][1]["analysis_coverage"]["providers"]["dynamic_sandbox"]["external_syscall_trace"] = False
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertTrue(any("external_syscall_trace" in item for item in result["artifacts"][1]["violations"]))
+
     @staticmethod
     def _corpus() -> dict:
         return {
@@ -173,6 +186,7 @@ class HoldoutBenchmarkTests(unittest.TestCase):
                         "execution": "policy-gated",
                         "policy": "capability-gated-v1",
                         "executed": False,
+                        "external_syscall_trace": False,
                     }},
                 },
                 "findings": [],
@@ -193,6 +207,7 @@ class HoldoutBenchmarkTests(unittest.TestCase):
                         "execution": "controlled-bubblewrap",
                         "policy": "capability-gated-v1",
                         "executed": True,
+                        "external_syscall_trace": True,
                     }},
                 },
                 "findings": [{"rule_id": "trusted-threat-feed-hit"}],
