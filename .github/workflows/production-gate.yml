@@ -184,6 +184,7 @@ jobs:
             production-gate.json
             bcai-calibration.json
             code-runner-cve-calibration.json
+            benchmarks/external/artifacts/formulahendry-code-runner-0.12.2/*.vsix
             benchmarks/external/artifacts/public-holdout-2026-09-18/*.vsix
             benchmarks/external/artifacts/code-spell-checker-4.5.6/*.vsix
             benchmarks/external/artifacts/vscode-yaml-1.24.0/*.vsix
