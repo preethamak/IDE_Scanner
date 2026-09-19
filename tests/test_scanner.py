@@ -189,6 +189,33 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result[0].evidence["occurrence_count"], 2)
         self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "node_modules/pkg/b.js"])
 
+    def test_repeated_weak_secret_reference_notes_are_aggregated_with_paths(self) -> None:
+        findings = [
+            Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="secret-reference:env-file",
+                category="credential",
+                severity="LOW",
+                confidence=0.5,
+                score=20,
+                evidence_type="static",
+                evidence_summary="Code references environment files.",
+                file_refs=[path],
+                recommendation="Treat this as contextual unless a credential value reaches a sensitive sink.",
+                evidence={"evidence_class": "weak", "secret_id": "env-file"},
+            )
+            for path in ("dist/a.js", "dist/b.js")
+        ]
+
+        result = _dedupe_findings(findings)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].file_refs, ["dist/a.js", "dist/b.js"])
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], ["dist/a.js", "dist/b.js"])
+
     def test_local_runtime_is_capability_gated_and_attached_to_exact_report(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "agent.vsix"

@@ -4806,6 +4806,11 @@ _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
 })
 
 
+def _is_contextual_occurrence_rule(rule_id: str) -> bool:
+    """Return whether repeated weak observations can share one report row."""
+    return rule_id in _CONTEXTUAL_OCCURRENCE_RULES or rule_id.startswith("secret-reference:")
+
+
 def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
     """Collapse findings that share a finding_id (identical rule + file_refs +
     evidence summary) to the first occurrence, preserving order. Multiple
@@ -4851,7 +4856,7 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
             summary_key,
         )
         if (
-            finding.rule_id not in _CONTEXTUAL_OCCURRENCE_RULES
+            not _is_contextual_occurrence_rule(finding.rule_id)
             or finding_actionability(finding) != "contextual"
         ):
             output.append(finding)
