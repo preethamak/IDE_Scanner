@@ -600,7 +600,10 @@ def _run_isolated(
         ]
     if os.name == "posix":
         timeout = int(kwargs.get("timeout", MAX_RUNTIME_TIMEOUT_SECONDS))
-        kwargs["preexec_fn"] = _runtime_resource_limiter(timeout)
+        kwargs["preexec_fn"] = _runtime_resource_limiter(
+            timeout,
+            max_file_bytes=MAX_EXTERNAL_TRACE_BYTES if external_trace_prefix is not None else None,
+        )
     result = _run_bounded_capture(args, **kwargs)
     if external_trace_prefix is not None:
         setattr(result, "_guardrails_external_trace_prefix", str(external_trace_prefix))
@@ -720,7 +723,7 @@ def _command_uses_node(command: str) -> bool:
     return any(token in words for token in command.replace(";", " ").split())
 
 
-def _runtime_resource_limiter(timeout_seconds: int):
+def _runtime_resource_limiter(timeout_seconds: int, *, max_file_bytes: int | None = None):
     """Apply inherited limits to Bubblewrap and the extension process tree.
 
     Wall-clock timeouts alone do not protect a production worker from an
@@ -737,7 +740,7 @@ def _runtime_resource_limiter(timeout_seconds: int):
         except (OSError, ValueError):
             pass
         try:
-            file_limit = min(MAX_RUNTIME_FILE_BYTES, MAX_RUNTIME_BYTES)
+            file_limit = min(max_file_bytes or MAX_RUNTIME_FILE_BYTES, MAX_RUNTIME_BYTES)
             resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
         except (OSError, ValueError):
             pass
