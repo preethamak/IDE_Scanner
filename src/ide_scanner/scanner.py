@@ -247,6 +247,7 @@ EXPOSURE_RULES = {
     "credential-global-state-key",
     "credential-global-state-storage",
     "credential-inputbox-prompt",
+    "remote-credential-broker",
     "clipboard-read-near-secret-input",
     "clipboard-near-credential-surface",
     "credential-input-near-state",
@@ -2093,6 +2094,7 @@ def _add_code_findings(
     has_encode = bool(ENCODE_ARCHIVE_RE.search(text))
     has_destructive = bool(DESTRUCTIVE_RE.search(text))
     has_download = bool(DOWNLOAD_RE.search(text))
+    has_content_download = _has_content_download(text)
     has_obfuscation = bool(re.search(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", text, re.I))
     has_dynamic_exec = bool(_DYNAMIC_EVAL_RE.search(text))
     has_exec_file = bool(re.search(r"\b(?:execFile|execFileSync)\s*\(", text)) or bool(
@@ -2116,6 +2118,18 @@ def _add_code_findings(
         text,
         re.I,
     ))
+    remote_broker_re = re.compile(
+        r"\b(?:tokenServerUrl|remoteTokenServerUrl|remoteTokenServer|lease-token|report-result|remote-token)\b",
+        re.I,
+    )
+    token_material_re = re.compile(
+        r"\b(?:refreshToken|refresh_token|accessToken|access_token|tokenServerSecret|tokenInfo)\b",
+        re.I,
+    )
+    bearer_forward_re = re.compile(
+        r"(?:\b(?:authorization|Authorization)\b.{0,160}\bBearer\b|\bBearer\b.{0,160}\b(?:authorization|Authorization)\b)",
+        re.I | re.S,
+    )
     secret_regex = _combined_secret_regex(secret_refs)
 
     identifier_credential_flow = credential_value_flow(text)
@@ -2428,8 +2442,30 @@ def _add_code_findings(
             "Review agent tool data boundaries. Proximity alone does not establish that sensitive data reaches the network.",
             {"evidence_class": "exposure", "correlation": "character-proximity"},
         ))
-    if has_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
-        DOWNLOAD_RE,
+    if (
+        has_network
+        and remote_broker_re.search(text)
+        and token_material_re.search(text)
+        and bearer_forward_re.search(text)
+    ):
+        findings.append(_finding(
+            extension_id,
+            version,
+            "remote-credential-broker",
+            "cross-extension-exposure",
+            "HIGH",
+            0.84,
+            "Code appears to obtain or forward bearer tokens through a separately configured remote token broker.",
+            [rel],
+            "Verify endpoint ownership, token scope, retention, and user disclosure. This is a trust-boundary review signal, not proof of exfiltration or malicious intent.",
+            {
+                "evidence_class": "exposure",
+                "correlation": "same-file-semantic-chain",
+                "signals": ["remote-token-endpoint", "token-material", "bearer-forwarding", "network-sink"],
+            },
+        ))
+    if has_content_download and any(item.rule_id == "process-execution" and rel in item.file_refs for item in findings) and _features_nearby(text, [
+        _CONTENT_DOWNLOAD_RE,
         process_exec_re,
     ]):
         findings.append(_finding(
@@ -2557,6 +2593,30 @@ _SHELL_EXEC_RE = re.compile(
     r"\bshell\s*:\s*true"
     r"|(?:\b(?:child_process|cp)\b|require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\))\s*\.\s*exec(?:Sync)?\s*\("
 )
+
+# A request API is not automatically a download. Connectivity probes and
+# proxy negotiation commonly use ``http[s].request`` with HEAD/CONNECT and may
+# sit next to legitimate local ``execSync`` calls. Only treat content-oriented
+# requests as the download leg of the download-and-execute chain; the broader
+# DOWNLOAD_RE remains available for lower-level updater/install correlation.
+_CONTENT_DOWNLOAD_RE = re.compile(
+    r"(?:\bfetch\s*\(|\bhttps?\.get\b|\baxios\.get\b|\bcurl\s+|\bwget\s+)"
+)
+_REQUEST_CALL_RE = re.compile(r"\bhttps?\.request\s*\(", re.I)
+_REQUEST_METHOD_RE = re.compile(r"\bmethod\s*:\s*['\"]([A-Za-z]+)['\"]", re.I)
+
+
+def _has_content_download(text: str) -> bool:
+    if _CONTENT_DOWNLOAD_RE.search(text):
+        return True
+    for match in _REQUEST_CALL_RE.finditer(text):
+        # Bound the lookahead so a later unrelated object cannot relabel a
+        # connectivity request. An omitted method is the Node default GET.
+        window = text[match.start(): match.start() + 1200]
+        method = _REQUEST_METHOD_RE.search(window)
+        if method is None or method.group(1).upper() == "GET":
+            return True
+    return False
 
 # Execution sinks for credential-dataflow-to-process: real process execution (above) or
 # dynamic code evaluation. Used with a proximity gate against credential source surfaces.

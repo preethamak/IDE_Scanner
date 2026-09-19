@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.19-policy-v3-calibration.23"
+RULESET_VERSION = "2026.09.19-policy-v3-calibration.24"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -426,6 +426,16 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "description": "Native static analysis found a credential-related source within a bounded character window of a file write.",
         "recommendation": "Review the written value and destination; proximity alone does not show that a credential is persisted.",
         "benchmark_tags": ["credential", "filesystem", "proximity"],
+    },
+    "remote-credential-broker": {
+        "title": "Remote credential broker",
+        "category": "cross-extension-exposure",
+        "evidence_class": "exposure",
+        "default_severity": "HIGH",
+        "description": "Code appears to obtain or forward bearer tokens through a separately configured remote token broker.",
+        "recommendation": "Verify endpoint ownership, token scope, retention, and user disclosure. This is a trust-boundary review signal, not proof of exfiltration or malicious intent.",
+        "false_positive_notes": "Legitimate account proxies and hosted API clients can use remote token brokers; review the endpoint and token boundary rather than labeling the extension malicious.",
+        "benchmark_tags": ["credential", "network", "token-broker", "cross-extension"],
     },
     "agent-sensitive-data-near-network": {
         "title": "Agent-sensitive data near network",

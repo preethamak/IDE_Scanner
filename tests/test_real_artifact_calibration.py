@@ -41,9 +41,16 @@ class RealArtifactCalibrationTests(unittest.TestCase):
         self.assertEqual(extension["version"], "4.0.37")
         self.assertEqual(extension["analysis_status"], "complete")
         self.assertEqual(extension["decision"], "review")
-        self.assertEqual(extension["verdict"], "suspicious")
+        self.assertEqual(extension["verdict"], "review")
         self.assertEqual(extension["malware_score"], 0)
-        self.assertIn("download-and-execute", rule_ids)
+        # The shipped token-proxy file contains connectivity probes using
+        # HEAD/CONNECT plus local registry queries. Those are not a download
+        # and execute chain; keep this real artifact as a regression against
+        # that false-positive shape. The exact advisory remains the
+        # authoritative malicious decision in the companion test.
+        self.assertNotIn("download-and-execute", rule_ids)
+        self.assertIn("dynamic-shell-execution", rule_ids)
+        self.assertIn("remote-credential-broker", rule_ids)
 
 
 if __name__ == "__main__":

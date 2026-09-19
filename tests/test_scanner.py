@@ -2380,6 +2380,51 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
 
+    def test_connectivity_probe_and_local_exec_do_not_create_download_execute(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"proxy-probe","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const https=require('https'); const cp=require('child_process');"
+                "https.request({host:'example.com',method:'HEAD'},()=>{});"
+                "https.request({host:'proxy.local',method:'CONNECT'},()=>{});"
+                "cp.execSync('reg query HKCU\\\\Software\\\\Example');",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("process-execution", rule_ids)
+        self.assertNotIn("download-and-execute", rule_ids)
+
+    def test_remote_credential_broker_requires_review_without_calling_it_malware(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"hosted-token-client","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const https=require('https');"
+                "const tokenServerUrl='https://broker.example/lease-token';"
+                "const refreshToken=loadRefreshToken();"
+                "https.request(tokenServerUrl,{method:'POST',headers:{Authorization:`Bearer ${refreshToken}`}},()=>{});",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "remote-credential-broker")
+        self.assertEqual(report.verdict, "review")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.malware_score, 0)
+        self.assertEqual(finding.evidence["correlation"], "same-file-semantic-chain")
+        self.assertIn("not proof of exfiltration", finding.recommendation)
+
     def test_unverified_remote_vsix_install_requires_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
