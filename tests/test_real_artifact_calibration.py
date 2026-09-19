@@ -13,6 +13,10 @@ BCAI_SHA256 = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
 
 
 class RealArtifactCalibrationTests(unittest.TestCase):
+    @unittest.skipUnless(
+        BCAI_ARTIFACT.is_file(),
+        "exact BCAI VSIX is not provisioned; run the production-gate artifact setup first",
+    )
     def test_bcai_rosetta_behavior_is_reviewed_without_threat_intelligence(self) -> None:
         """Keep one independently reported artifact as a reproducible calibration case.
 
@@ -52,6 +56,10 @@ class RealArtifactCalibrationTests(unittest.TestCase):
         self.assertIn("dynamic-shell-execution", rule_ids)
         self.assertIn("remote-credential-broker", rule_ids)
 
+    @unittest.skipUnless(
+        BCAI_ARTIFACT.is_file(),
+        "exact BCAI VSIX is not provisioned; run the production-gate artifact setup first",
+    )
     def test_bcai_rosetta_exact_advisory_blocks_the_real_artifact(self) -> None:
         """The independently reported exact artifact remains a confirmed block."""
         self.assertTrue(BCAI_ARTIFACT.is_file(), BCAI_ARTIFACT)

@@ -18,6 +18,29 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e . pytest
+      - name: Acquire exact real-artifact calibration input
+        run: |
+          mkdir -p benchmarks/external/artifacts/bcai-rosetta-4.0.37
+          python - <<'PY'
+          from pathlib import Path
+          from ide_scanner.artifact_input import acquire_https_vsix
+
+          destination = Path("benchmarks/external/artifacts/bcai-rosetta-4.0.37")
+          target = destination / "bcai-rosetta-4.0.37.vsix"
+          expected = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing BCAI calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_vsix(
+                  "https://open-vsx.org/api/bingcha/bcai-tools/4.0.37/file/bingcha.bcai-tools-4.0.37.vsix",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
+          PY
       - name: Unit and integration tests
         run: python -m pytest -q
       - name: Scan deterministic production fixtures
