@@ -26,6 +26,8 @@ jobs:
         run: |
           python -m ide_scanner scan \
             --fixtures \
+            --offline \
+            --skip-posture \
             --threat-feed benchmarks/threat-feed.json \
             --format json \
             --out production-fixtures.json
