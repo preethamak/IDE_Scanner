@@ -32,6 +32,17 @@ promotion gate still requires the fresh labelled holdout, at least five safe
 and five malicious exact artifacts, deep runtime evidence, zero safe blocks,
 zero malicious allows, and complete required-provider coverage.
 
+## Current replay identity
+
+The retained six-artifact replay was reproduced with scanner build
+`90f9f823646e25c14bd96c7835f07ea95dc7f20d`, policy
+`3.1.0-calibration.4`, and ruleset
+`2026.09.19-policy-v3-calibration.29-dynamic-catalog` (95 rules). It was a
+static-only diagnostic run with runtime execution disabled; the report records
+that limitation rather than presenting static evidence as dynamic coverage.
+The exact artifact hashes were verified before scanning, including
+`b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
+
 ## Latest canonical diagnostic replay
 
 After the exact-hash advisory snapshot was refreshed, the current canonical
