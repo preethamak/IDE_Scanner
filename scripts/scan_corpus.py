@@ -41,7 +41,7 @@ from ide_scanner.discovery import discover_from_path, discover_local_installatio
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
 from ide_scanner.classification_policy import POLICY_VERSION  # noqa: E402
 from ide_scanner.rule_registry import RULESET_VERSION  # noqa: E402
-from ide_scanner.sandbox_runner import sandbox_preflight  # noqa: E402
+from ide_scanner.sandbox_runner import _external_trace_requested, sandbox_preflight  # noqa: E402
 from ide_scanner.scanner import _build_report, _degzip_if_needed, _hash_file, _local_error_extension  # noqa: E402
 
 
@@ -286,7 +286,8 @@ def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_t
         "profile": profile,
         "runtime": bool(runtime),
         "runtime_timeout_seconds": runtime_timeout if runtime else 0,
-        "runtime_evidence_version": "1",
+        "runtime_evidence_version": "2",
+        "runtime_external_trace": bool(runtime and _external_trace_requested()),
     }
 
 
@@ -595,6 +596,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "executed": bool(args.runtime),
         "backend": "bubblewrap" if args.runtime else "external",
         "runtime_policy": "capability-gated-v1" if args.runtime else "external-evidence",
+        "external_syscall_trace": bool(args.runtime and _external_trace_requested()),
         "runtime_runs": runtime_runs,
         "runtime_required_ids": sorted(runtime_required_ids),
         "observed_kinds": {

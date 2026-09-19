@@ -125,6 +125,7 @@ def evaluate_holdout_corpus(
     execution = _corpus_execution(report)
     runtime_enabled = execution.get("runtime_enabled") is True
     deep_profile = str(execution.get("profile") or "") == "deep"
+    external_syscall_trace = execution.get("external_syscall_trace") is True
     summary = _holdout_summary(rows)
     checks = {
         "required_pass_rate": summary["required_pass_rate"] == 1.0,
@@ -134,6 +135,7 @@ def evaluate_holdout_corpus(
         "incomplete_required": summary["incomplete_required"] == 0,
         "runtime_enabled": runtime_enabled if require_runtime else True,
         "deep_profile": deep_profile if require_runtime else True,
+        "external_syscall_trace": external_syscall_trace if require_runtime else True,
     }
     return {
         "schema_version": HOLDOUT_CORPUS_SCHEMA_VERSION,
@@ -144,6 +146,7 @@ def evaluate_holdout_corpus(
             "required": require_runtime,
             "runtime_enabled": runtime_enabled,
             "profile": execution.get("profile") or "unknown",
+            "external_syscall_trace": external_syscall_trace,
             "runtime_timeout_seconds": execution.get("runtime_timeout_seconds", 0),
         },
         "gate": {

@@ -76,8 +76,9 @@ def build_publication_accuracy_gate(
         runtime_evidence.get("required") is not True
         or runtime_evidence.get("runtime_enabled") is not True
         or str(runtime_evidence.get("profile") or "") != "deep"
+        or runtime_evidence.get("external_syscall_trace") is not True
     ):
-        raise ValueError("Publication holdout must prove a required deep runtime scan")
+        raise ValueError("Publication holdout must prove a required deep runtime scan with external syscall tracing")
 
     regression_identity = _identity(regression)
     holdout_identity = _identity(holdout_gate)

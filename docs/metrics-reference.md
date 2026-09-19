@@ -460,7 +460,8 @@ PYTHONPATH=src python -m ide_scanner benchmark holdout \
 The holdout evaluator requires every exact artifact to be complete, keeps the
 scanner/policy/ruleset identity and hash in every result row, rejects a
 known-safe block or malicious allow, and requires evidence that the deep
-runtime path was enabled. The publication holdout must contain at least five
+runtime path was enabled and external syscall tracing was available on the
+worker. The publication holdout must contain at least five
 independently labelled safe artifacts and five independently labelled harmful
 artifacts; a two-item spot check is not treated as ecosystem accuracy. The
 `--allow-static-only` option exists only for offline calibration and must not

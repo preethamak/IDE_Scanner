@@ -20,14 +20,17 @@ from ide_scanner.posture import scan_posture, summarize_posture
 from ide_scanner.registry import _marketplace_metadata_findings, _repository_metadata_findings
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import (
+    EXTERNAL_TRACE_ENV,
     RUNTIME_EVENT_HANDSHAKE,
     RUNTIME_EVENT_OUTPUT_LIMIT_MARKER,
     RUNTIME_EVENT_PREFIX,
     MAX_RUNTIME_OUTPUT_BYTES,
     _execute_entrypoint,
+    _external_trace_observations,
     _extension_main,
     _observations_from_trace,
     _run_bounded_capture,
+    _run_isolated,
     _prepare_target,
     _verified_runtime_events,
     _write_entrypoint_runner,
@@ -3068,6 +3071,56 @@ class ScannerTests(unittest.TestCase):
         )
         self.assertFalse(valid)
         self.assertEqual(events, [])
+
+    def test_external_syscall_trace_recovers_native_runtime_capabilities(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 openat(AT_FDCWD, "/home/guardrails/.aws/credentials", O_RDONLY) = 3\n'
+                '123 connect(3, {sa_family=AF_INET}, 16) = -1 EPERM\n'
+                '123 execve("/bin/sh", ["sh"], 0x0) = 0\n'
+                '123 unlink("/home/guardrails/.probe") = 0\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(
+                result,
+                ["/home/guardrails/.aws/credentials"],
+            )
+
+        self.assertTrue(valid)
+        kinds = {item["kind"] for item in observations}
+        self.assertIn("secret_read", kinds)
+        self.assertIn("network_attempt", kinds)
+        self.assertIn("process_exec", kinds)
+        self.assertIn("filesystem_write", kinds)
+
+    def test_external_syscall_trace_wraps_bubblewrap_when_requested(self) -> None:
+        completed = subprocess.CompletedProcess(["strace"], 0, "", "")
+        which = lambda name: "/usr/bin/bwrap" if name == "bwrap" else "/usr/bin/strace"
+        with patch.dict("os.environ", {EXTERNAL_TRACE_ENV: "1"}), patch(
+            "ide_scanner.sandbox_runner.shutil.which", side_effect=which,
+        ), patch("ide_scanner.sandbox_runner._run_bounded_capture", return_value=completed) as run:
+            result = _run_isolated(
+                ["/bin/true"],
+                target=Path("/tmp/target"),
+                home=Path("/tmp/home"),
+                workspace=Path("/tmp/workspace"),
+                hook_file=Path("/tmp/hook"),
+                trace_file=Path("/tmp/trace.jsonl"),
+                entrypoint_runner=Path("/tmp/runner"),
+                cwd="/workspace",
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/strace")
+        self.assertIn("bwrap", command)
+        self.assertTrue(getattr(result, "_guardrails_external_trace_prefix", ""))
 
     def test_runtime_output_is_bounded_and_marks_transport_incomplete(self) -> None:
         result = _run_bounded_capture(

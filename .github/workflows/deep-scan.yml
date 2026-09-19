@@ -49,6 +49,8 @@ jobs:
     name: Deep Scan worker ${{ matrix.worker }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -61,8 +63,9 @@ jobs:
       - name: Install runtime isolation backend
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap strace
           bwrap --version
+          strace --version
       - name: Verify runtime namespace isolation
         run: |
           bwrap \

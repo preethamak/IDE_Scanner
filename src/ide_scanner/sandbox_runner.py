@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import hmac
@@ -8,6 +9,7 @@ import os
 import selectors
 import signal
 import shutil
+import re
 import subprocess
 import tempfile
 import time
@@ -37,9 +39,24 @@ MAX_RUNTIME_MEMORY_BYTES = 1536 * 1024 * 1024
 MAX_RUNTIME_OPEN_FILES = 4096
 MAX_RUNTIME_OUTPUT_BYTES = 4 * 1024 * 1024
 RUNTIME_OUTPUT_CHUNK_BYTES = 64 * 1024
+MAX_EXTERNAL_TRACE_BYTES = 8 * 1024 * 1024
+EXTERNAL_TRACE_ENV = "GUARDRAILS_RUNTIME_EXTERNAL_TRACE"
 RUNTIME_EVENT_HANDSHAKE = "GUARDRAILS_RUNTIME_HANDSHAKE_V1:"
 RUNTIME_EVENT_PREFIX = "GUARDRAILS_RUNTIME_EVENT_V1:"
 RUNTIME_EVENT_OUTPUT_LIMIT_MARKER = "GUARDRAILS_RUNTIME_EVENT_OUTPUT_LIMIT"
+
+
+def _external_trace_requested() -> bool:
+    return os.environ.get(EXTERNAL_TRACE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _external_trace_executable() -> str | None:
+    return shutil.which("strace")
+
+
+def external_trace_available() -> bool:
+    """Return whether the production external-trace contract is enabled."""
+    return _external_trace_requested() and _external_trace_executable() is not None
 
 
 def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
@@ -61,6 +78,16 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
             "execution": "controlled-bubblewrap",
             "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
             "error": "Bubblewrap (bwrap) is not installed.",
+        }
+    external_trace = _external_trace_executable()
+    if _external_trace_requested() and external_trace is None:
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "error": f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence, but strace is not installed.",
         }
 
     command = [
@@ -90,6 +117,22 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
         "--",
         "/bin/true",
     ]
+    external_trace_path: Path | None = None
+    if _external_trace_requested() and external_trace:
+        with tempfile.NamedTemporaryFile(prefix="guardrails-preflight-", suffix=".strace") as handle:
+            external_trace_path = Path(handle.name)
+    if _external_trace_requested() and external_trace:
+        command = [
+            external_trace,
+            "-f",
+            "-qq",
+            "-o",
+            str(external_trace_path),
+            "-e",
+            "trace=file,process,network",
+            "--",
+            *command,
+        ]
     try:
         result = subprocess.run(
             command,
@@ -116,6 +159,9 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
             "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
             "error": f"Bubblewrap preflight could not start: {exc}",
         }
+    finally:
+        if external_trace_path is not None:
+            external_trace_path.unlink(missing_ok=True)
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "Bubblewrap exited unsuccessfully").strip()
@@ -145,6 +191,12 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
     if allow_execute and shutil.which("bwrap") is None:
         raise ValueError(
             "Executable sandbox mode requires the Bubblewrap (bwrap) OS isolation backend; execution was refused."
+        )
+    external_trace_requested = _external_trace_requested()
+    external_trace = _external_trace_executable()
+    if allow_execute and external_trace_requested and external_trace is None:
+        raise ValueError(
+            f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence; execution was refused."
         )
     with tempfile.TemporaryDirectory(prefix="ide-scanner-sandbox-") as tmp:
         root = Path(tmp)
@@ -194,6 +246,12 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                     "registered_commands",
                     "webview_messages",
                 ],
+                "external_syscall_trace": {
+                    "requested": external_trace_requested,
+                    "available": bool(external_trace),
+                    "backend": "strace" if external_trace_requested and external_trace else "not-requested",
+                    "scope": "file,process,network syscalls outside the extension process",
+                },
             },
             "runtime_probes": {
                 "registered_commands": "invoke up to 50 handlers with a synthetic canary argument",
@@ -314,12 +372,24 @@ def _execute_planned_commands(
             combined = f"{result.stdout}\n{result.stderr}"
             events, transport_ok = _verified_runtime_events(result.stderr)
             observations.extend(_observations_from_events(events, canary_files))
+            external_observations, external_trace_ok = _external_trace_observations(
+                result,
+                canary_files,
+            )
+            observations.extend(external_observations)
             if _command_uses_node(command["command"]) and not transport_ok:
                 observations.append({
                     "kind": "sandbox_error",
                     "phase": "lifecycle",
                     "script": command["name"],
                     "evidence": "runtime event transport failed integrity validation",
+                })
+            if _external_trace_requested() and not external_trace_ok:
+                observations.append({
+                    "kind": "sandbox_error",
+                    "phase": "lifecycle",
+                    "script": command["name"],
+                    "evidence": "external syscall trace was requested but could not be validated",
                 })
             if result.returncode != 0:
                 observations.append({
@@ -394,6 +464,7 @@ def _execute_entrypoint(
         )
         combined = f"{result.stdout}\n{result.stderr}"
         events, transport_ok = _verified_runtime_events(result.stderr)
+        external_observations, external_trace_ok = _external_trace_observations(result, canary_files or [])
         succeeded = result.returncode == 0
         observations: list[dict[str, Any]] = [{
             "kind": "entrypoint_executed" if succeeded else "sandbox_error",
@@ -406,11 +477,18 @@ def _execute_entrypoint(
         if result.returncode != 0 and result.stderr:
             observations[0]["stderr_excerpt"] = result.stderr[:500]
         observations.extend(_observations_from_events(events, canary_files or []))
+        observations.extend(external_observations)
         if not transport_ok:
             observations.append({
                 "kind": "sandbox_error",
                 "phase": "activation",
                 "evidence": "runtime event transport failed integrity validation",
+            })
+        if _external_trace_requested() and not external_trace_ok:
+            observations.append({
+                "kind": "sandbox_error",
+                "phase": "activation",
+                "evidence": "external syscall trace was requested but could not be validated",
             })
         if CANARY_VALUE in combined:
             observations.append({
@@ -499,10 +577,34 @@ def _run_isolated(
         "--",
         *command,
     ]
+    external_trace_prefix: Path | None = None
+    if _external_trace_requested():
+        external_trace = _external_trace_executable()
+        if external_trace is None:
+            raise ValueError(
+                f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence; execution was refused."
+            )
+        external_trace_prefix = trace_file.parent / f"{trace_file.name}.{time.monotonic_ns()}.strace"
+        args = [
+            external_trace,
+            "-f",
+            "-qq",
+            "-s",
+            "256",
+            "-o",
+            str(external_trace_prefix),
+            "-e",
+            "trace=file,process,network",
+            "--",
+            *args,
+        ]
     if os.name == "posix":
         timeout = int(kwargs.get("timeout", MAX_RUNTIME_TIMEOUT_SECONDS))
         kwargs["preexec_fn"] = _runtime_resource_limiter(timeout)
-    return _run_bounded_capture(args, **kwargs)
+    result = _run_bounded_capture(args, **kwargs)
+    if external_trace_prefix is not None:
+        setattr(result, "_guardrails_external_trace_prefix", str(external_trace_prefix))
+    return result
 
 
 def _run_bounded_capture(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -1011,6 +1113,86 @@ def _verified_runtime_events(output: str) -> tuple[list[dict[str, Any]], bool]:
             continue
         events.append(event)
     return (events if valid else []), valid
+
+
+def _external_trace_observations(
+    result: subprocess.CompletedProcess[str],
+    canary_files: list[str],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Normalize parent-owned strace output without trusting extension text."""
+    prefix = str(getattr(result, "_guardrails_external_trace_prefix", "") or "")
+    if not prefix:
+        return [], not _external_trace_requested()
+    trace_path = Path(prefix)
+    if not trace_path.exists():
+        return [], False
+    try:
+        with trace_path.open("r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read(MAX_EXTERNAL_TRACE_BYTES + 1)
+    except OSError:
+        trace_path.unlink(missing_ok=True)
+        return [], False
+    trace_path.unlink(missing_ok=True)
+    if len(text.encode("utf-8", errors="replace")) > MAX_EXTERNAL_TRACE_BYTES:
+        return [], False
+
+    canary_set = {str(Path(item)) for item in canary_files}
+    observations: list[dict[str, Any]] = []
+    sensitive_suffixes = ("/.env", "/.npmrc", "/.ssh/id_ed25519", "/.aws/credentials")
+    for line in text.splitlines():
+        syscall_match = re.search(r"\b([A-Za-z][A-Za-z0-9_]*)\(", line)
+        if not syscall_match:
+            continue
+        syscall = syscall_match.group(1)
+        lower = line.lower()
+        path = _first_strace_string(line)
+        if syscall in {"open", "openat", "openat2", "creat"} and path:
+            if path in canary_set or any(path.endswith(suffix) for suffix in sensitive_suffixes):
+                observations.append({
+                    "kind": "secret_read",
+                    "path": path,
+                    "api": f"strace.{syscall}",
+                })
+            if any(flag in lower for flag in ("o_wronly", "o_rdwr", "o_creat")):
+                observations.append({
+                    "kind": "filesystem_write",
+                    "path": path,
+                    "api": f"strace.{syscall}",
+                })
+        elif syscall in {"connect", "sendto", "sendmsg", "sendmmsg", "bind"}:
+            observations.append({
+                "kind": "network_attempt",
+                "destination": "external-syscall",
+                "api": f"strace.{syscall}",
+            })
+        elif syscall in {"execve", "execveat"}:
+            observations.append({
+                "kind": "process_exec",
+                "command": path or "external-syscall",
+                "api": f"strace.{syscall}",
+            })
+        elif syscall in {
+            "chmod", "chmodat", "mkdir", "mkdirat", "rename", "renameat",
+            "renameat2", "rmdir", "symlink", "symlinkat", "truncate", "unlink",
+            "unlinkat",
+        } and path:
+            observations.append({
+                "kind": "filesystem_write",
+                "path": path,
+                "api": f"strace.{syscall}",
+            })
+    return _dedupe_observations(observations), True
+
+
+def _first_strace_string(line: str) -> str:
+    match = re.search(r'"(?:\\.|[^"\\])*"', line)
+    if not match:
+        return ""
+    try:
+        value = ast.literal_eval(match.group(0))
+    except (SyntaxError, ValueError):
+        return ""
+    return value if isinstance(value, str) else ""
 
 
 def _observations_from_trace(trace_file: Path, canary_files: list[str]) -> list[dict[str, Any]]:

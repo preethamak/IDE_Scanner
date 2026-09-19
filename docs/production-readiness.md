@@ -138,8 +138,15 @@ This authenticates the scanner hook's transport against writable-channel
 spoofing; it is not a claim that JavaScript running in the same Node process is
 tamper-proof. Runtime observations therefore remain corroborating evidence,
 while confirmed malware outcomes still require independent artifact or
-intelligence evidence. A future hardened worker can add an OS-level external
-tracer for native/direct-syscall coverage.
+intelligence evidence. Production publication also requires the OS-level
+external tracer for native/direct-syscall coverage.
+
+Production runtime workers set `GUARDRAILS_RUNTIME_EXTERNAL_TRACE=1` and
+install `strace`. Bubblewrap is then launched under the parent-owned syscall
+observer, which independently records file opens, process execution, and
+network syscalls that Node-level monkey-patching can miss. The preflight checks
+both namespace creation and tracer availability; a worker without either is
+ineligible for deep-runtime publication.
 
 WASM is treated as executable capability rather than malware evidence. A
 `wasm-loader` finding is emitted only when executable text visibly loads or

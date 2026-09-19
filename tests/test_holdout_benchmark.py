@@ -20,6 +20,7 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertTrue(result["gate"]["passed"])
             self.assertEqual(result["summary"]["required_pass_rate"], 1.0)
             self.assertTrue(result["runtime_evidence"]["runtime_enabled"])
+            self.assertTrue(result["runtime_evidence"]["external_syscall_trace"])
             self.assertEqual(result["rule_matrix"]["trusted-threat-feed-hit"]["fired_on_known_malicious"], 1)
             self.assertEqual(result["summary"]["safe_review_rate"], 0.0)
             self.assertEqual(result["summary"]["malicious_detection_rate"], 1.0)
@@ -149,7 +150,12 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             "scanner_build": "a" * 40,
             "policy_version": "policy",
             "ruleset_version": "rules",
-            "corpus_execution": {"runtime_enabled": True, "profile": "deep", "runtime_timeout_seconds": 20},
+            "corpus_execution": {
+                "runtime_enabled": True,
+                "profile": "deep",
+                "external_syscall_trace": True,
+                "runtime_timeout_seconds": 20,
+            },
             "extensions": [
                 {
                     "extension_id": "safe.extension",

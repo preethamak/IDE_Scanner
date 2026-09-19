@@ -15,6 +15,8 @@ def test_worker_verifies_real_bubblewrap_namespace_isolation() -> None:
     assert "--unshare-net" in workflow
     assert "--unshare-user" in workflow
     assert "-- /usr/bin/true" in workflow
+    assert "strace" in workflow
+    assert "GUARDRAILS_RUNTIME_EXTERNAL_TRACE: \"1\"" in workflow
 
 
 def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
@@ -36,6 +38,8 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa" in workflow
     assert "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa" in workflow
     assert "runtime-smoke:" in workflow
+    assert "sudo apt-get install -y bubblewrap strace" in workflow
+    assert "GUARDRAILS_RUNTIME_EXTERNAL_TRACE: \"1\"" in workflow
     assert "scripts/scan_corpus.py" in workflow
     assert "--path fixtures/credential-exfil" in workflow
     assert "--profile deep" in workflow

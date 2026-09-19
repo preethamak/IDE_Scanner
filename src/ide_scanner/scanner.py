@@ -57,7 +57,7 @@ from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
 from .providers import run_static_providers
 from .providers.runtime import SEMGREP_MAX_TARGET_BYTES, run_bounded_process
-from .sandbox_runner import run_sandbox
+from .sandbox_runner import external_trace_available, run_sandbox
 from .registry import (
     MarketplaceDownloadError,
     _degzip_if_needed,
@@ -381,6 +381,7 @@ def _scan_request(
         "extensions": {},
         "runs": [],
         "required_extension_ids": [],
+        "external_syscall_trace": external_trace_available(),
     }
     if request.dynamic_runtime and local_targets:
         _apply_local_dynamic_runtime(
@@ -1139,6 +1140,12 @@ def _apply_local_dynamic_runtime(
                     "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
                     "observation_count": len(items),
                 })
+                if isinstance(runtime, dict):
+                    plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
+                    instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
+                    trace = instrumentation.get("external_syscall_trace")
+                    if isinstance(trace, dict) and trace.get("requested") is True and trace.get("available") is True:
+                        runtime_bundle["external_syscall_trace"] = True
                 if runtime_failed:
                     run_record["error"] = "Runtime execution did not complete successfully."
             except Exception as exc:  # noqa: BLE001 - runtime failure is disclosed and fail-closed
@@ -1233,6 +1240,12 @@ def scan_marketplace_extension(
                         "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
                         "observation_count": len(items),
                     })
+                    if isinstance(runtime, dict):
+                        plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
+                        instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
+                        trace = instrumentation.get("external_syscall_trace")
+                        if isinstance(trace, dict) and trace.get("requested") is True and trace.get("available") is True:
+                            runtime_bundle["external_syscall_trace"] = True
                     if runtime_failed:
                         run_record["error"] = "Runtime execution did not complete successfully."
                 except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
@@ -3537,6 +3550,12 @@ def _load_sandbox_observation_bundle(path: Path | str | None = None) -> dict[str
         metadata["runtime_probes"] = dict(plan["runtime_probes"])
     if isinstance(instrumentation.get("captures"), list):
         metadata["captures"] = [str(item) for item in instrumentation["captures"]]
+    external_trace = instrumentation.get("external_syscall_trace")
+    if isinstance(external_trace, dict):
+        metadata["external_syscall_trace"] = bool(
+            external_trace.get("requested") is True
+            and external_trace.get("available") is True
+        )
     return {"extensions": out, "metadata": metadata}
 
 
@@ -3574,6 +3593,10 @@ def _merge_dynamic_runtime_bundle(
         "runtime_required_ids": sorted({str(item) for item in required_ids if str(item)}),
         "observation_count": sum(len(value) for value in merged_extensions.values()),
         "observed_kinds": _observation_kinds(merged_extensions),
+        "external_syscall_trace": bool(
+            runtime_bundle.get("external_syscall_trace") is True
+            or base_metadata.get("external_syscall_trace") is True
+        ),
     })
     return {"extensions": merged_extensions, "metadata": metadata}
 

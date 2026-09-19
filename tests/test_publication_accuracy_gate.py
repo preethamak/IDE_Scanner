@@ -103,6 +103,7 @@ def holdout_gate() -> dict:
         "required": True,
         "runtime_enabled": True,
         "profile": "deep",
+        "external_syscall_trace": True,
         "runtime_timeout_seconds": 20,
     }
     result["artifacts"] = []
@@ -260,6 +261,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             invalid = holdout_gate()
             invalid["runtime_evidence"]["required"] = False
             with self.assertRaisesRegex(ValueError, "required deep runtime"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_holdout_without_external_syscall_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["runtime_evidence"]["external_syscall_trace"] = False
+            with self.assertRaisesRegex(ValueError, "external syscall tracing"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),
