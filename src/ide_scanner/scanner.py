@@ -159,9 +159,17 @@ CORRELATED_RULES = {
 }
 # A remote extension update without visible integrity verification is a serious
 # supply-chain review signal, but legitimate extension managers use this shape.
-# It becomes blocking only when another high-confidence abuse rule proves the
-# payload is tied to credential theft, destructive behavior, or execution abuse.
-BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {"download-and-execute", "remote-vsix-install-chain"}
+# Destructive archive/upload workflows and local command servers are also common
+# in backup, deployment, and IDE tooling. Keep those chains high-risk and
+# reviewable, but do not turn static capability evidence into a preventive block
+# without observed behavior, authoritative intelligence, or a separate
+# high-specificity data-theft chain.
+BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {
+    "download-and-execute",
+    "remote-vsix-install-chain",
+    "destructive-transfer-chain",
+    "persistence-chain",
+}
 BLOCKING_OBSERVED_RULES = {
     "observed-destructive-behavior",
     "observed-download-execute",

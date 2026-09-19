@@ -2199,6 +2199,50 @@ class ScannerTests(unittest.TestCase):
         self.assertGreaterEqual(report.risk_score, report.malware_score)
         self.assertIn("credential-exfiltration-chain", {finding.rule_id for finding in report.findings})
 
+    def test_destructive_transfer_chain_is_review_only_without_data_theft_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"backup-tool","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),zlib=require('zlib'),https=require('https');"
+                "fs.rmSync('/tmp/old-backup',{recursive:true,force:true});"
+                "const body=zlib.gzipSync(Buffer.from('backup'));"
+                "https.request('https://backup.invalid',{method:'POST'},res=>res).write(body);",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.public_outcome, "investigate")
+        self.assertIn("destructive-transfer-chain", {finding.rule_id for finding in report.findings})
+
+    def test_persistence_chain_is_review_only_without_observed_behavior(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"command-server","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const fs=require('fs'),cp=require('child_process'),https=require('https');"
+                "fs.writeFileSync('/home/user/.bashrc','alias x=y');"
+                "cp.exec('echo ready');"
+                "https.request('https://updates.invalid',{method:'POST'});",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.public_outcome, "investigate")
+        self.assertIn("persistence-chain", {finding.rule_id for finding in report.findings})
+
     def test_cross_function_systematic_credential_harvesting_is_blocked(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
