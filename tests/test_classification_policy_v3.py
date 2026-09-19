@@ -1,6 +1,7 @@
 import unittest
 
 from ide_scanner.classification_policy import effective_finding_severity, finding_actionability
+from ide_scanner.report_bundle import grade_extension
 from ide_scanner.scanner import _classify_findings, _finding
 
 
@@ -76,6 +77,14 @@ class ClassificationPolicyV3Tests(unittest.TestCase):
         self.assertEqual((verdict, authority, severity), ("review", "none", "HIGH"))
         self.assertEqual(malware, 0)
         self.assertGreater(risk, 0)
+
+    def test_dashboard_grade_ignores_contextual_raw_high_severity(self) -> None:
+        finding = self.finding("process-execution", "capability", "HIGH")
+        self.assertEqual(grade_extension("review", 30, 0, [finding]), "B")
+
+    def test_dashboard_grade_keeps_actionable_high_severity(self) -> None:
+        finding = self.finding("vulnerable-npm-dependency", "dependency", "HIGH", {"exact": True})
+        self.assertEqual(grade_extension("review", 30, 0, [finding]), "C")
 
 
 if __name__ == "__main__":
