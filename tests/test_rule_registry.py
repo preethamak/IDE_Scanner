@@ -55,3 +55,25 @@ class RuleRegistryTests(unittest.TestCase):
         }
         registered = {rule.rule_id for rule in rule_registry()}
         self.assertFalse(emitted - registered, f"Missing rule metadata: {sorted(emitted - registered)}")
+
+    def test_dynamic_observation_findings_are_present_in_rule_catalog(self) -> None:
+        scanner_path = Path(__file__).resolve().parents[1] / "src" / "ide_scanner" / "scanner.py"
+        tree = ast.parse(scanner_path.read_text(encoding="utf-8"))
+        dynamic_ids: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name != "_sandbox_observation_finding":
+                continue
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Assign) or not any(
+                    isinstance(target, ast.Name) and target.id == "mapping" for target in child.targets
+                ):
+                    continue
+                if not isinstance(child.value, ast.Dict):
+                    continue
+                for value in child.value.values:
+                    if isinstance(value, ast.Tuple) and value.elts and isinstance(value.elts[0], ast.Constant):
+                        if isinstance(value.elts[0].value, str):
+                            dynamic_ids.add(value.elts[0].value)
+        registered = {rule.rule_id for rule in rule_registry()}
+        self.assertTrue(dynamic_ids, "Expected runtime observation mapping to be discoverable")
+        self.assertFalse(dynamic_ids - registered, f"Missing dynamic rule metadata: {sorted(dynamic_ids - registered)}")
