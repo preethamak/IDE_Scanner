@@ -47,6 +47,7 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert "sandbox-preflight" in workflow
     assert '"secret_exfil" not in observed_kinds.get("unknown.shadow-helper", [])' in workflow
     assert 'provider.get("status") != "completed"' in workflow
+    assert 'execution.get("external_syscall_trace") is not True' in workflow
 
 
 def test_worker_preserves_claimed_platform_artifact_for_90_days() -> None:

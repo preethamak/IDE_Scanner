@@ -202,6 +202,8 @@ jobs:
           execution = report.get("corpus_execution", {})
           if execution.get("runtime_enabled") is not True or execution.get("profile") != "deep":
               raise SystemExit("runtime smoke report did not prove deep runtime execution")
+          if execution.get("external_syscall_trace") is not True:
+              raise SystemExit("runtime smoke report did not prove external syscall tracing")
           if execution.get("incomplete_count") != 0:
               raise SystemExit("runtime smoke corpus is incomplete")
           extensions = report.get("extensions") or []
