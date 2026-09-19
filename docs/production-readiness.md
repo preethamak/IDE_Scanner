@@ -226,6 +226,17 @@ pinned-source inputs with explicit provenance labels.
 
 ## Artifact input provenance
 
+The publication holdout has a separate offline provenance check. Every label
+must declare that it applies to the exact extension id, version, and retained
+artifact SHA-256. Every known-malicious label must resolve to the exact-hash
+advisory snapshot shipped with that scanner build, with the advisory source
+matching the label evidence. The holdout workflow runs
+`scripts/verify_holdout_provenance.py` before acquiring or scanning bytes, and
+the frozen corpus retains the source and advisory snapshot digests. This is an
+auditability boundary, not a claim that a third-party report is infallible;
+unknown artifacts remain subject to the static, dynamic, and human-review
+gates below.
+
 Local scans now record one of `user_uploaded_vsix`, `installed_directory`,
 `local_directory`, `archive_artifact`, or `source_snapshot` in both artifact
 identity and inventory metadata. The CLI accepts `--artifact-origin` for

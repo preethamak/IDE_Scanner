@@ -12,6 +12,8 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "workflow_run.head_sha || github.sha" in workflow
     assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert "scripts/freeze_accuracy_holdout.py" in workflow
+    assert "scripts/verify_holdout_provenance.py" in workflow
+    assert "--advisories src/ide_scanner/intelligence/extension-advisories.json" in workflow
     assert "--source benchmarks/holdouts/real-evidence-2026-source.json" in workflow
     assert "--profile deep" in workflow
     assert "--runtime" in workflow

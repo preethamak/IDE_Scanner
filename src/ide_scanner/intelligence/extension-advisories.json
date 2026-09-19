@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-19.4",
+  "snapshot_version": "2026-09-19.5",
   "entries": [
     {
       "extension_id": "nrwl.angular-console",
@@ -49,6 +49,19 @@
       "threat_classification": "malicious",
       "source": "https://socket.dev/blog/glasswasm-malware-open-vsx-extensions",
       "summary": "Socket reported this exact Open VSX artifact as a trojanized theme carrying an obfuscated WebAssembly loader that retrieves and executes a follow-on payload."
+    },
+    {
+      "extension_id": "Iconkieftwo.icon-theme-materiall",
+      "version": "5.29.1",
+      "artifact_sha256": "0878f3c59755ffaf0b639c1b2f6e8fed552724a50eb2878c3ba21cf8eb4e2ab6",
+      "advisory_id": "NEXTRON-MATERIAL-ICON-THEME-2025-5.29.1",
+      "severity": "CRITICAL",
+      "published_at": "2025-11-28T00:00:00Z",
+      "policy_action": "block",
+      "threat_classification": "malicious",
+      "source": "https://www.nextron-systems.com/2025/11/28/malicious-vs-code-extension-impersonating-material-icon-theme-found-in-marketplace/",
+      "source_secondary": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+      "summary": "Nextron Systems reported this exact Marketplace artifact as a malicious Material Icon Theme impersonator; the VSIX Zoo manifest independently preserves the reported hash."
     },
     {
       "extension_id": "bingcha.bcai-tools",

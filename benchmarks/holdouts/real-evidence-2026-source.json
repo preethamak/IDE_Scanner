@@ -7,6 +7,11 @@
     "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisory, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
     "frozen_at": "2026-09-19T00:00:00Z"
   },
+  "advisory_snapshot": {
+    "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
+    "snapshot_version": "2026-09-19.5",
+    "sha256": "a93582ccdec16771c5a56de6ed3eb809ae12576089e0f485a55723e55ed344e8"
+  },
   "artifacts": [
     {
       "extension_id": "nrwl.angular-console",
@@ -19,7 +24,11 @@
         "source_type": "independent_hash_report_and_official_release",
         "source_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
         "retrieved_at": "2026-09-18T00:00:00Z",
-        "official_release_url": "https://github.com/nrwl/nx-console/releases/tag/vscode-v18.94.0"
+        "official_release_url": "https://github.com/nrwl/nx-console/releases/tag/vscode-v18.94.0",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "nrwl.angular-console",
+        "version": "18.94.0",
+        "artifact_sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3"
       }
     },
     {
@@ -33,7 +42,11 @@
         "source_type": "independent_review",
         "source_url": "https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker",
         "publisher_source_url": "https://github.com/streetsidesoftware/vscode-spell-checker",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "streetsidesoftware.code-spell-checker",
+        "version": "4.5.6",
+        "artifact_sha256": "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44"
       }
     },
     {
@@ -47,7 +60,11 @@
         "source_type": "independent_review",
         "source_url": "https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml",
         "publisher_source_url": "https://github.com/redhat-developer/vscode-yaml",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "redhat.vscode-yaml",
+        "version": "1.24.0",
+        "artifact_sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168"
       }
     },
     {
@@ -61,7 +78,11 @@
         "source_type": "independent_review",
         "source_url": "https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer",
         "publisher_source_url": "https://github.com/rust-lang/rust-analyzer",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "rust-lang.rust-analyzer",
+        "version": "0.3.2971",
+        "artifact_sha256": "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa"
       }
     },
     {
@@ -74,7 +95,12 @@
       "label_evidence": {
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
-        "retrieved_at": "2026-09-18T00:00:00Z"
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "bingcha.bcai-tools",
+        "version": "4.0.37",
+        "artifact_sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+        "advisory_id": "KNOSTIC-BCAI-2026-4.0.37"
       }
     },
     {
@@ -90,7 +116,12 @@
         "source_type": "maintainer_advisory_and_independent_hash_report",
         "source_url": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
         "source_secondary_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "nrwl.angular-console",
+        "version": "18.95.0",
+        "artifact_sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+        "advisory_id": "GHSA-c9j4-9m59-847w"
       }
     },
     {
@@ -103,7 +134,12 @@
         "source_type": "independent_threat_report",
         "source_url": "https://www.nextron-systems.com/2025/11/28/malicious-vs-code-extension-impersonating-material-icon-theme-found-in-marketplace/",
         "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "Iconkieftwo.icon-theme-materiall",
+        "version": "5.29.1",
+        "artifact_sha256": "0878f3c59755ffaf0b639c1b2f6e8fed552724a50eb2878c3ba21cf8eb4e2ab6",
+        "advisory_id": "NEXTRON-MATERIAL-ICON-THEME-2025-5.29.1"
       }
     },
     {
@@ -116,7 +152,12 @@
       "label_evidence": {
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/new-malicious-vs-code-extension-backdoor-remote-text-fetcher",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "DorianN612.remote-text-fetcher",
+        "version": "0.0.1",
+        "artifact_sha256": "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
+        "advisory_id": "KNOSTIC-REMOTE-TEXT-FETCHER-2026-0.0.1"
       }
     },
     {
@@ -129,7 +170,12 @@
       "label_evidence": {
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "NoahBit.api-reactor",
+        "version": "0.0.1",
+        "artifact_sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+        "advisory_id": "KNOSTIC-API-REACTOR-2026-0.0.1"
       }
     },
     {
@@ -142,7 +188,12 @@
       "label_evidence": {
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "KoltinSmith.project-restructure-nodejs",
+        "version": "1.0.0",
+        "artifact_sha256": "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
+        "advisory_id": "KNOSTIC-KOLTINSMITH-2026-1.0.0"
       }
     },
     {
@@ -155,7 +206,12 @@
       "label_evidence": {
         "source_type": "independent_threat_report",
         "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "sunsetHightlight.sunset-highlight",
+        "version": "0.0.2",
+        "artifact_sha256": "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
+        "advisory_id": "KNOSTIC-SUNSETHIGHLIGHT-2026-0.0.2"
       }
     },
     {
@@ -169,7 +225,11 @@
         "source_type": "independent_review",
         "source_url": "https://marketplace.visualstudio.com/items?itemName=ms-python.python",
         "publisher_source_url": "https://github.com/microsoft/vscode-python",
-        "retrieved_at": "2026-09-19T00:00:00Z"
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "ms-python.python",
+        "version": "2026.5.2026070801",
+        "artifact_sha256": "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa"
       }
     }
   ]

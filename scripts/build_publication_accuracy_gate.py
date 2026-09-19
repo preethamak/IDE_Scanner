@@ -123,6 +123,7 @@ def build_publication_accuracy_gate(
         "known_safe": sum(1 for artifact in artifacts if artifact.get("label") == "known_safe"),
         "known_malicious": sum(1 for artifact in artifacts if artifact.get("label") == "known_malicious"),
     }
+    corpus_provenance = _validate_holdout_provenance_metadata(holdout_corpus, label_counts)
     if (
         _number(summary.get("safe_evaluated")) != label_counts["known_safe"]
         or _number(summary.get("malicious_evaluated")) != label_counts["known_malicious"]
@@ -172,6 +173,7 @@ def build_publication_accuracy_gate(
             "rule_matrix": holdout_rule_matrix,
             "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
+            "provenance": corpus_provenance,
         },
         "provenance": {
             "regression_gate_sha256": _sha256(regression_bytes),
@@ -240,8 +242,15 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
         seen.add(key)
         if artifact.get("gate_required") is not True or artifact.get("label") not in LABELS:
             raise ValueError(f"Holdout artifact {index} must be a required known_safe or known_malicious label")
-        _validate_label_evidence(artifact.get("label_evidence"), index, str(artifact.get("label") or ""))
         identity = _object(artifact.get("artifact"))
+        _validate_label_evidence(
+            artifact.get("label_evidence"),
+            index,
+            str(artifact.get("label") or ""),
+            extension_id=key[0],
+            version=key[1],
+            artifact_sha256=str(identity.get("sha256") or ""),
+        )
         source_type = str(identity.get("source_type") or "")
         if source_type == "fixture_directory" or not source_type:
             raise ValueError(f"Holdout artifact {index} cannot use a synthetic fixture source")
@@ -249,15 +258,61 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
             raise ValueError(f"Holdout artifact {index} requires retained exact bytes and a SHA-256")
 
 
-def _validate_label_evidence(value: Any, index: int, label: str | None = None) -> None:
+def _validate_holdout_provenance_metadata(
+    corpus: dict[str, Any],
+    label_counts: dict[str, int],
+) -> dict[str, Any]:
+    metadata = _object(corpus.get("holdout"))
+    provenance = _object(metadata.get("provenance"))
+    for field in ("source_sha256", "advisory_snapshot_sha256"):
+        if not SHA256_RE.fullmatch(str(provenance.get(field) or "")):
+            raise ValueError(f"Holdout corpus provenance requires a valid {field}")
+    if not str(provenance.get("advisory_snapshot_version") or "").strip():
+        raise ValueError("Holdout corpus provenance requires advisory_snapshot_version")
+    matched = provenance.get("malicious_artifacts_with_exact_advisories")
+    if isinstance(matched, bool) or not isinstance(matched, int) or matched != label_counts["known_malicious"]:
+        raise ValueError("Holdout corpus provenance must tie every malicious label to an exact advisory")
+    return {
+        "source_sha256": str(provenance["source_sha256"]).lower(),
+        "advisory_snapshot_sha256": str(provenance["advisory_snapshot_sha256"]).lower(),
+        "advisory_snapshot_version": str(provenance["advisory_snapshot_version"]),
+        "malicious_artifacts_with_exact_advisories": matched,
+    }
+
+
+def _validate_label_evidence(
+    value: Any,
+    index: int,
+    label: str | None = None,
+    *,
+    extension_id: str | None = None,
+    version: str | None = None,
+    artifact_sha256: str | None = None,
+) -> None:
     """Require auditable evidence instead of an operator-written label claim."""
     if not isinstance(value, dict):
         raise ValueError(f"Holdout artifact {index} requires structured label evidence")
     source_type = str(value.get("source_type") or "").strip()
     source_url = str(value.get("source_url") or "").strip()
     retrieved_at = str(value.get("retrieved_at") or "").strip()
+    evidence_sha256 = str(value.get("artifact_sha256") or "").strip().lower()
+    evidence_scope = str(value.get("evidence_scope") or "").strip()
+    asserted_extension_id = str(value.get("extension_id") or "").strip()
+    asserted_version = str(value.get("version") or "").strip()
     if not source_type or not source_url or not retrieved_at:
         raise ValueError(f"Holdout artifact {index} label evidence requires source_type, source_url, and retrieved_at")
+    if evidence_scope != "exact-artifact":
+        raise ValueError(f"Holdout artifact {index} label evidence must use evidence_scope exact-artifact")
+    if not SHA256_RE.fullmatch(evidence_sha256):
+        raise ValueError(f"Holdout artifact {index} label evidence requires the exact artifact SHA-256")
+    if extension_id is not None and asserted_extension_id.lower() != str(extension_id).strip().lower():
+        raise ValueError(f"Holdout artifact {index} label evidence extension_id does not match the frozen artifact")
+    if version is not None and asserted_version != str(version).strip():
+        raise ValueError(f"Holdout artifact {index} label evidence version does not match the frozen artifact")
+    if artifact_sha256 is not None and evidence_sha256 != str(artifact_sha256).strip().lower():
+        raise ValueError(f"Holdout artifact {index} label evidence SHA-256 does not match the frozen artifact")
+    if label == "known_malicious" and not str(value.get("advisory_id") or "").strip():
+        raise ValueError(f"Holdout artifact {index} known_malicious evidence requires advisory_id")
     if source_type not in LABEL_EVIDENCE_SOURCE_TYPES:
         raise ValueError(
             f"Holdout artifact {index} label evidence requires an approved independent source_type"

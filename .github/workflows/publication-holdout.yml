@@ -63,6 +63,11 @@ jobs:
         run: python -m pip install -e '.[analysis]'
       - name: Verify scanner runtime preflight
         run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
+      - name: Verify labelled holdout provenance
+        run: |
+          python scripts/verify_holdout_provenance.py \
+            --source benchmarks/holdouts/real-evidence-2026-source.json \
+            --advisories src/ide_scanner/intelligence/extension-advisories.json
       - name: Freeze exact external holdout
         run: |
           python scripts/freeze_accuracy_holdout.py \

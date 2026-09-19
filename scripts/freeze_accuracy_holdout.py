@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ide_scanner.artifact_input import ArtifactInputError, acquire_https_vsix  # noqa: E402
 from scripts.build_publication_accuracy_gate import LABELS, SHA256_RE, _validate_label_evidence  # noqa: E402
+from scripts.verify_holdout_provenance import verify_holdout_provenance  # noqa: E402
 
 SOURCE_SCHEMA = "guardrails.holdout-source.v1"
 CORPUS_SCHEMA = "1.0"
@@ -41,6 +42,11 @@ def freeze_holdout(
     artifact_vault: Path | str | None = None,
 ) -> dict[str, Any]:
     source = _read_source(Path(source_path))
+    provenance: dict[str, Any] | None = None
+    advisory_snapshot = source.get("advisory_snapshot")
+    if isinstance(advisory_snapshot, dict):
+        snapshot_path = (Path(source_path).resolve().parent / str(advisory_snapshot.get("path") or "")).resolve()
+        provenance = verify_holdout_provenance(source_path, snapshot_path)
     destination = Path(output_dir).resolve()
     manifest_root = Path(manifest_path).resolve().parent
     vault_root = Path(artifact_vault).expanduser().resolve() if artifact_vault else None
@@ -66,7 +72,14 @@ def freeze_holdout(
         sha256 = str(item.get("sha256") or "").strip().lower()
         if not SHA256_RE.fullmatch(sha256):
             raise ValueError(f"source artifact {index} requires a 64-character SHA-256")
-        _validate_label_evidence(item.get("label_evidence"), index, str(label))
+        _validate_label_evidence(
+            item.get("label_evidence"),
+            index,
+            str(label),
+            extension_id=extension_id,
+            version=version,
+            artifact_sha256=sha256,
+        )
 
         filename = f"{_safe_name(extension_id)}-{_safe_name(version)}-{sha256[:16]}.vsix"
         target = destination / filename
@@ -114,6 +127,13 @@ def freeze_holdout(
         },
         "artifacts": artifacts,
     }
+    if provenance is not None:
+        corpus["holdout"]["provenance"] = {
+            "source_sha256": provenance["source_sha256"],
+            "advisory_snapshot_sha256": provenance["advisory_snapshot_sha256"],
+            "advisory_snapshot_version": provenance["advisory_snapshot_version"],
+            "malicious_artifacts_with_exact_advisories": provenance["malicious_artifacts_with_exact_advisories"],
+        }
     manifest = {"schema_version": MANIFEST_SCHEMA, "artifacts": manifest_artifacts}
     _write_json(Path(corpus_path), corpus)
     _write_json(Path(manifest_path), manifest)
@@ -122,6 +142,7 @@ def freeze_holdout(
         "manifest": str(Path(manifest_path)),
         "artifacts": len(artifacts),
         "directory": str(destination),
+        "provenance": provenance,
     }
 
 
@@ -154,6 +175,7 @@ def _read_source(path: Path) -> dict[str, Any]:
         "corpus_id": corpus_id,
         "corpus_version": corpus_version,
         "holdout": {"label_source": label_source, "frozen_at": frozen_at},
+        "advisory_snapshot": value.get("advisory_snapshot"),
         "artifacts": artifacts,
     }
 

@@ -60,6 +60,7 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
 def holdout_corpus(source_type: str = "vsix") -> dict:
     artifacts = []
     for index in range(5):
+        artifact_sha256 = f"{index + 1:x}" * 64
         artifacts.append({
             "extension_id": f"safe.extension{index}",
             "version": f"1.0.{index}",
@@ -69,10 +70,15 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
                 "source_type": "independent_review",
                 "source_url": f"https://security.example.org/safe-extension-{index}",
                 "retrieved_at": "2026-09-18T00:00:00Z",
+                "evidence_scope": "exact-artifact",
+                "extension_id": f"safe.extension{index}",
+                "version": f"1.0.{index}",
+                "artifact_sha256": artifact_sha256,
             },
-            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": f"{index + 1:x}" * 64},
+            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": artifact_sha256},
         })
     for index in range(5):
+        artifact_sha256 = f"{index + 11:x}" * 64
         artifacts.append({
             "extension_id": f"bad.extension{index}",
             "version": f"9.9.{index}",
@@ -82,8 +88,13 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
                 "source_type": "independent_threat_report",
                 "source_url": f"https://security.example.org/bad-extension-{index}",
                 "retrieved_at": "2026-09-18T00:00:00Z",
+                "evidence_scope": "exact-artifact",
+                "extension_id": f"bad.extension{index}",
+                "version": f"9.9.{index}",
+                "artifact_sha256": artifact_sha256,
+                "advisory_id": f"UNIT-ADVISORY-{index}",
             },
-            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": f"{index + 11:x}" * 64},
+            "artifact": {"source_type": source_type, "original_bytes_available": True, "sha256": artifact_sha256},
         })
     return {
         "schema_version": "1.0",
@@ -94,6 +105,12 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
             "frozen_before_scan": True,
             "original_bytes_available": True,
             "label_source": "independent-adjudication-2026-09-18",
+            "provenance": {
+                "source_sha256": "a" * 64,
+                "advisory_snapshot_sha256": "b" * 64,
+                "advisory_snapshot_version": "unit-test.1",
+                "malicious_artifacts_with_exact_advisories": 5,
+            },
         },
         "artifacts": artifacts,
     }

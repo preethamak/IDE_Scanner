@@ -255,6 +255,7 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
 
     @staticmethod
     def _source_artifact(extension_id: str, version: str, label: str, payload: bytes) -> dict[str, object]:
+        artifact_sha256 = hashlib.sha256(payload).hexdigest()
         return {
             "extension_id": extension_id,
             "version": version,
@@ -265,6 +266,11 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
                 "source_type": "independent_review" if label == "known_safe" else "independent_threat_report",
                 "source_url": "https://evidence.example.test/report",
                 "retrieved_at": "2026-09-18T00:00:00Z",
+                "evidence_scope": "exact-artifact",
+                "extension_id": extension_id,
+                "version": version,
+                "artifact_sha256": artifact_sha256,
+                **({"advisory_id": f"UNIT-{extension_id}-{version}"} if label == "known_malicious" else {}),
             },
         }
 
