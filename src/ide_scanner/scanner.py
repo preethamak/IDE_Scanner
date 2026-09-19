@@ -3326,9 +3326,13 @@ def _load_threat_feed(path: Path | str | None = None) -> dict[str, dict[str, Any
     if not raw_path:
         return {}
     try:
-        parsed = json.loads(Path(raw_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        raw = Path(raw_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Configured threat feed could not be read: {raw_path}: {exc}") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Configured threat feed is not valid JSON: {raw_path}: {exc}") from exc
     entries = parsed.get("extensions") if isinstance(parsed, dict) else parsed
     out: dict[str, dict[str, Any]] = {}
     if isinstance(entries, list):
@@ -3342,6 +3346,8 @@ def _load_threat_feed(path: Path | str | None = None) -> dict[str, dict[str, Any
         for extension_id, metadata in entries.items():
             if isinstance(extension_id, str):
                 out[extension_id] = dict(metadata) if isinstance(metadata, dict) else {"classification": str(metadata)}
+    if not out:
+        raise ValueError(f"Configured threat feed contains no valid extension entries: {raw_path}")
     return out
 
 
@@ -4054,14 +4060,20 @@ def _load_known_bad_hashes(path: Path | str | None = None) -> dict[str, dict[str
         return {}
     try:
         text = Path(raw_path).read_text(encoding="utf-8")
-    except OSError:
-        return {}
+    except OSError as exc:
+        raise ValueError(f"Configured known-bad hash feed could not be read: {raw_path}: {exc}") from exc
+    if not text.strip():
+        raise ValueError(f"Configured known-bad hash feed is empty: {raw_path}")
 
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        return _load_line_based_hashes(text, raw_path)
-    return _load_json_hashes(parsed, raw_path)
+        hashes = _load_line_based_hashes(text, raw_path)
+    else:
+        hashes = _load_json_hashes(parsed, raw_path)
+    if not hashes:
+        raise ValueError(f"Configured known-bad hash feed contains no valid SHA-256 hashes: {raw_path}")
+    return hashes
 
 
 def _load_json_hashes(parsed: Any, source_path: str) -> dict[str, dict[str, Any]]:

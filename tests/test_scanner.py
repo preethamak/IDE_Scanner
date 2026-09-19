@@ -44,6 +44,8 @@ from ide_scanner.scanner import (
     _dedupe_findings,
     _find_sensitive_api_text,
     _is_generated_code_blob,
+    _load_known_bad_hashes,
+    _load_threat_feed,
     _local_error_extension,
     _marketplace_error_extension,
     _score_details,
@@ -1641,6 +1643,24 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["malware_authority"], "authoritative")
         self.assertEqual(scanned["malware_score"], 100)
         self.assertIn("known-bad-artifact", {finding["rule_id"] for finding in scanned["findings"]})
+
+    def test_configured_intelligence_feed_failures_do_not_degrade_to_empty_feeds(self) -> None:
+        with TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing-feed.json"
+            with self.assertRaisesRegex(ValueError, "known-bad hash feed could not be read"):
+                _load_known_bad_hashes(missing)
+            with self.assertRaisesRegex(ValueError, "threat feed could not be read"):
+                _load_threat_feed(missing)
+
+            malformed_hashes = Path(tmp) / "malformed-hashes.json"
+            malformed_hashes.write_text('{"hashes": []}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "no valid SHA-256 hashes"):
+                _load_known_bad_hashes(malformed_hashes)
+
+            malformed_threats = Path(tmp) / "malformed-threats.json"
+            malformed_threats.write_text('{"extensions": []}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "no valid extension entries"):
+                _load_threat_feed(malformed_threats)
 
     def test_threat_feed_extension_id_is_authoritative_malware(self) -> None:
         with TemporaryDirectory() as tmp:

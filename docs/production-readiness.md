@@ -35,6 +35,10 @@ verdict, decision, coverage, rule, score, or artifact identity constraints. It
 also enforces corpus-wide thresholds for safe blocking, malicious allows, and
 incomplete required scans.
 
+Configured known-bad hash and threat feeds fail closed: unreadable, malformed,
+or empty feeds abort the scan instead of silently behaving like an empty
+intelligence set. Omitting an optional feed remains supported.
+
 The CI production gate additionally acquires the independently reported BCAI
 Rosetta 4.0.37 VSIX by its pinned Open VSX URL and SHA-256 before running the
 real-artifact calibration tests. A clean source checkout may skip those two
