@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+# A worker is a separate scanner process, but the analyzer's peak memory and
+# CPU cost varies substantially with the package.  Running eight 30-40 MiB
+# generated-heavy extensions at once can make every child miss its wall-clock
+# budget even though each child finishes comfortably in isolation.  These are
+# scheduling weights, not relaxed scan limits: a heavy artifact still gets the
+# same full analysis and the same per-artifact timeout.
+_LARGE_ARTIFACT_BYTES = 8 * 1024 * 1024
+_VERY_LARGE_ARTIFACT_BYTES = 32 * 1024 * 1024
 
 from ide_scanner.discovery import discover_from_path, discover_local_installations  # noqa: E402
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
@@ -349,6 +358,102 @@ def _scan_one_safe(target: dict[str, str], *, timeout: int, profile: str, runtim
         return _worker_error(Path(target["path"]), target.get("type", "vscode"), target, f"Corpus worker raised an isolated error: {exc}")
 
 
+def _artifact_work_units(target: dict[str, str]) -> int:
+    """Return a conservative scheduler weight for one isolated artifact.
+
+    The input is only used for scheduling.  A missing/unreadable path gets the
+    heaviest weight so an unexpected filesystem condition cannot cause a burst
+    of workers to compete for the same failing resource.
+    """
+    try:
+        size = Path(target["path"]).stat().st_size
+    except OSError:
+        return 4
+    if size >= _VERY_LARGE_ARTIFACT_BYTES:
+        return 4
+    if size >= _LARGE_ARTIFACT_BYTES:
+        return 2
+    return 1
+
+
+def _scan_pending(
+    pending: dict[int, dict[str, str]],
+    *,
+    jobs: int,
+    timeout: int,
+    profile: str,
+    runtime: bool,
+    runtime_timeout: int,
+    checkpoint_dir: Path | None,
+    checkpoint_context: dict[str, Any],
+    targets: list[dict[str, str]],
+    extensions_by_index: dict[int, dict[str, Any]],
+) -> None:
+    """Scan pending artifacts with bounded, size-aware concurrency.
+
+    ``jobs`` remains the maximum number of child processes.  Large artifacts
+    consume two or four scheduling units, so a cohort can still use available
+    parallelism for small packages without launching a memory-pressure storm.
+    Results are written in completion order, while the final report remains in
+    manifest order.
+    """
+    if not pending:
+        return
+    work = [(index, target, _artifact_work_units(target)) for index, target in pending.items()]
+    capacity = max(jobs, max(weight for _, _, weight in work))
+    queue = list(work)
+    running_units = 0
+    executor = ThreadPoolExecutor(max_workers=min(jobs, len(work)))
+    futures: dict[Any, tuple[int, int]] = {}
+    try:
+        while queue or futures:
+            # Fill every slot that fits.  Selecting the first fitting item
+            # prevents a large artifact at the head of the queue from
+            # needlessly blocking small independent artifacts.
+            while queue:
+                available = capacity - running_units
+                fitting = next((position for position, (_, _, weight) in enumerate(queue) if weight <= available), None)
+                if fitting is None:
+                    break
+                index, target, weight = queue.pop(fitting)
+                future = executor.submit(
+                    _scan_one_safe,
+                    target,
+                    timeout=timeout,
+                    profile=profile,
+                    runtime=runtime,
+                    runtime_timeout=runtime_timeout,
+                )
+                futures[future] = (index, weight)
+                running_units += weight
+            if not futures:
+                raise RuntimeError("corpus scheduler could not place a pending artifact")
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                index, weight = futures.pop(future)
+                running_units -= weight
+                result = future.result()
+                extensions_by_index[index] = result
+                _write_checkpoint(checkpoint_dir, targets[index], result, checkpoint_context)
+                print(
+                    json.dumps({
+                        "completed": len(extensions_by_index),
+                        "total": len(targets),
+                        "source": "scan",
+                        "path": targets[index]["path"],
+                        "analysis_status": result.get("analysis_status", "incomplete"),
+                        "work_units": weight,
+                    }),
+                    file=sys.stderr,
+                    flush=True,
+                )
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
+
+
 def _canonical_artifact_sha256(path: Path) -> str:
     """Hash the same canonical VSIX bytes used for scanner artifact identity.
 
@@ -447,30 +552,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         else:
             pending[index] = target
 
-    executor = ThreadPoolExecutor(max_workers=min(args.jobs, max(1, len(pending))))
-    futures = {
-        executor.submit(
-            _scan_one_safe,
-            target,
-            timeout=args.timeout,
-            profile=args.profile,
-            runtime=args.runtime,
-            runtime_timeout=args.runtime_timeout,
-        ): index
-        for index, target in pending.items()
-    }
-    try:
-        for future in as_completed(futures):
-            index = futures[future]
-            result = future.result()
-            extensions_by_index[index] = result
-            _write_checkpoint(checkpoint_dir, targets[index], result, checkpoint_context)
-            print(json.dumps({"completed": len(extensions_by_index), "total": len(targets), "source": "scan", "path": targets[index]["path"], "analysis_status": result.get("analysis_status", "incomplete")}), file=sys.stderr, flush=True)
-    except BaseException:
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise
-    else:
-        executor.shutdown(wait=True)
+    _scan_pending(
+        pending,
+        jobs=args.jobs,
+        timeout=args.timeout,
+        profile=args.profile,
+        runtime=args.runtime,
+        runtime_timeout=args.runtime_timeout,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_context=checkpoint_context,
+        targets=targets,
+        extensions_by_index=extensions_by_index,
+    )
 
     observed_kinds: dict[str, set[str]] = {}
     runtime_runs: list[dict[str, Any]] = []

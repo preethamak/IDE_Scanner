@@ -11,7 +11,22 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from scripts.scan_corpus import _canonical_artifact_sha256, _checkpoint_context, _checkpoint_path, _load_checkpoint, _manifest_targets, _parser, _scan_one, _wait_for_worker, _worker_command, _write_checkpoint, run
+from scripts.scan_corpus import (
+    _LARGE_ARTIFACT_BYTES,
+    _VERY_LARGE_ARTIFACT_BYTES,
+    _artifact_work_units,
+    _canonical_artifact_sha256,
+    _checkpoint_context,
+    _checkpoint_path,
+    _load_checkpoint,
+    _manifest_targets,
+    _parser,
+    _scan_one,
+    _wait_for_worker,
+    _worker_command,
+    _write_checkpoint,
+    run,
+)
 
 
 class ScanCorpusTests(unittest.TestCase):
@@ -34,6 +49,22 @@ class ScanCorpusTests(unittest.TestCase):
         command = _worker_command(Path("artifact.vsix"), "benchmark", Path("report.json"), runtime=True, runtime_timeout=30)
         self.assertIn("--runtime", command)
         self.assertEqual(command[command.index("--runtime-timeout") + 1], "30")
+
+    def test_scheduler_weights_heavy_artifacts_without_changing_scan_limits(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            small = root / "small.vsix"
+            large = root / "large.vsix"
+            very_large = root / "very-large.vsix"
+            small.write_bytes(b"small")
+            with large.open("wb") as handle:
+                handle.truncate(_LARGE_ARTIFACT_BYTES)
+            with very_large.open("wb") as handle:
+                handle.truncate(_VERY_LARGE_ARTIFACT_BYTES)
+
+            self.assertEqual(_artifact_work_units({"path": str(small)}), 1)
+            self.assertEqual(_artifact_work_units({"path": str(large)}), 2)
+            self.assertEqual(_artifact_work_units({"path": str(very_large)}), 4)
 
     def test_runtime_observation_kinds_survive_corpus_aggregation(self) -> None:
         with TemporaryDirectory() as tmp:
