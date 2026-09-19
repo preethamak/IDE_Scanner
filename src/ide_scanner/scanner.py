@@ -4794,6 +4794,8 @@ _GENERATED_NOISE_AST_RULES = {"ast-dynamic-call-target", "ast-bracket-notation-s
 # repeated high-specificity evidence must remain individually reviewable. The
 # AST dynamic-call rule is explicitly weak/contextual, so it is safe to merge
 # its repeated occurrences while retaining all source paths and the count.
+# Weak secret-reference markers follow the same rule: repeated references are
+# still retained as paths/counts, but should not read like separate incidents.
 _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
     "ast-dynamic-call-target",
     "dynamic-code-loading",
