@@ -362,6 +362,7 @@ blind spot without treating ordinary single-credential API clients as exfiltrati
 | `persistence-chain` | `persistence` | `correlated` | HIGH | Code modifies persistence locations and executes or communicates externally. |
 | `agent-data-exfil-chain` | `agentic` | `correlated` | HIGH | Agent-facing code combines sensitive references with outbound network behavior. |
 | `download-and-execute` | `execution` | `correlated` | HIGH | Code can download content and execute local processes from the same file. |
+| `remote-credential-broker` | `cross-extension-exposure` | `exposure` | HIGH | Code appears to obtain or forward bearer tokens through a separately configured remote token broker; review the trust boundary without treating it as proof of exfiltration. |
 | `supply-chain-dropper-chain` | `supply-chain` | `correlated` | HIGH | Remote download + archive extraction + dynamic load of code from a computed path without integrity verification. |
 
 ### Webview Security Metrics

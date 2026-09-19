@@ -350,6 +350,7 @@ Current `ide-scanner` behavior already matches the most important safety rules:
 - `known-bad-artifact`, `marketplace-removed-malware`, and `malicious-npm-dependency` are `confirmed`.
 - non-malware `marketplace-removed-package` findings are `provenance`.
 - `credential-exfiltration-chain`, `destructive-transfer-chain`, and `download-and-execute` are `correlated`.
+- `remote-credential-broker` is `exposure`: multiple same-file indicators identify a bearer-token trust boundary, but the rule routes to review and does not claim exfiltration or malicious intent.
 - `agentic-tooling`, lifecycle scripts, native artifacts, broad/startup/sensitive activation, and powerful IDE contributions are `capability`.
 - vulnerable runtime dependencies, mutable dependency sources, and unpinned dependencies are `dependency`.
 - packed archive artifacts are `provenance`.
