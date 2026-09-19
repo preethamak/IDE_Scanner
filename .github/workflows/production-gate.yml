@@ -40,6 +40,22 @@ jobs:
                   destination,
               )
               temporary.replace(target)
+          destination = Path("benchmarks/external/artifacts/nx-console-18.95.0")
+          destination.mkdir(parents=True, exist_ok=True)
+          target = destination / "nrwl.angular-console-18.95.0.vsix"
+          expected = "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing Nx Console calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_vsix(
+                  "https://github.com/trailofbits/vsix-zoo/raw/refs/heads/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
           destination = Path("benchmarks/external/artifacts/formulahendry-code-runner-0.12.2")
           destination.mkdir(parents=True, exist_ok=True)
           target = destination / "code-runner-0.12.2.vsix"
@@ -56,6 +72,39 @@ jobs:
                   destination,
               )
               temporary.replace(target)
+          PY
+      - name: Scan exact Nx Console supply-chain calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/nx-console-18.95.0/nrwl.angular-console-18.95.0.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out nx-console-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8"
+          report = json.load(open("nx-console-calibration.json", encoding="utf-8"))
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one Nx Console calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Nx Console calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "nrwl.angular-console" or extension.get("version") != "18.95.0":
+              raise SystemExit("Nx Console calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Nx Console calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "malicious":
+              raise SystemExit("Exact malicious Nx Console calibration artifact was not blocked")
+          if not any(item.get("rule_id") == "known-malicious-extension" for item in extension.get("findings", [])):
+              raise SystemExit("Exact Nx Console advisory-backed finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"]}))
           PY
       - name: Acquire exact safe-control inputs
         run: |
@@ -183,6 +232,7 @@ jobs:
             production-fixtures.json
             production-gate.json
             bcai-calibration.json
+            nx-console-calibration.json
             code-runner-cve-calibration.json
             benchmarks/external/artifacts/formulahendry-code-runner-0.12.2/*.vsix
             benchmarks/external/artifacts/public-holdout-2026-09-18/*.vsix

@@ -24,6 +24,11 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
 
     assert "Acquire exact real-artifact calibration input" in workflow
     assert "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216" in workflow
+    assert "Scan exact Nx Console supply-chain calibration input" in workflow
+    assert "nrwl.angular-console-18.95.0.vsix" in workflow
+    assert "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8" in workflow
+    assert 'extension.get("extension_id") != "nrwl.angular-console"' in workflow
+    assert 'extension.get("version") != "18.95.0"' in workflow
     assert "open-vsx.org/api/bingcha/bcai-tools/4.0.37" in workflow
     assert "Scan exact real-artifact calibration input" in workflow
     assert "--path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix" in workflow
