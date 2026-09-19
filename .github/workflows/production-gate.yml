@@ -41,6 +41,31 @@ jobs:
               )
               temporary.replace(target)
           PY
+      - name: Acquire exact safe-control inputs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          from ide_scanner.artifact_input import acquire_https_vsix
+
+          controls = [
+              ("https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.94.0/vspackage", "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3", "benchmarks/external/artifacts/public-holdout-2026-09-18/nrwl-angular-console-18.94.0.vsix"),
+              ("https://marketplace.visualstudio.com/_apis/public/gallery/publishers/streetsidesoftware/vsextensions/code-spell-checker/4.5.6/vspackage", "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44", "benchmarks/external/artifacts/code-spell-checker-4.5.6/code-spell-checker-4.5.6.vsix"),
+              ("https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/vscode-yaml/1.24.0/vspackage", "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168", "benchmarks/external/artifacts/vscode-yaml-1.24.0/vscode-yaml-1.24.0-298.vsix"),
+              ("https://marketplace.visualstudio.com/_apis/public/gallery/publishers/rust-lang/vsextensions/rust-analyzer/0.3.2971/vspackage", "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa", "benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13/rust-analyzer-no-server.vsix"),
+              ("https://marketplace.visualstudio.com/_apis/public/gallery/publishers/ms-python/vsextensions/python/2026.5.2026070801/vspackage", "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa", "benchmarks/external/artifacts/public-holdout-2026-09-18/ms-python.python-2026.5.2026070801.vsix"),
+          ]
+          for url, expected, raw_target in controls:
+              target = Path(raw_target)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if target.exists():
+                  digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                  if digest != expected:
+                      raise SystemExit(f"Existing safe-control artifact has SHA-256 {digest}, expected {expected}: {target}")
+                  continue
+              temporary = acquire_https_vsix(url, expected, target.parent)
+              temporary.replace(target)
+          PY
       - name: Unit and integration tests
         run: python -m pytest -q
       - name: Scan deterministic production fixtures
@@ -106,6 +131,10 @@ jobs:
             production-fixtures.json
             production-gate.json
             bcai-calibration.json
+            benchmarks/external/artifacts/public-holdout-2026-09-18/*.vsix
+            benchmarks/external/artifacts/code-spell-checker-4.5.6/*.vsix
+            benchmarks/external/artifacts/vscode-yaml-1.24.0/*.vsix
+            benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13/*.vsix
           retention-days: 30
           if-no-files-found: warn
 

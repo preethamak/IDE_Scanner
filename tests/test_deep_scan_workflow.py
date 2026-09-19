@@ -29,6 +29,12 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert 'extension.get("verdict") != "malicious"' in workflow
     assert 'item.get("rule_id") == "known-malicious-extension"' in workflow
     assert "bcai-calibration.json" in workflow
+    assert "Acquire exact safe-control inputs" in workflow
+    assert "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3" in workflow
+    assert "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44" in workflow
+    assert "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168" in workflow
+    assert "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa" in workflow
+    assert "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa" in workflow
     assert "runtime-smoke:" in workflow
     assert "scripts/scan_corpus.py" in workflow
     assert "--path fixtures/credential-exfil" in workflow
