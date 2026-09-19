@@ -228,6 +228,18 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertEqual(result["analysis_status"], "complete")
         self.assertTrue(result["artifact_inventory"]["corpus_manifest"]["verified"])
 
+    def test_manifest_hashes_raw_vsix_in_place_without_scratch_copy(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "example.vsix"
+            with zipfile.ZipFile(artifact, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"example","name":"raw","version":"1.0.0"}')
+            expected_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            with patch("scripts.scan_corpus.shutil.copyfile", side_effect=AssertionError("raw VSIX should not be copied")):
+                actual_hash = _canonical_artifact_sha256(artifact)
+
+        self.assertEqual(actual_hash, expected_hash)
+
     def test_worker_timeout_reaps_stuck_process(self) -> None:
         process = subprocess.Popen(
             ["/usr/bin/python", "-c", "import time; time.sleep(60)"],

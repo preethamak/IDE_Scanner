@@ -358,6 +358,14 @@ def _canonical_artifact_sha256(path: Path) -> str:
     """
     if path.suffix.lower() != ".vsix":
         return _sha256_file(path)
+    # Marketplace transport occasionally wraps a VSIX in gzip, but the exact
+    # corpus files are normally already ZIP containers. Avoid copying every
+    # raw VSIX into scratch space just to hash it: large parallel corpora can
+    # otherwise exhaust the worker filesystem before analysis begins.
+    with path.open("rb") as handle:
+        is_gzip = handle.read(2) == b"\x1f\x8b"
+    if not is_gzip:
+        return _sha256_file(path)
     with tempfile.TemporaryDirectory(prefix="guardrails-corpus-hash-") as temp_dir:
         canonical = Path(temp_dir) / path.name
         shutil.copyfile(path, canonical)
