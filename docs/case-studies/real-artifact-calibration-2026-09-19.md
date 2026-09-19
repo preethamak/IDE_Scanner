@@ -34,7 +34,7 @@ zero malicious allows, and complete required-provider coverage.
 
 ## Current replay identity
 
-The retained six-artifact replay was reproduced with scanner build
+The retained six-artifact replay was originally reproduced with scanner build
 `90f9f823646e25c14bd96c7835f07ea95dc7f20d`, policy
 `3.1.0-calibration.4`, and ruleset
 `2026.09.19-policy-v3-calibration.29-dynamic-catalog` (95 rules). It was a
@@ -42,6 +42,11 @@ static-only diagnostic run with runtime execution disabled; the report records
 that limitation rather than presenting static evidence as dynamic coverage.
 The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
+
+The current engine replay is `8276643e5ed2f44b003bdc292dc350c2036348c3`.
+The BCAI behavior-only replay remains `REVIEW` without the advisory and the
+exact-hash replay is `BLOCK/MALICIOUS` with the advisory enabled. Neither run
+is a substitute for the required deep-runtime publication holdout.
 
 ## Latest canonical diagnostic replay
 

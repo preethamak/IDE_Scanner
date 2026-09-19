@@ -258,6 +258,30 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(runtime_bundle["required_extension_ids"], ["publisher.native"])
             self.assertEqual(runtime_bundle["runs"][0]["status"], "completed")
 
+    def test_required_runtime_without_execution_path_is_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "native-without-entrypoint.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.native"
+            report.version = "1.0.0"
+            report.artifact_hash = "d" * 64
+            report.capabilities = [{"id": "native_code", "evidence": ["server.node"]}]
+            runtime = {
+                "mode": "executed",
+                "plan": {"instrumentation": {"entrypoint_status": "not-applicable"}},
+                "extensions": {"publisher.native": []},
+            }
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox", return_value=runtime):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "failed")
+            self.assertIn("no declared Node activation entrypoint", runtime_bundle["runs"][0]["error"])
+            self.assertEqual(runtime_bundle["extensions"]["publisher.native"][0]["kind"], "sandbox_error")
+
     def test_ast_dynamic_call_targets_are_aggregated_per_file(self) -> None:
         findings: list[Finding] = []
         with patch(

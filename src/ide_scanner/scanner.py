@@ -1108,6 +1108,34 @@ def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:
     )
 
 
+def _runtime_execution_failure(runtime: dict[str, Any], items: list[dict[str, Any]]) -> str:
+    """Explain when a required runtime pass did not execute an artifact path.
+
+    Native/WASM and lifecycle capabilities can make runtime coverage required
+    even when the package has no Node activation entrypoint. The sandbox still
+    returns a valid plan in that case, but a plan-only result must not be
+    mistaken for executed coverage. A successful lifecycle action is a valid
+    execution path; otherwise the required provider is incomplete.
+    """
+    plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
+    instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
+    entrypoint_status = str(instrumentation.get("entrypoint_status") or "")
+    if entrypoint_status != "not-applicable":
+        return ""
+    lifecycle_executed = any(
+        isinstance(item, dict)
+        and item.get("kind") == "lifecycle_executed"
+        and item.get("returncode") == 0
+        for item in items
+    )
+    if lifecycle_executed:
+        return ""
+    return (
+        "Required runtime coverage had no declared Node activation entrypoint "
+        "and did not complete a lifecycle execution path."
+    )
+
+
 def _apply_local_dynamic_runtime(
     targets: list[dict[str, str]],
     extensions: list[ExtensionReport],
@@ -1142,14 +1170,22 @@ def _apply_local_dynamic_runtime(
                 items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
                 if not isinstance(items, list):
                     items = []
-                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
-                    item for item in items if isinstance(item, dict)
-                ]
                 runtime_failed = any(
                     isinstance(item, dict)
                     and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
                     for item in items
                 )
+                execution_error = _runtime_execution_failure(runtime, items) if required else ""
+                if execution_error:
+                    items.append({
+                        "kind": "sandbox_error",
+                        "phase": "runtime",
+                        "evidence": execution_error,
+                    })
+                    runtime_failed = True
+                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                    item for item in items if isinstance(item, dict)
+                ]
                 run_record.update({
                     "status": "failed" if runtime_failed else "completed",
                     "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
@@ -1168,7 +1204,7 @@ def _apply_local_dynamic_runtime(
                         runtime_bundle["external_syscall_trace_available"] = True
                     run_record["external_syscall_trace"] = bool(trace_available and not runtime_failed)
                 if runtime_failed:
-                    run_record["error"] = "Runtime execution did not complete successfully."
+                    run_record["error"] = execution_error or "Runtime execution did not complete successfully."
             except Exception as exc:  # noqa: BLE001 - runtime failure is disclosed and fail-closed
                 runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
                     "kind": "sandbox_error",
@@ -1250,14 +1286,22 @@ def scan_marketplace_extension(
                     items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
                     if not isinstance(items, list):
                         items = []
-                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
-                        item for item in items if isinstance(item, dict)
-                    ]
                     runtime_failed = any(
                         isinstance(item, dict)
                         and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
                         for item in items
                     )
+                    execution_error = _runtime_execution_failure(runtime, items) if runtime_required else ""
+                    if execution_error:
+                        items.append({
+                            "kind": "sandbox_error",
+                            "phase": "runtime",
+                            "evidence": execution_error,
+                        })
+                        runtime_failed = True
+                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                        item for item in items if isinstance(item, dict)
+                    ]
                     run_record.update({
                         "status": "failed" if runtime_failed else "completed",
                         "mode": runtime.get("mode") if isinstance(runtime, dict) else "executed",
@@ -1276,7 +1320,7 @@ def scan_marketplace_extension(
                             runtime_bundle["external_syscall_trace_available"] = True
                         run_record["external_syscall_trace"] = bool(trace_available and not runtime_failed)
                     if runtime_failed:
-                        run_record["error"] = "Runtime execution did not complete successfully."
+                        run_record["error"] = execution_error or "Runtime execution did not complete successfully."
                 except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
                     runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
                         "kind": "sandbox_error",
