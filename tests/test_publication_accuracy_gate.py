@@ -49,6 +49,8 @@ def gate(corpus_id: str, *, safe: int = 2, malicious: int = 2, version: str = "1
             "malicious_review_rate": 0.0,
             "malicious_detected": malicious,
             "malicious_detection_rate": 1.0,
+            "dynamic_required": malicious,
+            "dynamic_not_applicable": safe,
             "incomplete_required": 0,
         },
         "rule_matrix": {},
@@ -182,6 +184,8 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         self.assertEqual(result["holdout"]["label_counts"], {"known_safe": 5, "known_malicious": 5})
         self.assertEqual(result["holdout"]["safe_review_rate"], 0.0)
         self.assertEqual(result["holdout"]["malicious_detection_rate"], 1.0)
+        self.assertEqual(result["holdout"]["dynamic_required"], 5)
+        self.assertEqual(result["holdout"]["dynamic_not_applicable"], 5)
         self.assertEqual(result["holdout"]["rule_matrix"]["download-and-execute"]["fired_on_known_malicious"], 5)
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
 
@@ -261,6 +265,18 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             invalid = holdout_gate()
             invalid["runtime_evidence"]["required"] = False
             with self.assertRaisesRegex(ValueError, "required deep runtime"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", invalid),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_holdout_without_both_runtime_surfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = holdout_gate()
+            invalid["summary"]["dynamic_required"] = 0
+            with self.assertRaisesRegex(ValueError, "both executable-capability"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),

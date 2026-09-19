@@ -353,6 +353,14 @@ def _holdout_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     malicious_blocked = sum(1 for row in malicious if row["actual"].get("decision") == "block")
     malicious_reviewed = sum(1 for row in malicious if row["actual"].get("decision") == "review")
     malicious_detected = sum(1 for row in malicious if _is_review_or_higher(row["actual"]))
+    dynamic_required = sum(
+        1 for row in rows
+        if row["scanned"] and row["actual"].get("runtime_contract", {}).get("required") is True
+    )
+    dynamic_not_applicable = sum(
+        1 for row in rows
+        if row["scanned"] and row["actual"].get("runtime_contract", {}).get("required") is False
+    )
     required_passed = sum(1 for row in rows if row["passed"])
     return {
         "total_artifacts": len(rows),
@@ -376,6 +384,8 @@ def _holdout_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "malicious_review_rate": round(malicious_reviewed / len(malicious), 4) if malicious else 0.0,
         "malicious_detected": malicious_detected,
         "malicious_detection_rate": round(malicious_detected / len(malicious), 4) if malicious else 0.0,
+        "dynamic_required": dynamic_required,
+        "dynamic_not_applicable": dynamic_not_applicable,
         "incomplete_required": sum(
             1 for row in rows
             if not row["scanned"] or row["actual"].get("analysis_status") != "complete"

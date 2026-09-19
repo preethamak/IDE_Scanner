@@ -56,6 +56,11 @@ MALICIOUS_LABEL_EVIDENCE_SOURCE_TYPES = {
 # before it is allowed to represent ecosystem accuracy.
 MIN_FRESH_HOLDOUT_SAFE = 5
 MIN_FRESH_HOLDOUT_MALICIOUS = 5
+# The public contract distinguishes non-executable packages from packages that
+# require capability-gated execution. A holdout that exercises only one side
+# cannot validate that distinction before a large registry rollout.
+MIN_DYNAMIC_REQUIRED = 1
+MIN_DYNAMIC_NOT_APPLICABLE = 1
 MAX_SAFE_REVIEW_RATE = 0.2
 
 
@@ -112,6 +117,8 @@ def build_publication_accuracy_gate(
             f"{MIN_FRESH_HOLDOUT_SAFE} known-safe and "
             f"{MIN_FRESH_HOLDOUT_MALICIOUS} known-malicious artifacts."
         )
+    if _number(summary.get("dynamic_required")) < MIN_DYNAMIC_REQUIRED or _number(summary.get("dynamic_not_applicable")) < MIN_DYNAMIC_NOT_APPLICABLE:
+        raise ValueError("Publication holdout must include both executable-capability and explicit runtime-not-applicable artifacts.")
     label_counts = {
         "known_safe": sum(1 for artifact in artifacts if artifact.get("label") == "known_safe"),
         "known_malicious": sum(1 for artifact in artifacts if artifact.get("label") == "known_malicious"),
@@ -159,6 +166,8 @@ def build_publication_accuracy_gate(
             "malicious_review_rate": _number(summary.get("malicious_review_rate")),
             "malicious_detected": _number(summary.get("malicious_detected")),
             "malicious_detection_rate": _number(summary.get("malicious_detection_rate")),
+            "dynamic_required": _number(summary.get("dynamic_required")),
+            "dynamic_not_applicable": _number(summary.get("dynamic_not_applicable")),
             "rule_matrix": holdout_rule_matrix,
             "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
