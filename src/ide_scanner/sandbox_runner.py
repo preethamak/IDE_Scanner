@@ -593,7 +593,7 @@ def _run_bounded_capture(command: list[str], **kwargs: Any) -> subprocess.Comple
         for stream in streams:
             try:
                 selector.unregister(stream)
-            except KeyError:
+            except (KeyError, ValueError):
                 pass
             if not stream.closed:
                 stream.close()

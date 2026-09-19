@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ide_scanner.providers.runtime import (
+    PROVIDER_OUTPUT_LIMIT_MARKER,
     SEMGREP_RULES,
     YARA_RULES,
     find_runtime_executable,
@@ -170,6 +171,18 @@ def test_timeout_terminates_provider_process_group(tmp_path: Path) -> None:
             break
         time.sleep(0.05)
     assert process_state() in (None, "Z")
+
+
+def test_provider_output_is_bounded_and_marked_incomplete(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "PROVIDER_OUTPUT_LIMIT_BYTES", 1024)
+    result = run_bounded_process(
+        [sys.executable, "-c", "import sys; sys.stdout.write('x' * 4097)"],
+        timeout=5,
+    )
+
+    assert result.returncode != 0
+    assert len(result.stdout.encode("utf-8")) <= runtime.PROVIDER_OUTPUT_LIMIT_BYTES
+    assert PROVIDER_OUTPUT_LIMIT_MARKER in result.stderr
 
 
 def test_bounded_process_applies_posix_resource_limits(monkeypatch) -> None:
