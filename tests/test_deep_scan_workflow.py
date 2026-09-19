@@ -23,6 +23,12 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert "Acquire exact real-artifact calibration input" in workflow
     assert "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216" in workflow
     assert "open-vsx.org/api/bingcha/bcai-tools/4.0.37" in workflow
+    assert "Scan exact real-artifact calibration input" in workflow
+    assert "--path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix" in workflow
+    assert 'extension.get("decision") != "block"' in workflow
+    assert 'extension.get("verdict") != "malicious"' in workflow
+    assert 'item.get("rule_id") == "known-malicious-extension"' in workflow
+    assert "bcai-calibration.json" in workflow
     assert "runtime-smoke:" in workflow
     assert "scripts/scan_corpus.py" in workflow
     assert "--path fixtures/credential-exfil" in workflow

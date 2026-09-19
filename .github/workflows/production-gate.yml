@@ -54,6 +54,43 @@ jobs:
             --threat-feed benchmarks/threat-feed.json \
             --format json \
             --out production-fixtures.json
+      - name: Scan exact real-artifact calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          # This is an independently reported, exact-hash artifact. Keep the
+          # result separate from synthetic fixtures so a green fixture gate
+          # cannot hide a regression in real published-package handling.
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out bcai-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
+          with open("bcai-calibration.json", encoding="utf-8") as handle:
+              report = json.load(handle)
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one exact calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "bingcha.bcai-tools" or extension.get("version") != "4.0.37":
+              raise SystemExit("Calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "malicious":
+              raise SystemExit("Exact malicious calibration artifact was not blocked")
+          if not any(item.get("rule_id") == "known-malicious-extension" for item in extension.get("findings", [])):
+              raise SystemExit("Exact advisory-backed calibration finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"]}))
+          PY
       - name: Enforce production corpus invariants
         run: |
           python -m ide_scanner benchmark production \
@@ -68,6 +105,7 @@ jobs:
           path: |
             production-fixtures.json
             production-gate.json
+            bcai-calibration.json
           retention-days: 30
           if-no-files-found: warn
 
