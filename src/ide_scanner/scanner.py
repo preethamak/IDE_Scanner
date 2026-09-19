@@ -381,7 +381,8 @@ def _scan_request(
         "extensions": {},
         "runs": [],
         "required_extension_ids": [],
-        "external_syscall_trace": external_trace_available(),
+        "external_syscall_trace": False,
+        "external_syscall_trace_available": external_trace_available(),
     }
     if request.dynamic_runtime and local_targets:
         _apply_local_dynamic_runtime(
@@ -1094,6 +1095,19 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
     )
 
 
+def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:
+    """Summarize actual trace evidence without confusing it with availability."""
+    runs = runtime_bundle.get("runs") if isinstance(runtime_bundle.get("runs"), list) else []
+    required_runs = [
+        item for item in runs
+        if isinstance(item, dict) and item.get("required") is True
+    ]
+    runtime_bundle["external_syscall_trace"] = bool(
+        required_runs
+        and all(item.get("external_syscall_trace") is True for item in required_runs)
+    )
+
+
 def _apply_local_dynamic_runtime(
     targets: list[dict[str, str]],
     extensions: list[ExtensionReport],
@@ -1114,6 +1128,7 @@ def _apply_local_dynamic_runtime(
             "required": required,
             "artifact_sha256": report.artifact_hash,
             "status": "not-applicable" if not required else "failed",
+            "external_syscall_trace": False,
         }
         if required:
             runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
@@ -1144,8 +1159,14 @@ def _apply_local_dynamic_runtime(
                     plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
                     instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
                     trace = instrumentation.get("external_syscall_trace")
-                    if isinstance(trace, dict) and trace.get("requested") is True and trace.get("available") is True:
-                        runtime_bundle["external_syscall_trace"] = True
+                    trace_available = (
+                        isinstance(trace, dict)
+                        and trace.get("requested") is True
+                        and trace.get("available") is True
+                    )
+                    if trace_available:
+                        runtime_bundle["external_syscall_trace_available"] = True
+                    run_record["external_syscall_trace"] = bool(trace_available and not runtime_failed)
                 if runtime_failed:
                     run_record["error"] = "Runtime execution did not complete successfully."
             except Exception as exc:  # noqa: BLE001 - runtime failure is disclosed and fail-closed
@@ -1156,6 +1177,7 @@ def _apply_local_dynamic_runtime(
                 }]
                 run_record["error"] = str(exc)[:500]
         runtime_bundle.setdefault("runs", []).append(run_record)
+        _finalize_runtime_trace_metadata(runtime_bundle)
 
 
 def scan_marketplace_extension(
@@ -1214,6 +1236,7 @@ def scan_marketplace_extension(
                 "required": runtime_required,
                 "artifact_sha256": report.artifact_hash,
                 "status": "not-applicable" if not runtime_required else "failed",
+                "external_syscall_trace": False,
             }
             if runtime_required:
                 runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
@@ -1244,8 +1267,14 @@ def scan_marketplace_extension(
                         plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
                         instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
                         trace = instrumentation.get("external_syscall_trace")
-                        if isinstance(trace, dict) and trace.get("requested") is True and trace.get("available") is True:
-                            runtime_bundle["external_syscall_trace"] = True
+                        trace_available = (
+                            isinstance(trace, dict)
+                            and trace.get("requested") is True
+                            and trace.get("available") is True
+                        )
+                        if trace_available:
+                            runtime_bundle["external_syscall_trace_available"] = True
+                        run_record["external_syscall_trace"] = bool(trace_available and not runtime_failed)
                     if runtime_failed:
                         run_record["error"] = "Runtime execution did not complete successfully."
                 except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
@@ -1256,6 +1285,7 @@ def scan_marketplace_extension(
                     }]
                     run_record["error"] = str(exc)[:500]
             runtime_bundle.setdefault("runs", []).append(run_record)
+            _finalize_runtime_trace_metadata(runtime_bundle)
     except ArtifactStoreError as exc:
         return _marketplace_error_extension(resolved_id, f"Downloaded VSIX could not be preserved: {exc}")
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
@@ -3552,10 +3582,12 @@ def _load_sandbox_observation_bundle(path: Path | str | None = None) -> dict[str
         metadata["captures"] = [str(item) for item in instrumentation["captures"]]
     external_trace = instrumentation.get("external_syscall_trace")
     if isinstance(external_trace, dict):
-        metadata["external_syscall_trace"] = bool(
+        trace_available = bool(
             external_trace.get("requested") is True
             and external_trace.get("available") is True
         )
+        metadata["external_syscall_trace_available"] = trace_available
+        metadata["external_syscall_trace"] = trace_available
     return {"extensions": out, "metadata": metadata}
 
 
@@ -3596,6 +3628,10 @@ def _merge_dynamic_runtime_bundle(
         "external_syscall_trace": bool(
             runtime_bundle.get("external_syscall_trace") is True
             or base_metadata.get("external_syscall_trace") is True
+        ),
+        "external_syscall_trace_available": bool(
+            runtime_bundle.get("external_syscall_trace_available") is True
+            or base_metadata.get("external_syscall_trace_available") is True
         ),
     })
     return {"extensions": merged_extensions, "metadata": metadata}
@@ -3656,6 +3692,9 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
                 required
                 and metadata.get("external_syscall_trace") is True
                 and error_count == 0
+            ),
+            "external_syscall_trace_available": bool(
+                metadata.get("external_syscall_trace_available") is True
             ),
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider

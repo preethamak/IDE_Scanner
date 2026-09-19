@@ -611,6 +611,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "backend": "bubblewrap" if args.runtime else "external",
         "runtime_policy": "capability-gated-v1" if args.runtime else "external-evidence",
         "external_syscall_trace": external_syscall_trace,
+        "external_syscall_trace_available": bool(args.runtime and external_trace_available()),
         "runtime_required_count": len(runtime_trace_results),
         "runtime_traced_count": traced_runtime_count,
         "runtime_runs": runtime_runs,
