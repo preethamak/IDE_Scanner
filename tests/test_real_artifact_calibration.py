@@ -10,6 +10,8 @@ from ide_scanner.scanner import scan_targets
 
 BCAI_ARTIFACT = Path(__file__).parents[1] / "benchmarks" / "external" / "artifacts" / "bcai-rosetta-4.0.37" / "bcai-rosetta-4.0.37.vsix"
 BCAI_SHA256 = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
+CODE_RUNNER_ARTIFACT = Path(__file__).parents[1] / "benchmarks" / "external" / "artifacts" / "formulahendry-code-runner-0.12.2" / "code-runner-0.12.2.vsix"
+CODE_RUNNER_SHA256 = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
 SAFE_CONTROLS = (
     (
         "nrwl.angular-console",
@@ -45,6 +47,33 @@ SAFE_CONTROLS = (
 
 
 class RealArtifactCalibrationTests(unittest.TestCase):
+    @unittest.skipUnless(
+        CODE_RUNNER_ARTIFACT.is_file(),
+        "exact Code Runner VSIX is not provisioned; run the production-gate artifact setup first",
+    )
+    def test_code_runner_cve_is_blocked_as_a_vulnerability_not_malware(self) -> None:
+        """Reproduce the published CVE on the exact release without mislabelling it malware."""
+        report = scan_targets(
+            paths=[CODE_RUNNER_ARTIFACT],
+            online=False,
+            include_posture=False,
+        )
+
+        extension = report["extensions"][0]
+        vulnerability = next(
+            item for item in extension["findings"]
+            if item.get("rule_id") == "known-vulnerable-extension"
+        )
+        self.assertEqual(extension["artifact_hash"], CODE_RUNNER_SHA256)
+        self.assertEqual(extension["extension_id"], "formulahendry.code-runner")
+        self.assertEqual(extension["version"], "0.12.2")
+        self.assertEqual(extension["analysis_status"], "complete")
+        self.assertEqual(extension["decision"], "block")
+        self.assertEqual(extension["verdict"], "review")
+        self.assertEqual(extension["malware_score"], 0)
+        self.assertEqual(vulnerability["evidence"]["advisory_id"], "CVE-2025-65715")
+        self.assertEqual(vulnerability["evidence"]["artifact_sha256"], CODE_RUNNER_SHA256)
+
     @unittest.skipUnless(
         all(path.is_file() for _, _, path, _ in SAFE_CONTROLS),
         "exact safe-control VSIX artifacts are not provisioned; run the production-gate artifact setup first",

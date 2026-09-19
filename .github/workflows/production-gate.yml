@@ -40,6 +40,22 @@ jobs:
                   destination,
               )
               temporary.replace(target)
+          destination = Path("benchmarks/external/artifacts/formulahendry-code-runner-0.12.2")
+          destination.mkdir(parents=True, exist_ok=True)
+          target = destination / "code-runner-0.12.2.vsix"
+          expected = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing Code Runner calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_vsix(
+                  "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/formulahendry/vsextensions/code-runner/0.12.2/vspackage",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
           PY
       - name: Acquire exact safe-control inputs
         run: |
@@ -123,6 +139,42 @@ jobs:
             --report production-fixtures.json \
             --fail-on-regression \
             --out production-gate.json
+      - name: Scan exact vulnerability calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/formulahendry-code-runner-0.12.2/code-runner-0.12.2.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out code-runner-cve-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
+          report = json.load(open("code-runner-cve-calibration.json", encoding="utf-8"))
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one Code Runner calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Code Runner calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "formulahendry.code-runner" or extension.get("version") != "0.12.2":
+              raise SystemExit("Code Runner calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Code Runner calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "review":
+              raise SystemExit("CVE-backed Code Runner release was not blocked as reviewable vulnerability")
+          if extension.get("malware_score") != 0:
+              raise SystemExit("CVE-backed vulnerability was incorrectly labelled malware")
+          finding = next((item for item in extension.get("findings", []) if item.get("rule_id") == "known-vulnerable-extension"), None)
+          if not finding or finding.get("evidence", {}).get("advisory_id") != "CVE-2025-65715":
+              raise SystemExit("Exact CVE-backed calibration finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"], "advisory": "CVE-2025-65715"}))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -131,6 +183,7 @@ jobs:
             production-fixtures.json
             production-gate.json
             bcai-calibration.json
+            code-runner-cve-calibration.json
             benchmarks/external/artifacts/public-holdout-2026-09-18/*.vsix
             benchmarks/external/artifacts/code-spell-checker-4.5.6/*.vsix
             benchmarks/external/artifacts/vscode-yaml-1.24.0/*.vsix

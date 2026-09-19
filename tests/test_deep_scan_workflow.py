@@ -31,6 +31,9 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert 'extension.get("verdict") != "malicious"' in workflow
     assert 'item.get("rule_id") == "known-malicious-extension"' in workflow
     assert "bcai-calibration.json" in workflow
+    assert "code-runner-cve-calibration.json" in workflow
+    assert "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144" in workflow
+    assert 'item.get("rule_id") == "known-vulnerable-extension"' in workflow
     assert "Acquire exact safe-control inputs" in workflow
     assert "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3" in workflow
     assert "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44" in workflow
