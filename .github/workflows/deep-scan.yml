@@ -50,6 +50,10 @@ on:
           - "8"
           - "16"
           - "32"
+      scanner_build:
+        description: Exact scanner commit to check out and record in every report
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -68,6 +72,8 @@ jobs:
         worker: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.scanner_build || github.ref }}
       - name: Gate configured worker count
         id: worker_gate
         env:
@@ -126,7 +132,7 @@ jobs:
           SCAN_EXTENSION_VERSION: ${{ inputs.version }}
           SCAN_PURPOSE: ${{ inputs.scan_purpose }}
           SCAN_TARGET_PLATFORM: ${{ inputs.target_platform }}
-          SCAN_GITHUB_SHA: ${{ github.sha }}
+          SCAN_GITHUB_SHA: ${{ inputs.scanner_build || github.sha }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
         run: python scripts/enqueue_scan.py
       - name: Install analyzers
@@ -145,7 +151,7 @@ jobs:
         if: steps.worker_gate.outputs.enabled == 'true'
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
-          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+          IDE_SCANNER_BUILD_SHA: ${{ inputs.scanner_build || github.sha }}
           # Large packages are handled only on the isolated cloud worker. The
           # local CLI retains its conservative 50 MiB default.
           IDE_SCANNER_MAX_VSIX_BYTES: 268435456
@@ -165,7 +171,7 @@ jobs:
           SCAN_ENQUEUED_JOB_ID: ${{ steps.enqueue.outputs.job_id }}
           SCAN_JOBS_PER_WORKER: ${{ inputs.jobs_per_worker || '1' }}
           SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
-          SCAN_GITHUB_SHA: ${{ github.sha }}
+          SCAN_GITHUB_SHA: ${{ inputs.scanner_build || github.sha }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
           SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
         run: |

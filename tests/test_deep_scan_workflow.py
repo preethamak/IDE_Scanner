@@ -8,6 +8,9 @@ def test_worker_uses_supported_scanner_module_entrypoint() -> None:
     assert "python scripts/run_scan_worker.py" in workflow
     assert '"-m"' in worker
     assert '"ide_scanner"' in worker
+    assert "scanner_build" in workflow
+    assert "ref: ${{ inputs.scanner_build || github.ref }}" in workflow
+    assert "IDE_SCANNER_BUILD_SHA: ${{ inputs.scanner_build || github.sha }}" in workflow
     assert '"scan"' in worker
     assert "\n          ide-scanner scan" not in workflow
 
