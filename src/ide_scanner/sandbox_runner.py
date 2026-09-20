@@ -261,6 +261,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 "max_files": MAX_RUNTIME_FILES,
                 "max_total_bytes": MAX_RUNTIME_BYTES,
                 "max_file_bytes": MAX_RUNTIME_FILE_BYTES,
+                "max_memory_bytes": MAX_RUNTIME_MEMORY_BYTES,
                 "timeout_seconds_per_action": timeout_seconds,
             },
             "canary_files": canaries,
@@ -393,7 +394,11 @@ def _execute_planned_commands(
                 })
             if result.returncode != 0:
                 observations.append({
-                    "kind": "sandbox_error",
+                    # The lifecycle command itself failed, but that does not
+                    # invalidate the separate activation probe below. Keep
+                    # the failed command visible without downgrading the
+                    # whole dynamic provider to incomplete.
+                    "kind": "runtime_lifecycle_error",
                     "phase": "lifecycle",
                     "script": command["name"],
                     "returncode": result.returncode,
@@ -572,7 +577,11 @@ def _run_isolated(
         "--setenv", "IDE_SCANNER_SANDBOX", "1",
         "--setenv", "IDE_SCANNER_CANARY", CANARY_VALUE,
         "--setenv", "VSCODE_CWD", "/workspace",
-        "--setenv", "NODE_OPTIONS", "--require=/runner/node-runtime-hook.js",
+        # Node derives an extremely small V8 heap from the inherited virtual
+        # address-space cap unless an explicit bounded heap is supplied. That
+        # makes ordinary bundled extensions fail with an OOM before activate()
+        # runs, which is a harness failure rather than extension evidence.
+        "--setenv", "NODE_OPTIONS", "--max-old-space-size=512 --require=/runner/node-runtime-hook.js",
         "--chdir", cwd,
         "--",
         *command,
@@ -735,10 +744,25 @@ def _runtime_resource_limiter(timeout_seconds: int, *, max_file_bytes: int | Non
     def apply_limits() -> None:
         if resource is None:  # pragma: no cover - POSIX always imports it
             return
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (MAX_RUNTIME_MEMORY_BYTES, MAX_RUNTIME_MEMORY_BYTES))
-        except (OSError, ValueError):
-            pass
+        # RLIMIT_AS is a virtual-address cap. Node/V8 and native extension
+        # loaders reserve address space far beyond their resident memory; a
+        # 1.5 GiB RLIMIT_AS therefore makes ordinary bundled extensions fail
+        # with a false OOM at ~20 MiB. RLIMIT_DATA bounds process data without
+        # breaking those legitimate virtual reservations. Keep an AS fallback
+        # only for platforms that do not expose RLIMIT_DATA.
+        memory_limit = MAX_RUNTIME_MEMORY_BYTES
+        memory_limit_applied = False
+        if hasattr(resource, "RLIMIT_DATA"):
+            try:
+                resource.setrlimit(resource.RLIMIT_DATA, (memory_limit, memory_limit))
+                memory_limit_applied = True
+            except (OSError, ValueError):
+                pass
+        if not memory_limit_applied and hasattr(resource, "RLIMIT_AS"):
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
+            except (OSError, ValueError):
+                pass
         try:
             file_limit = min(max_file_bytes or MAX_RUNTIME_FILE_BYTES, MAX_RUNTIME_BYTES)
             resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
@@ -964,6 +988,41 @@ Module._load = function(request, parent, isMain) {
 function createVscodeStub() {
   const disposable = { dispose() {} };
   const noop = () => disposable;
+  const asyncNoop = async () => undefined;
+  const namespace = (seed = {}) => new Proxy(seed, {
+    get(target, property) {
+      if (property in target) return target[property];
+      target[property] = asyncNoop;
+      return target[property];
+    },
+  });
+  // Extensions commonly import VS Code's model classes at module load time,
+  // before activate() is reached. A missing class would make every runtime
+  // probe look like a sandbox failure even though the package was safely
+  // loaded and instrumented. These inert constructors keep the harness from
+  // inventing host behavior while allowing observation to proceed.
+  const inertClass = new Proxy(function(...args) {
+    if (new.target) Object.assign(this, args[0] && typeof args[0] === 'object' ? args[0] : {});
+    return disposable;
+  }, {
+    get(target, property) {
+      if (property in target) return target[property];
+      return 0;
+    },
+  });
+  const inertEnum = new Proxy({}, { get: () => 0 });
+  const fileSystemError = class extends Error {};
+  fileSystemError.FileNotFound = () => Object.assign(new fileSystemError('File not found'), { code: 'FileNotFound' });
+  fileSystemError.FileExists = () => Object.assign(new fileSystemError('File exists'), { code: 'FileExists' });
+  fileSystemError.NoPermissions = () => Object.assign(new fileSystemError('No permissions'), { code: 'NoPermissions' });
+  fileSystemError.FileIsADirectory = () => Object.assign(new fileSystemError('File is a directory'), { code: 'FileIsADirectory' });
+  fileSystemError.FileNotADirectory = () => Object.assign(new fileSystemError('File is not a directory'), { code: 'FileNotADirectory' });
+  inertClass.file = (p) => ({ fsPath: String(p), toString: () => String(p) });
+  inertClass.parse = (p) => ({ fsPath: String(p), toString: () => String(p) });
+  inertClass.joinPath = (base, ...parts) => ({
+    fsPath: [base && base.fsPath, ...parts].filter(Boolean).join('/'),
+    toString() { return this.fsPath; },
+  });
   const registerCommand = (name, handler) => {
     const command = String(name || '');
     record({kind: 'command_registered', command});
@@ -991,26 +1050,111 @@ function createVscodeStub() {
       onDidDispose: noop,
     };
   };
-  return {
+  const extensionList = new Proxy([], {
+    get(target, property) {
+      if (property === 'find') return () => ({ id: '', packageJSON: {} });
+      return target[property];
+    },
+  });
+  const vscode = {
     commands: { registerCommand, executeCommand },
     window: {
       showInformationMessage: async () => undefined,
       showWarningMessage: async () => undefined,
       showErrorMessage: async () => undefined,
       createWebviewPanel,
+      createOutputChannel: () => ({ append() {}, appendLine() {}, clear() {}, dispose() {}, hide() {}, show() {} }),
+      createStatusBarItem: () => disposable,
+      createTextEditorDecorationType: () => disposable,
+      registerTreeDataProvider: () => disposable,
+      registerWebviewViewProvider: () => disposable,
     },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: process.env.VSCODE_CWD || process.cwd() } }],
-      fs: {},
-      getConfiguration: () => ({ get: () => undefined, update: async () => undefined }),
+      textDocuments: [],
+      fs: namespace({
+        readFile: async () => Buffer.from('{}'),
+        stat: async () => ({ type: 1 }),
+      }),
+      getConfiguration: () => ({
+        get: () => undefined,
+        has: () => false,
+        inspect: () => undefined,
+        update: async () => undefined,
+      }),
       onDidChangeConfiguration: noop,
       onDidChangeTextDocument: noop,
-      onDidOpenTextDocument: noop
+      onDidOpenTextDocument: noop,
+      onDidCloseTextDocument: noop,
+      createFileSystemWatcher: () => ({ onDidCreate: noop, onDidChange: noop, onDidDelete: noop, dispose() {} }),
     },
-    Uri: { file: (p) => ({ fsPath: p, toString: () => String(p) }), parse: (p) => ({ fsPath: p, toString: () => String(p) }) },
-    ExtensionContext: class {},
-    Disposable: class { dispose() {} }
+    env: {
+      uiKind: 1,
+      appName: 'GuardRails Runtime',
+      language: 'en',
+      remoteName: undefined,
+      createTelemetryLogger: () => ({
+        logUsage() {},
+        logError() {},
+        dispose() {},
+      }),
+    },
+    extensions: {
+      getExtension: () => ({ packageJSON: {}, extensionPath: '/target', exports: {}, isActive: false, activate: async () => undefined }),
+      all: extensionList,
+    },
+    l10n: { t: (key) => String(key) },
+    ConfigurationTarget: inertEnum,
+    FileSystemError: fileSystemError,
+    languages: { getLanguages: async () => [], registerCompletionItemProvider: () => disposable },
+    Uri: inertClass,
+    ExtensionContext: inertClass,
+    Disposable: inertClass,
+    EventEmitter: class { constructor() { this.event = noop; } fire() {} dispose() {} },
+    CompletionItem: inertClass,
+    CodeAction: inertClass,
+    CodeLens: inertClass,
+    DocumentLink: inertClass,
+    Diagnostic: inertClass,
+    CallHierarchyItem: inertClass,
+    TypeHierarchyItem: inertClass,
+    SymbolInformation: inertClass,
+    InlayHint: inertClass,
+    CancellationError: inertClass,
+    Task: inertClass,
+    Position: inertClass,
+    Range: inertClass,
+    Location: inertClass,
+    TreeItem: inertClass,
+    ThemeIcon: inertClass,
+    ThemeColor: inertClass,
+    MarkdownString: inertClass,
+    TreeItemCollapsibleState: inertEnum,
+    TaskScope: inertEnum,
+    TaskGroup: inertEnum,
+    ViewColumn: inertEnum,
+    StatusBarAlignment: inertEnum,
+    CompletionItemKind: inertEnum,
+    SymbolKind: inertEnum,
+    DiagnosticSeverity: inertEnum,
+    FileType: inertEnum,
+    MarkupKind: inertEnum,
+    FoldingRangeKind: inertEnum,
+    SemanticTokenTypes: inertEnum,
+    UIKind: inertEnum,
+    CodeActionKind: inertEnum,
   };
+  // Keep unknown VS Code classes inert rather than failing module loading on
+  // an API that is irrelevant to the package's activation path. The fallback
+  // is intentionally top-level only; it does not fabricate filesystem,
+  // network, or process behavior inside the declared namespaces above.
+  return new Proxy(vscode, {
+    get(target, property) {
+      if (property in target) return target[property];
+      target[property] = inertClass;
+      return target[property];
+    },
+  });
 }
 
 record({kind: 'instrumentation_started', home: sandboxHome});
@@ -1030,10 +1174,13 @@ def _write_entrypoint_runner(path: Path, manifest: dict[str, Any]) -> None:
         return
     path.write_text(
         f"""
-const path = require('path');
-const {{ pathToFileURL }} = require('url');
-const target = '/target';
-const mainFile = path.resolve(target, {json.dumps(main)});
+    const path = require('path');
+    const {{ pathToFileURL }} = require('url');
+    const target = '/target';
+    // VSIX manifests in the wild sometimes write a leading slash even
+    // though the entrypoint is package-relative. Never let a manifest turn
+    // that spelling into a host-absolute path outside the mounted artifact.
+    const mainFile = path.resolve(target, {json.dumps(main.lstrip('/\\\\'))});
 async function run() {{
   let mod;
   try {{
@@ -1046,6 +1193,11 @@ async function run() {{
     subscriptions: [],
     extensionPath: target,
     extensionUri: {{ fsPath: target, toString: () => target }},
+    asAbsolutePath: (relativePath) => path.resolve(target, String(relativePath || '')),
+    extensionMode: 1,
+    extension: {{ id: 'guardrails.runtime', extensionPath: target, packageJSON: {{}} }},
+    globalState: {{ get: () => undefined, keys: () => [], update: async () => undefined }},
+    workspaceState: {{ get: () => undefined, keys: () => [], update: async () => undefined }},
     globalStorageUri: {{ fsPath: path.join(process.env.HOME || target, '.globalStorage') }},
     storageUri: {{ fsPath: path.join(process.env.HOME || target, '.workspaceStorage') }},
     secrets: {{ get: async () => undefined, store: async () => undefined, delete: async () => undefined }}

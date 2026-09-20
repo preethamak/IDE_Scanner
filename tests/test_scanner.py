@@ -2976,6 +2976,37 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("ERR_REQUIRE_ESM", source)
         self.assertIn("mod.default && mod.default.activate", source)
 
+    def test_entrypoint_runner_keeps_manifest_absolute_paths_inside_artifact(self) -> None:
+        with TemporaryDirectory() as tmp:
+            runner = Path(tmp) / "activate-entrypoint.js"
+            _write_entrypoint_runner(runner, {"main": "/dist/rn-extension"})
+            source = runner.read_text(encoding="utf-8")
+
+        self.assertIn('path.resolve(target, "dist/rn-extension")', source)
+
+    def test_runtime_lifecycle_error_is_contextual_not_coverage_failure(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"lifecycle","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            finding = _sandbox_observation_finding(
+                extension,
+                {
+                    "kind": "runtime_lifecycle_error",
+                    "phase": "lifecycle",
+                    "script": "postinstall",
+                    "returncode": 127,
+                },
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.rule_id, "runtime-lifecycle-error")
+        self.assertEqual(finding.to_dict()["effective_severity"], "INFO")
+
     def test_sandbox_runtime_exfil_requires_canary_in_network_body(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

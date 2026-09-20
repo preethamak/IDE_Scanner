@@ -3514,6 +3514,7 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         "unexpected_network": ("runtime-network-attempt", "INFO", 0.35, "Sandbox observed an attempted network request; isolation prevented the request from completing."),
         "process_exec": ("runtime-process-execution", "INFO", 0.35, "Sandbox observed process execution; this confirms capability, not malicious intent."),
         "filesystem_write": ("runtime-filesystem-write", "INFO", 0.3, "Sandbox observed a filesystem write; this confirms capability, not malicious intent."),
+        "runtime_lifecycle_error": ("runtime-lifecycle-error", "INFO", 0.4, "A lifecycle script exited unsuccessfully; activation coverage was still attempted."),
     }
     if kind == "runtime_timeout":
         rule_id, severity, confidence, summary = (

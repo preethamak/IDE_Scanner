@@ -508,6 +508,7 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "runtime-network-attempt": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed an attempted network request; isolation does not establish that it completed."),
     "runtime-process-execution": ("dynamic-sandbox", "weak", "INFO", "The sandbox observed process execution; this confirms capability, not malicious intent."),
     "sandbox-runtime-error": ("coverage", "weak", "INFO", "The runtime sandbox could not complete one execution phase, so dynamic coverage is incomplete."),
+    "runtime-lifecycle-error": ("dynamic-sandbox", "weak", "INFO", "A lifecycle script exited unsuccessfully; this does not by itself invalidate the activation probe."),
     "sandbox-runtime-timeout": ("coverage", "weak", "INFO", "The runtime sandbox timed out during one execution phase, so dynamic coverage is incomplete."),
     "observed-secret-read": ("dynamic-sandbox", "observed", "MEDIUM", "The sandbox observed reads of a synthetic canary or sensitive credential path."),
     "observed-secret-exfil": ("dynamic-sandbox", "observed", "HIGH", "The sandbox observed a synthetic canary or sensitive value in a network request body."),
