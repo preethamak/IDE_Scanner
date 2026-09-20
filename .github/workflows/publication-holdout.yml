@@ -61,6 +61,8 @@ jobs:
             -- /usr/bin/true
       - name: Install scanner and analyzers
         run: python -m pip install -e '.[analysis]'
+      - name: Provision verified runtime sidecars
+        run: python scripts/provision_runtime_dependencies.py --cache "$RUNNER_TEMP/guardrails-runtime-cache"
       - name: Verify scanner runtime preflight
         run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
       - name: Verify labelled holdout provenance
@@ -92,6 +94,7 @@ jobs:
       - name: Scan exact holdout with required runtime coverage
         env:
           IDE_SCANNER_BUILD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          GUARDRAILS_RUNTIME_CACHE: ${{ runner.temp }}/guardrails-runtime-cache
         run: |
           # Keep the accuracy gate serialized: exact third-party artifacts can
           # invoke semgrep and the runtime backend, and parallel workers can

@@ -148,6 +148,23 @@ network syscalls that Node-level monkey-patching can miss. The preflight checks
 both namespace creation and tracer availability; a worker without either is
 ineligible for deep-runtime publication.
 
+Some language-aware extensions require a client-side runtime that is not
+packaged in the VSIX. These dependencies are never downloaded inside the
+sandbox and are never replaced with stubs. A trusted worker-image step must
+provision the pinned, hash-verified sidecars first:
+
+```bash
+python scripts/provision_runtime_dependencies.py \
+  --cache /secure/guardrails-runtime-cache
+export GUARDRAILS_RUNTIME_CACHE=/secure/guardrails-runtime-cache
+```
+
+The current lock contains the Linux x86_64 Rust Analyzer release required by
+the frozen accuracy holdout. Missing, unsupported, or hash-mismatched sidecars
+make the corresponding dynamic provider incomplete, so the artifact cannot
+be published as a complete result. The same cache contract is used by the
+canonical scanner, the vendored CLI engine, and the website deep-scan worker.
+
 WASM is treated as executable capability rather than malware evidence. A
 `wasm-loader` finding is emitted only when executable text visibly loads or
 instantiates a packaged module; the module itself still requires the controlled

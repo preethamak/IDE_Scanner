@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .jsonc import loads_jsonc
+from .runtime_dependencies import provision_for_extension
 
 try:
     import resource
@@ -213,6 +214,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
         root = Path(tmp)
         target = _prepare_target(source, root / "target")
         manifest = _read_manifest(target / "package.json")
+        runtime_dependencies = provision_for_extension(target, manifest)
         extension_id = f"{manifest.get('publisher') or 'unknown'}.{manifest.get('name') or target.name}"
         home = root / "home"
         workspace = root / "workspace"
@@ -223,6 +225,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
         home.mkdir()
         workspace.mkdir()
         canaries = _write_canaries(home)
+        _seed_runtime_workspace(workspace, manifest)
         _write_node_hook(hook_file, trace_file, home)
         _write_entrypoint_runner(entrypoint_runner, manifest)
         observations: list[dict[str, Any]] = []
@@ -268,6 +271,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 "registered_commands": "invoke up to 50 handlers with a synthetic canary argument",
                 "webview_messages": "deliver one synthetic canary message to each registered handler",
             },
+            "runtime_dependencies": runtime_dependencies,
             "resource_limits": {
                 "max_files": MAX_RUNTIME_FILES,
                 "max_total_bytes": MAX_RUNTIME_BYTES,
@@ -331,6 +335,38 @@ def _write_canaries(home: Path) -> list[str]:
         file.write_text(f"IDE_SCANNER_CANARY={CANARY_VALUE}\n", encoding="utf-8")
         written.append(str(file))
     return written
+
+
+def _seed_runtime_workspace(workspace: Path, manifest: dict[str, Any]) -> None:
+    """Provide a minimal, non-secret project for language-aware extensions.
+
+    A VS Code extension is normally activated with the user's workspace open.
+    An empty synthetic workspace makes language servers that require project
+    discovery fail before they can be observed. Seed only the fixture that
+    the extension declares support for; the files contain no credentials,
+    network endpoints, or package dependencies.
+    """
+    languages: set[str] = set()
+    for contribution in (manifest.get("contributes") or {}).get("languages", []) or []:
+        if isinstance(contribution, dict):
+            language_id = contribution.get("id")
+            if isinstance(language_id, str):
+                languages.add(language_id.lower())
+    if "rust" not in languages:
+        return
+    source = workspace / "src" / "lib.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    (workspace / "Cargo.toml").write_text(
+        "[package]\n"
+        "name = \"guardrails_runtime_fixture\"\n"
+        "version = \"0.1.0\"\n"
+        "edition = \"2021\"\n",
+        encoding="utf-8",
+    )
+    source.write_text(
+        "pub fn guardrails_runtime_fixture() -> u32 { 42 }\n",
+        encoding="utf-8",
+    )
 
 
 def _planned_commands(manifest: dict[str, Any]) -> list[dict[str, str]]:
@@ -491,7 +527,7 @@ def _execute_entrypoint(
         }]
         observations[0] = {key: value for key, value in observations[0].items() if value is not None}
         if result.returncode != 0 and result.stderr:
-            observations[0]["stderr_excerpt"] = result.stderr[:500]
+            observations[0]["stderr_excerpt"] = result.stderr[-2000:]
         observations.extend(_observations_from_events(events, canary_files or []))
         observations.extend(external_observations)
         if not transport_ok:
@@ -1052,15 +1088,22 @@ function createVscodeStub() {
   codeActionKind.RefactorRewrite = new codeActionKind('refactor.rewrite');
   codeActionKind.Source = new codeActionKind('source');
   codeActionKind.SourceOrganizeImports = new codeActionKind('source.organizeImports');
-  inertClass.file = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
-  inertClass.parse = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
+  const makeFileUri = (p) => {
+    const fsPath = String(p);
+    return { fsPath, path: fsPath, scheme: 'file', toString: () => 'file://' + fsPath };
+  };
+  inertClass.file = makeFileUri;
+  inertClass.parse = (p) => makeFileUri(String(p).startsWith('file://') ? String(p).slice(7) : p);
+  inertClass.from = (...items) => ({
+    dispose() { for (const item of items) { try { item?.dispose?.(); } catch (_) {} } },
+  });
   inertClass.joinPath = (base, ...parts) => {
     const fsPath = require('path').posix.normalize([base && (base.fsPath || base.path), ...parts].filter(Boolean).join('/'));
     return {
       fsPath,
       path: fsPath,
       scheme: 'file',
-      toString() { return this.fsPath; },
+      toString() { return 'file://' + this.fsPath; },
     };
   };
   const registerCommand = (name, handler) => {
@@ -1164,7 +1207,8 @@ function createVscodeStub() {
         dispose() {},
       }),
       createOutputChannel: () => ({
-        append() {}, appendLine() {}, clear() {}, dispose() {}, hide() {}, show() {},
+        append() {}, appendLine() {},
+        clear() {}, dispose() {}, hide() {}, show() {},
         info() {}, error() {}, warn() {}, debug() {}, trace() {},
       }),
       createStatusBarItem: () => ({
@@ -1186,7 +1230,10 @@ function createVscodeStub() {
       visibleTextEditors: [],
     },
     workspace: {
-      workspaceFolders: [{ uri: { fsPath: process.env.VSCODE_CWD || process.cwd(), path: process.env.VSCODE_CWD || process.cwd(), scheme: 'file' } }],
+      workspaceFolders: [{
+        uri: makeFileUri(process.env.VSCODE_CWD || process.cwd()),
+        name: 'guardrails-runtime',
+      }],
       workspaceFile: undefined,
       isTrusted: true,
       textDocuments: [],
@@ -1244,7 +1291,40 @@ function createVscodeStub() {
     l10n: { t: (key) => String(key) },
     ConfigurationTarget: inertEnum,
     FileSystemError: fileSystemError,
-    languages: { getLanguages: async () => [], registerCompletionItemProvider: () => disposable },
+    languages: new Proxy({
+      getLanguages: async () => [],
+      registerCompletionItemProvider: () => disposable,
+      registerLanguageProvider: () => disposable,
+      registerCodeActionsProvider: () => disposable,
+      registerCodeLensProvider: () => disposable,
+      registerDefinitionProvider: () => disposable,
+      registerDeclarationProvider: () => disposable,
+      registerDocumentFormattingEditProvider: () => disposable,
+      registerDocumentRangeFormattingEditProvider: () => disposable,
+      registerDocumentHighlightProvider: () => disposable,
+      registerDocumentLinkProvider: () => disposable,
+      registerDocumentSymbolProvider: () => disposable,
+      registerHoverProvider: () => disposable,
+      registerImplementationProvider: () => disposable,
+      registerInlayHintsProvider: () => disposable,
+      registerInlineValuesProvider: () => disposable,
+      registerReferenceProvider: () => disposable,
+      registerRenameProvider: () => disposable,
+      registerSelectionRangeProvider: () => disposable,
+      registerSignatureHelpProvider: () => disposable,
+      registerTypeDefinitionProvider: () => disposable,
+      registerTypeHierarchyProvider: () => disposable,
+      registerWorkspaceSymbolProvider: () => disposable,
+      registerFoldingRangeProvider: () => disposable,
+      registerDocumentSemanticTokensProvider: () => disposable,
+      registerDocumentRangeSemanticTokensProvider: () => disposable,
+    }, {
+      get(target, property) {
+        if (property in target) return target[property];
+        if (String(property).startsWith('register')) return () => disposable;
+        return asyncNoop;
+      },
+    }),
     tests: {
       createTestController: () => ({
         items: { add() {}, delete() {}, replace() {}, forEach() {} },
@@ -1352,6 +1432,17 @@ def _write_entrypoint_runner(path: Path, manifest: dict[str, Any]) -> None:
     const path = require('path');
     const {{ pathToFileURL }} = require('url');
     const target = '/target';
+global.__guardrailsFinishing = false;
+process.on('uncaughtException', (err) => {{
+  if (global.__guardrailsFinishing) return;
+  console.error(err && err.stack ? err.stack : String(err));
+  process.exit(1);
+}});
+process.on('unhandledRejection', (err) => {{
+  if (global.__guardrailsFinishing) return;
+  console.error(err && err.stack ? err.stack : String(err));
+  process.exit(1);
+}});
     // VSIX manifests in the wild sometimes write a leading slash even
     // though the entrypoint is package-relative. Never let a manifest turn
     // that spelling into a host-absolute path outside the mounted artifact.
@@ -1386,6 +1477,10 @@ async function run() {{
   if (typeof activate === 'function') {{
     await Promise.resolve(activate(context));
   }}
+  // Activation has returned successfully. Background language servers may
+  // reject pending protocol requests when this disposable probe host is
+  // torn down; those teardown errors are not activation failures.
+  global.__guardrailsFinishing = true;
   if (global.__guardrailsProbe && typeof global.__guardrailsProbe.run === 'function') {{
     await global.__guardrailsProbe.run();
   }}

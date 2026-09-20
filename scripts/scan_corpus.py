@@ -641,6 +641,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "profile": args.profile,
                 "runtime_enabled": args.runtime,
                 "runtime_timeout_seconds": args.runtime_timeout if args.runtime else 0,
+                "external_syscall_trace": external_syscall_trace,
+                "external_syscall_trace_available": bool(args.runtime and external_trace_available()),
                 "target_count": len(targets),
                 "incomplete_count": sum(item.analysis_status != "complete" for item in extensions),
                 "manifest": str(args.manifest.resolve()) if args.manifest else "",
