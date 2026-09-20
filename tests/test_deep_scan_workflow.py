@@ -68,3 +68,12 @@ def test_worker_preserves_claimed_platform_artifact_for_90_days() -> None:
     assert "${{ runner.temp }}/ide-scanner-artifacts" in workflow
     assert "retention-days: 90" in workflow
     assert "retention-days: 7" not in workflow
+
+
+def test_worker_count_gate_is_step_scoped_for_github_matrix_evaluation() -> None:
+    workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "deep-scan.yml").read_text(encoding="utf-8")
+
+    assert "Gate configured worker count" in workflow
+    assert "WORKER_INDEX: ${{ matrix.worker }}" in workflow
+    assert "WORKER_COUNT: ${{ inputs.worker_count || '16' }}" in workflow
+    assert "if: ${{ matrix.worker <= fromJSON(inputs.worker_count || '16') }}" not in workflow
