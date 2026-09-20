@@ -555,8 +555,15 @@ def _execute_entrypoint(
         events, transport_ok = _verified_runtime_events(result.stderr)
         external_observations, external_trace_ok = _external_trace_observations(result, canary_files or [])
         succeeded = result.returncode == 0
+        # A controlled extension process can exit nonzero after it has already
+        # executed and emitted authenticated observations. Network denial,
+        # platform-specific child binaries, and optional host integrations are
+        # common examples. Preserve that exit as evidence instead of treating
+        # it as a harness failure; missing trace, invalid transport, and
+        # timeout remain hard coverage failures below.
+        executed_with_error = not succeeded and bool(events or external_observations)
         observations: list[dict[str, Any]] = [{
-            "kind": "entrypoint_executed" if succeeded else "sandbox_error",
+            "kind": "entrypoint_executed" if succeeded else ("runtime_entrypoint_error" if executed_with_error else "sandbox_error"),
             "phase": "activation" if not succeeded else None,
             "returncode": result.returncode,
             "stdout_bytes": len(result.stdout.encode("utf-8", errors="replace")),

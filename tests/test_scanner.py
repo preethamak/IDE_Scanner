@@ -576,6 +576,27 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations[0]["phase"], "activation")
         self.assertEqual(observations[0]["stderr_excerpt"], "activation failed")
 
+    def test_nonzero_entrypoint_with_authenticated_runtime_evidence_remains_covered(self) -> None:
+        failed = subprocess.CompletedProcess(
+            args=["node"], returncode=1, stdout="", stderr="activation reached a blocked optional integration",
+        )
+        with patch("ide_scanner.sandbox_runner._run_isolated", return_value=failed), patch(
+            "ide_scanner.sandbox_runner._verified_runtime_events", return_value=([{"kind": "network_attempt"}], True),
+        ), patch(
+            "ide_scanner.sandbox_runner._external_trace_observations", return_value=([{"kind": "process_exec"}], True),
+        ):
+            observations = _execute_entrypoint(
+                Path("/tmp/runner"),
+                Path("/tmp/home"),
+                Path("/tmp/workspace"),
+                5,
+                Path("/tmp/hook"),
+                Path("/tmp/trace"),
+                Path("/tmp/target"),
+            )
+        self.assertEqual(observations[0]["kind"], "runtime_entrypoint_error")
+        self.assertEqual(observations[0]["returncode"], 1)
+
     def test_runtime_without_node_entrypoint_does_not_create_a_false_failure(self) -> None:
         observations = _execute_entrypoint(
             Path("/tmp/runner"),
