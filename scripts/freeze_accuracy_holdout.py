@@ -80,6 +80,10 @@ def freeze_holdout(
             version=version,
             artifact_sha256=sha256,
         )
+        frozen_at = _parse_timestamp(source["holdout"]["frozen_at"], "holdout.frozen_at")
+        evidence_at = _parse_timestamp(item["label_evidence"].get("retrieved_at"), f"source artifact {index} label evidence retrieved_at")
+        if evidence_at > frozen_at:
+            raise ValueError(f"source artifact {index} label evidence was retrieved after the holdout was frozen")
 
         filename = f"{_safe_name(extension_id)}-{_safe_name(version)}-{sha256[:16]}.vsix"
         target = destination / filename
@@ -267,6 +271,17 @@ def _required_string(item: dict[str, Any], field: str, index: int) -> str:
 def _safe_name(value: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
     return name[:120] or "artifact"
+
+
+def _parse_timestamp(value: Any, label: str) -> datetime:
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include an explicit timezone")
+    return parsed
 
 
 def _sha256(path: Path) -> str:

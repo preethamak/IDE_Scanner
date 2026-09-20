@@ -130,6 +130,22 @@ class FreezeAccuracyHoldoutTests(unittest.TestCase):
             acquire.assert_called_once()
             self.assertEqual(next(output_dir.glob("*.vsix")).read_bytes(), payload)
 
+    def test_freezer_rejects_evidence_retrieved_after_freeze(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.json"
+            artifact = self._source_artifact("future.ext", "1.0.0", "known_safe", b"future-vsix")
+            artifact["label_evidence"]["retrieved_at"] = "2026-09-19T00:00:00Z"
+            source.write_text(json.dumps({
+                "schema_version": "guardrails.holdout-source.v1",
+                "corpus_id": "holdout",
+                "corpus_version": "future-evidence",
+                "holdout": {"status": "fresh-labeled", "label_source": "adjudication", "frozen_at": "2026-09-18T00:00:00Z"},
+                "artifacts": [artifact],
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "retrieved after the holdout was frozen"):
+                freeze_holdout(source, root / "artifacts", root / "corpus.json", root / "manifest.json")
+
     def test_freezer_tries_exact_artifact_mirrors_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

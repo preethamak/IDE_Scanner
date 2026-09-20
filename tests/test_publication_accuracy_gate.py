@@ -103,6 +103,7 @@ def holdout_corpus(source_type: str = "vsix") -> dict:
         "holdout": {
             "status": "fresh-labeled",
             "frozen_before_scan": True,
+            "frozen_at": "2026-09-18T00:00:00Z",
             "original_bytes_available": True,
             "label_source": "independent-adjudication-2026-09-18",
             "provenance": {
@@ -246,6 +247,19 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             corpus = holdout_corpus()
             corpus["artifacts"][0]["label_evidence"] = "operator says safe"
             with self.assertRaisesRegex(ValueError, "structured label evidence"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", corpus),
+                )
+
+    def test_rejects_evidence_retrieved_after_holdout_freeze(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = holdout_corpus()
+            corpus["holdout"]["frozen_at"] = "2026-09-18T00:00:00Z"
+            corpus["artifacts"][0]["label_evidence"]["retrieved_at"] = "2026-09-19T00:00:00Z"
+            with self.assertRaisesRegex(ValueError, "retrieved after the holdout was frozen"):
                 build_publication_accuracy_gate(
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", holdout_gate()),

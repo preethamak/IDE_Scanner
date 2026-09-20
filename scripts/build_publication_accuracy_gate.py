@@ -227,6 +227,7 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
     metadata = _object(corpus.get("holdout"))
     if metadata.get("status") != "fresh-labeled" or metadata.get("frozen_before_scan") is not True:
         raise ValueError("Holdout corpus must be frozen and labelled before scanning")
+    frozen_at = _parse_timestamp(metadata.get("frozen_at"), "Holdout corpus frozen_at")
     if metadata.get("original_bytes_available") is not True or not str(metadata.get("label_source") or "").strip():
         raise ValueError("Holdout corpus must retain original bytes and document its label source")
     artifacts = corpus.get("artifacts")
@@ -251,6 +252,12 @@ def _validate_holdout_corpus(corpus: dict[str, Any]) -> None:
             version=key[1],
             artifact_sha256=str(identity.get("sha256") or ""),
         )
+        evidence_at = _parse_timestamp(
+            _object(artifact.get("label_evidence")).get("retrieved_at"),
+            f"Holdout artifact {index} label evidence retrieved_at",
+        )
+        if evidence_at > frozen_at:
+            raise ValueError(f"Holdout artifact {index} label evidence was retrieved after the holdout was frozen")
         source_type = str(identity.get("source_type") or "")
         if source_type == "fixture_directory" or not source_type:
             raise ValueError(f"Holdout artifact {index} cannot use a synthetic fixture source")
@@ -330,6 +337,17 @@ def _validate_label_evidence(
         datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"Holdout artifact {index} label evidence retrieved_at must be ISO-8601") from exc
+
+
+def _parse_timestamp(value: Any, label: str) -> datetime:
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include an explicit timezone")
+    return parsed
 
 
 def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> dict[str, int | float]:
