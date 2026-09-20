@@ -1028,6 +1028,13 @@ function createVscodeStub() {
   fileSystemError.NoPermissions = () => Object.assign(new fileSystemError('No permissions'), { code: 'NoPermissions' });
   fileSystemError.FileIsADirectory = () => Object.assign(new fileSystemError('File is a directory'), { code: 'FileIsADirectory' });
   fileSystemError.FileNotADirectory = () => Object.assign(new fileSystemError('File is not a directory'), { code: 'FileNotADirectory' });
+  const markdownString = class {
+    constructor(value = '') { this.value = String(value); this.isTrusted = false; }
+    appendText(value) { this.value += String(value); return this; }
+    appendMarkdown(value) { this.value += String(value); return this; }
+    appendCodeblock(value) { this.value += String(value); return this; }
+    toString() { return this.value; }
+  };
   inertClass.file = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
   inertClass.parse = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
   inertClass.joinPath = (base, ...parts) => {
@@ -1075,6 +1082,29 @@ function createVscodeStub() {
   const vscode = {
     version: '1.99.0',
     commands: { registerCommand, executeCommand },
+    debug: {
+      activeDebugSession: undefined,
+      onDidReceiveDebugSessionCustomEvent: noop,
+      onDidStartDebugSession: noop,
+      onDidTerminateDebugSession: noop,
+      onDidChangeActiveDebugSession: noop,
+      registerDebugConfigurationProvider: () => disposable,
+      startDebugging: async () => false,
+      stopDebugging: async () => false,
+      addBreakpoints() {},
+      removeBreakpoints() {},
+    },
+    tasks: {
+      registerTaskProvider: () => disposable,
+      executeTask: async () => undefined,
+      fetchTasks: async () => [],
+    },
+    lm: {
+      registerTool: () => disposable,
+      registerLanguageModelChatProvider: () => disposable,
+      selectChatModels: async () => [],
+      onDidChangeChatModels: noop,
+    },
     window: {
       showInformationMessage: async () => undefined,
       showWarningMessage: async () => undefined,
@@ -1092,7 +1122,9 @@ function createVscodeStub() {
         append() {}, appendLine() {}, clear() {}, dispose() {}, hide() {}, show() {},
         info() {}, error() {}, warn() {}, debug() {}, trace() {},
       }),
-      createStatusBarItem: () => disposable,
+      createStatusBarItem: () => ({
+        text: '', tooltip: '', command: undefined, show() {}, hide() {}, dispose() {},
+      }),
       createTextEditorDecorationType: () => disposable,
       registerTreeDataProvider: () => disposable,
       registerWebviewViewProvider: () => disposable,
@@ -1109,7 +1141,9 @@ function createVscodeStub() {
       visibleTextEditors: [],
     },
     workspace: {
-      workspaceFolders: [{ uri: { fsPath: process.env.VSCODE_CWD || process.cwd() } }],
+      workspaceFolders: [{ uri: { fsPath: process.env.VSCODE_CWD || process.cwd(), path: process.env.VSCODE_CWD || process.cwd(), scheme: 'file' } }],
+      workspaceFile: undefined,
+      isTrusted: true,
       textDocuments: [],
       fs: namespace({
         readFile: async (uri) => {
@@ -1137,6 +1171,9 @@ function createVscodeStub() {
     env: {
       uiKind: 1,
       appName: 'GuardRails Runtime',
+      appRoot: '',
+      machineId: 'guardrails-runtime-machine',
+      sessionId: 'guardrails-runtime-session',
       language: 'en',
       remoteName: undefined,
       createTelemetryLogger: () => ({
@@ -1187,7 +1224,7 @@ function createVscodeStub() {
     TreeItem: inertClass,
     ThemeIcon: inertClass,
     ThemeColor: inertClass,
-    MarkdownString: inertClass,
+    MarkdownString: markdownString,
     TreeItemCollapsibleState: inertEnum,
     TaskScope: inertEnum,
     TaskGroup: inertEnum,
@@ -1206,13 +1243,15 @@ function createVscodeStub() {
     TestTag: inertClass,
     TestMessage: inertClass,
     CodeActionKind: inertEnum,
+    IndentAction: inertEnum,
+    TextEditorRevealType: inertEnum,
   };
   // Preserve the explicitly modeled APIs above while letting ordinary event
   // registration calls from host-heavy extensions remain inert. Missing host
   // events must not turn a safe package into a synthetic activation failure;
   // the capability hooks above still record filesystem, process, and network
   // behavior independently.
-  for (const api of ['window', 'workspace', 'languages', 'commands', 'extensions', 'env', 'l10n']) {
+  for (const api of ['window', 'workspace', 'languages', 'commands', 'extensions', 'env', 'l10n', 'debug', 'tasks', 'lm']) {
     vscode[api] = new Proxy(vscode[api], {
       get(target, property) {
         if (property in target) return target[property];
@@ -1269,14 +1308,19 @@ async function run() {{
   const context = {{
     subscriptions: [],
     extensionPath: target,
-    extensionUri: {{ fsPath: target, toString: () => target }},
+    extensionUri: {{ fsPath: target, path: target, scheme: 'file', toString: () => target }},
     asAbsolutePath: (relativePath) => path.resolve(target, String(relativePath || '')),
     extensionMode: 1,
     extension: {{ id: 'guardrails.runtime', extensionPath: target, packageJSON: {{}} }},
     globalState: {{ get: (_key, defaultValue) => defaultValue, keys: () => [], update: async () => undefined }},
     workspaceState: {{ get: (_key, defaultValue) => defaultValue, keys: () => [], update: async () => undefined }},
-    globalStorageUri: {{ fsPath: path.join(process.env.HOME || target, '.globalStorage') }},
-    storageUri: {{ fsPath: path.join(process.env.HOME || target, '.workspaceStorage') }},
+    environmentVariableCollection: {{
+      persistent: false,
+      description: undefined,
+      replace() {{}}, append() {{}}, prepend() {{}}, delete() {{}}, clear() {{}},
+    }},
+    globalStorageUri: {{ fsPath: path.join(process.env.HOME || target, '.globalStorage'), path: path.join(process.env.HOME || target, '.globalStorage'), scheme: 'file' }},
+    storageUri: {{ fsPath: path.join(process.env.HOME || target, '.workspaceStorage'), path: path.join(process.env.HOME || target, '.workspaceStorage'), scheme: 'file' }},
     secrets: {{ get: async () => undefined, store: async () => undefined, delete: async () => undefined }}
   }};
   const activate = mod && (mod.activate || (mod.default && mod.default.activate));
