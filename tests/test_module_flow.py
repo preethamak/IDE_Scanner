@@ -202,6 +202,26 @@ def test_comments_and_jsdoc_examples_are_not_import_graph_edges():
     assert module["imports"] == ["dist/live-helper"]
 
 
+def test_parser_diagnostic_strings_are_not_import_graph_edges():
+    module = module_summary(
+        "dist/web-extension.cjs",
+        'const message = "Only `import { x } from \'./module\'` is valid."; '
+        'const other = "require(\\\"./other\\\")"; '
+        "const live = require('./live');",
+    )
+
+    assert module["imports"] == ["dist/live"]
+
+
+def test_regex_literals_are_not_import_graph_edges():
+    module = module_summary(
+        "extension.js",
+        r"const example = /require\('\.\/fake'\)/; const live = require('./live');",
+    )
+
+    assert module["imports"] == ["live"]
+
+
 def test_typescript_declaration_import_is_not_executable_coverage():
     modules = [module_summary("extension.js", "import '../types/client.d.ts';")]
     coverage = module_flow_coverage(modules, {"extension.js"})
