@@ -1035,6 +1035,23 @@ function createVscodeStub() {
     appendCodeblock(value) { this.value += String(value); return this; }
     toString() { return this.value; }
   };
+  const codeActionKind = class {
+    constructor(value = '') { this.value = String(value); }
+    append(...parts) {
+      const suffix = parts.filter((part) => part !== undefined && part !== null && String(part) !== '')
+        .map((part) => String(part.value || part));
+      return new codeActionKind([this.value, ...suffix].filter(Boolean).join('.'));
+    }
+    toString() { return this.value; }
+  };
+  codeActionKind.Empty = new codeActionKind('');
+  codeActionKind.QuickFix = new codeActionKind('quickfix');
+  codeActionKind.Refactor = new codeActionKind('refactor');
+  codeActionKind.RefactorExtract = new codeActionKind('refactor.extract');
+  codeActionKind.RefactorInline = new codeActionKind('refactor.inline');
+  codeActionKind.RefactorRewrite = new codeActionKind('refactor.rewrite');
+  codeActionKind.Source = new codeActionKind('source');
+  codeActionKind.SourceOrganizeImports = new codeActionKind('source.organizeImports');
   inertClass.file = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
   inertClass.parse = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
   inertClass.joinPath = (base, ...parts) => {
@@ -1073,6 +1090,27 @@ function createVscodeStub() {
       onDidDispose: noop,
     };
   };
+  const createQuickInput = () => {
+    const listeners = new Map();
+    const event = (name) => (handler) => {
+      const callbacks = listeners.get(name) || [];
+      callbacks.push(handler);
+      listeners.set(name, callbacks);
+      return { dispose() {} };
+    };
+    const fire = (name, value) => {
+      for (const handler of listeners.get(name) || []) {
+        try { handler(value); } catch (_) {}
+      }
+    };
+    return {
+      title: '', step: 0, totalSteps: 0, placeholder: '', ignoreFocusOut: false,
+      items: [], activeItems: [], buttons: [], value: '', enabled: true, busy: false,
+      onDidTriggerButton: event('button'), onDidChangeSelection: event('selection'),
+      onDidHide: event('hide'), onDidAccept: event('accept'), onDidChangeValue: event('value'),
+      show() { setImmediate(() => fire('hide')); }, hide() { fire('hide'); }, dispose() {},
+    };
+  };
   const extensionList = new Proxy([], {
     get(target, property) {
       if (property === 'find') return () => ({ id: '', packageJSON: {} });
@@ -1080,6 +1118,11 @@ function createVscodeStub() {
     },
   });
   const vscode = {
+    // Keep CommonJS __importStar interop correct. Returning a synthetic
+    // truthy value for an unknown __esModule property makes bundled
+    // extensions skip their default namespace and then fail on
+    // `vscode.default.EventEmitter`-style imports.
+    __esModule: false,
     version: '1.99.0',
     commands: { registerCommand, executeCommand },
     debug: {
@@ -1110,6 +1153,8 @@ function createVscodeStub() {
       showWarningMessage: async () => undefined,
       showErrorMessage: async () => undefined,
       createWebviewPanel,
+      createQuickPick: createQuickInput,
+      createInputBox: createQuickInput,
       createTreeView: () => ({
         onDidExpandElement: noop,
         onDidCollapseElement: noop,
@@ -1156,9 +1201,19 @@ function createVscodeStub() {
         stat: async () => ({ type: 1 }),
       }),
       getConfiguration: () => ({
-        get: (_section, defaultValue) => defaultValue,
-        has: () => false,
-        inspect: () => undefined,
+      get: (_section, defaultValue) => defaultValue,
+      has: () => false,
+      inspect: (section) => ({
+        key: String(section || ''),
+        defaultValue: undefined,
+        globalValue: undefined,
+        workspaceValue: undefined,
+        workspaceFolderValue: undefined,
+        defaultLanguageValue: undefined,
+        globalLanguageValue: undefined,
+        workspaceLanguageValue: undefined,
+        workspaceFolderLanguageValue: undefined,
+      }),
         update: async () => undefined,
       }),
       onDidChangeConfiguration: noop,
@@ -1238,11 +1293,15 @@ function createVscodeStub() {
     FoldingRangeKind: inertEnum,
     SemanticTokenTypes: inertEnum,
     UIKind: inertEnum,
+    OverviewRulerLane: { Left: 1, Center: 2, Right: 4, Full: 7 },
+    NotebookCellStatusBarAlignment: { Left: 1, Right: 2 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+    ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
     LogLevel: inertEnum,
     TestRunProfileKind: inertEnum,
     TestTag: inertClass,
     TestMessage: inertClass,
-    CodeActionKind: inertEnum,
+    CodeActionKind: codeActionKind,
     IndentAction: inertEnum,
     TextEditorRevealType: inertEnum,
   };
@@ -1330,10 +1389,18 @@ async function run() {{
   if (global.__guardrailsProbe && typeof global.__guardrailsProbe.run === 'function') {{
     await global.__guardrailsProbe.run();
   }}
+  // An extension host normally stays alive for the lifetime of VS Code and
+  // may leave language servers or timers attached to the event loop. The
+  // scanner's contract is activation plus the bounded probe window, so end
+  // the host after those observations instead of treating a healthy
+  // long-lived child as an activation timeout. Bubblewrap's die-with-parent
+  // policy cleans up the child process tree with the host.
+  await new Promise((resolve) => setImmediate(resolve));
+  process.exit(0);
 }}
 run().catch((err) => {{
   console.error(err && err.stack ? err.stack : String(err));
-  process.exitCode = 1;
+  process.exit(1);
 }});
 """.strip()
         + "\n",

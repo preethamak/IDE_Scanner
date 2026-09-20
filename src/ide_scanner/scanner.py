@@ -3534,7 +3534,10 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         evidence_class = "weak"
     elif kind in mapping:
         rule_id, severity, confidence, summary = mapping[kind]
-        evidence_class = "weak" if kind in {"network_attempt", "unexpected_network", "process_exec", "filesystem_write", "canary_exposed"} else "observed"
+        evidence_class = "weak" if kind in {
+            "network_attempt", "unexpected_network", "process_exec", "filesystem_write",
+            "canary_exposed", "runtime_lifecycle_error",
+        } else "observed"
     else:
         return None
     evidence = dict(item)

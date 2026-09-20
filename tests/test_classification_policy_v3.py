@@ -42,6 +42,13 @@ class ClassificationPolicyV3Tests(unittest.TestCase):
         self.assertEqual((verdict, severity), ("clean", "LOW"))
         self.assertGreater(risk, 0)
 
+    def test_isolated_secret_read_is_low_without_exfiltration(self) -> None:
+        finding = self.finding("observed-secret-read", "observed", "MEDIUM")
+        verdict, _, _, severity, _, risk, _ = _classify_findings([finding])
+        self.assertEqual(finding_actionability(finding), "low")
+        self.assertEqual((verdict, severity), ("clean", "LOW"))
+        self.assertGreater(risk, 0)
+
     def test_unverified_binary_is_a_low_hardening_note(self) -> None:
         finding = self.finding("binary-without-origin", "provenance")
         verdict, _, _, severity, _, _, _ = _classify_findings([finding])
