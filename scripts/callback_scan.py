@@ -25,8 +25,9 @@ TRANSIENT_UPSTREAM_MARKERS = (
 USER_AGENT = "ide-scanner-github-actions/1"
 
 
-def main() -> int:
-    bundle_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    bundle_path = Path(argv[0]) if argv else None
     target_platform = os.environ.get("SCAN_TARGET_PLATFORM", "").strip().lower()
     if target_platform and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", target_platform):
         raise RuntimeError("target platform is invalid")

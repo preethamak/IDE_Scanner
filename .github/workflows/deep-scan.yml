@@ -39,6 +39,17 @@ on:
           - "4"
           - "8"
           - "16"
+      jobs_per_worker:
+        description: Maximum queued extensions drained by each isolated worker
+        required: false
+        type: choice
+        default: "1"
+        options:
+          - "1"
+          - "4"
+          - "8"
+          - "16"
+          - "32"
 
 permissions:
   contents: read
@@ -47,7 +58,7 @@ jobs:
   scan:
     name: Deep Scan worker ${{ matrix.worker }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
       GUARDRAILS_RUNTIME_BWRAP_SUDO: "1"
@@ -118,31 +129,20 @@ jobs:
           SCAN_GITHUB_SHA: ${{ github.sha }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
         run: python scripts/enqueue_scan.py
-      - name: Claim queued scan
-        id: claim
-        if: steps.worker_gate.outputs.enabled == 'true'
-        env:
-          # Only the canonical apex host. abscissa.dev is canonical; vercel.app aliases redirect
-          # here, and urllib refuses to follow a 307 on POST, crashing the claim.
-          SCAN_CLAIM_URLS: https://abscissa.dev/api/internal/scan-jobs/claim
-          SCAN_RUNNER_ID: github-actions-${{ github.run_id }}-${{ matrix.worker }}
-          SCAN_JOB_ID: ${{ inputs.job_id || steps.enqueue.outputs.job_id }}
-          SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
-          SCAN_GITHUB_SHA: ${{ github.sha }}
-          SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
-        run: python scripts/claim_scan.py
       - name: Install analyzers
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true'
+        if: steps.worker_gate.outputs.enabled == 'true'
         run: python -m pip install -e '.[analysis]'
       - name: Provision verified runtime sidecars
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true'
+        if: steps.worker_gate.outputs.enabled == 'true'
         run: python scripts/provision_runtime_dependencies.py --cache "$RUNNER_TEMP/guardrails-runtime-cache"
       - name: Verify scanner runtime preflight
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true'
+        if: steps.worker_gate.outputs.enabled == 'true'
         run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
-      - name: Scan exact artifact
-        id: analyze
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true'
+      - name: Validate Semgrep ruleset
+        if: steps.worker_gate.outputs.enabled == 'true'
+        run: semgrep --validate --config rules/semgrep/vscode-security.yml
+      - name: Drain queued scans in isolated worker
+        if: steps.worker_gate.outputs.enabled == 'true'
         env:
           IDE_SCANNER_REQUIRE_PROVIDERS: semgrep,yara,dependency_intelligence
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
@@ -155,50 +155,28 @@ jobs:
           # report exposes the mismatch and keeps the observed SHA-256 as the
           # immutable artifact identity. Local/CLI scans remain fail-closed.
           IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH: "1"
-          SCAN_TARGET_PLATFORM: ${{ steps.claim.outputs.target_platform }}
           IDE_SCANNER_ARTIFACT_STORE: ${{ runner.temp }}/ide-scanner-artifacts
+          IDE_SCANNER_RUNTIME_TIMEOUT: "20"
+          IDE_SCANNER_WORKER_ARTIFACTS: ${{ runner.temp }}/ide-scanner-worker-artifacts
           GUARDRAILS_RUNTIME_CACHE: ${{ runner.temp }}/guardrails-runtime-cache
+          SCAN_CLAIM_URLS: https://abscissa.dev/api/internal/scan-jobs/claim
+          SCAN_RUNNER_ID: github-actions-${{ github.run_id }}-${{ matrix.worker }}
+          SCAN_JOB_ID: ${{ inputs.job_id }}
+          SCAN_ENQUEUED_JOB_ID: ${{ steps.enqueue.outputs.job_id }}
+          SCAN_JOBS_PER_WORKER: ${{ inputs.jobs_per_worker || '1' }}
+          SCAN_GITHUB_RUN_ID: ${{ github.run_id }}
+          SCAN_GITHUB_SHA: ${{ github.sha }}
+          SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
+          SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
         run: |
-          semgrep --validate --config rules/semgrep/vscode-security.yml
-          target_platform_args=()
-          if [[ -n "$SCAN_TARGET_PLATFORM" ]]; then
-            target_platform_args=(--target-platform "$SCAN_TARGET_PLATFORM")
-          fi
-          python -m ide_scanner scan \
-            --extension-id '${{ steps.claim.outputs.extension_id }}' \
-            --version '${{ steps.claim.outputs.version }}' \
-            "${target_platform_args[@]}" \
-            --profile deep \
-            --online \
-            --runtime \
-            --runtime-timeout 20 \
-            --format bundle.json \
-            --include-raw-evidence \
-            --output scan-bundle.json
-      - name: Submit signed result
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true' && success()
-        env:
-          SCAN_JOB_ID: ${{ steps.claim.outputs.job_id }}
-          SCAN_CALLBACK_URL: ${{ steps.claim.outputs.callback_url }}
-          SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
-          SCAN_TARGET_PLATFORM: ${{ steps.claim.outputs.target_platform }}
-        run: python scripts/callback_scan.py scan-bundle.json
-      - name: Report workflow failure
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true' && steps.analyze.outcome == 'failure'
-        env:
-          SCAN_JOB_ID: ${{ steps.claim.outputs.job_id }}
-          SCAN_CALLBACK_URL: ${{ steps.claim.outputs.callback_url }}
-          SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
-          SCAN_ERROR: Deep Scan failed before a canonical report was produced.
-          SCAN_TARGET_PLATFORM: ${{ steps.claim.outputs.target_platform }}
-        run: python scripts/callback_scan.py
+          python scripts/run_scan_worker.py
       - uses: actions/upload-artifact@v4
-        if: steps.worker_gate.outputs.enabled == 'true' && steps.claim.outputs.has_job == 'true' && always()
+        if: steps.worker_gate.outputs.enabled == 'true' && always()
         with:
-          name: deep-scan-${{ steps.claim.outputs.job_id }}
+          name: deep-scan-worker-${{ matrix.worker }}
           path: |
-            scan-bundle.json
             runtime-preflight.json
             ${{ runner.temp }}/ide-scanner-artifacts
+            ${{ runner.temp }}/ide-scanner-worker-artifacts
           retention-days: 90
           if-no-files-found: ignore
