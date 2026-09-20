@@ -1071,27 +1071,27 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
 
 
 def _runtime_required_for_report(report: ExtensionReport) -> bool:
-    """Require runtime coverage for every executable extension entrypoint.
+    """Require dynamic coverage only when it can answer a security question.
 
-    A declared ``main``/``browser`` entrypoint is executable behavior even when
-    static capability extraction does not recognize a sensitive API. Requiring
-    activation coverage for it prevents a missed capability label from turning
-    an unseen runtime path into a false ``not-applicable`` result. Truly
-    non-executable packages such as themes remain policy-gated. The explicit
-    capability set is retained for artifacts that ship executable behavior
-    without a declared entrypoint, such as native or WASM payloads.
+    A VS Code extension can have a JavaScript activation entrypoint without
+    requesting sensitive powers. Running every such entrypoint in the sandbox
+    creates noise and incorrectly treats ordinary themes, UI helpers, and
+    similarly low-power packages as runtime-required. Static analysis still
+    covers their executable files; the dynamic provider records them as
+    ``not-applicable`` under the capability policy.
+
+    Sensitive capabilities remain runtime-required even when no activation
+    entrypoint is declared, which covers native/WASM payloads and lifecycle
+    behavior discovered from the package. This is deliberately capability
+    based rather than name based: a theme carrying a hidden native payload or
+    network/process behavior still enters the required runtime path.
     """
     capability_ids = {
         str(item.get("id") or "")
         for item in report.capabilities
         if isinstance(item, dict)
     }
-    coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
-    entrypoints = coverage.get("declared_entrypoints")
-    return bool(
-        (isinstance(entrypoints, list) and any(str(item).strip() for item in entrypoints))
-        or capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES
-    )
+    return bool(capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES)
 
 
 def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:

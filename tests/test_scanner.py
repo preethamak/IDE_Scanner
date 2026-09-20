@@ -1725,7 +1725,7 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("wasm-loader", {finding.rule_id for finding in report.findings})
         self.assertIn("wasm_runtime", {str(item.get("id")) for item in report.capabilities})
 
-    def test_declared_activation_entrypoint_requires_runtime_even_without_sensitive_api_labels(self) -> None:
+    def test_declared_activation_entrypoint_without_sensitive_labels_is_runtime_not_applicable(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "extension"
             root.mkdir()
@@ -1738,6 +1738,11 @@ class ScannerTests(unittest.TestCase):
             report = scan_extension(root)
 
         self.assertTrue(report.analysis_coverage["declared_entrypoints"])
+        self.assertFalse(_runtime_required_for_report(report))
+
+    def test_declared_activation_entrypoint_with_network_label_requires_runtime(self) -> None:
+        report = MagicMock()
+        report.capabilities = [{"id": "network", "evidence": ["extension.js"]}]
         self.assertTrue(_runtime_required_for_report(report))
 
     def test_known_bad_hash_feed_is_authoritative_malware(self) -> None:
