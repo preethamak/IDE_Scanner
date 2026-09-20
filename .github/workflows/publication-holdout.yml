@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 45
     env:
       GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
+      GUARDRAILS_RUNTIME_BWRAP_SUDO: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +36,7 @@ jobs:
           strace --version
       - name: Verify runtime namespace isolation
         run: |
-          bwrap \
+          sudo -n bwrap \
             --die-with-parent \
             --new-session \
             --unshare-net \

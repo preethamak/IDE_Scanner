@@ -42,6 +42,7 @@ MAX_RUNTIME_OUTPUT_BYTES = 4 * 1024 * 1024
 RUNTIME_OUTPUT_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_TRACE_BYTES = 8 * 1024 * 1024
 EXTERNAL_TRACE_ENV = "GUARDRAILS_RUNTIME_EXTERNAL_TRACE"
+RUNTIME_BWRAP_SUDO_ENV = "GUARDRAILS_RUNTIME_BWRAP_SUDO"
 RUNTIME_EVENT_HANDSHAKE = "GUARDRAILS_RUNTIME_HANDSHAKE_V1:"
 RUNTIME_EVENT_PREFIX = "GUARDRAILS_RUNTIME_EVENT_V1:"
 RUNTIME_EVENT_OUTPUT_LIMIT_MARKER = "GUARDRAILS_RUNTIME_EVENT_OUTPUT_LIMIT"
@@ -64,6 +65,15 @@ def _external_trace_requested() -> bool:
 
 def _external_trace_executable() -> str | None:
     return shutil.which("strace")
+
+
+def _bwrap_command() -> list[str]:
+    """Return Bubblewrap with an explicit managed-runner privilege boundary."""
+    if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+        if shutil.which("sudo") is None:
+            raise ValueError(f"{RUNTIME_BWRAP_SUDO_ENV}=1 requires sudo for the Bubblewrap namespace boundary.")
+        return ["sudo", "-n", "bwrap"]
+    return ["bwrap"]
 
 
 def external_trace_available() -> bool:
@@ -103,7 +113,7 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
         }
 
     command = [
-        "bwrap",
+        *_bwrap_command(),
         "--die-with-parent",
         "--new-session",
         "--unshare-net",
@@ -134,8 +144,13 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
         with tempfile.NamedTemporaryFile(prefix="guardrails-preflight-", suffix=".strace") as handle:
             external_trace_path = Path(handle.name)
     if _external_trace_requested() and external_trace:
+        trace_prefix = [external_trace]
+        if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+            if shutil.which("sudo") is None:
+                raise ValueError(f"{RUNTIME_BWRAP_SUDO_ENV}=1 requires sudo for the Bubblewrap namespace boundary.")
+            trace_prefix = ["sudo", "-n", external_trace]
         command = [
-            external_trace,
+            *trace_prefix,
             "-f",
             "-qq",
             "-o",
@@ -586,7 +601,7 @@ def _run_isolated(
             "Executable sandbox mode requires the Bubblewrap (bwrap) OS isolation backend; execution was refused."
         )
     args = [
-        "bwrap",
+        *_bwrap_command(),
         "--die-with-parent",
         "--new-session",
         "--unshare-net",
@@ -641,8 +656,13 @@ def _run_isolated(
                 f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence; execution was refused."
             )
         external_trace_prefix = trace_file.parent / f"{trace_file.name}.{time.monotonic_ns()}.strace"
+        trace_prefix = [external_trace]
+        if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+            if shutil.which("sudo") is None:
+                raise ValueError(f"{RUNTIME_BWRAP_SUDO_ENV}=1 requires sudo for the Bubblewrap namespace boundary.")
+            trace_prefix = ["sudo", "-n", external_trace]
         args = [
-            external_trace,
+            *trace_prefix,
             "-f",
             "-qq",
             "-s",

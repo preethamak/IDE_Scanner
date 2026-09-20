@@ -35,7 +35,7 @@ jobs:
                   raise SystemExit(f"Existing BCAI calibration artifact has SHA-256 {digest}, expected {expected}")
           else:
               temporary = acquire_https_vsix(
-                  "https://open-vsx.org/api/bingcha/bcai-tools/4.0.37/file/bingcha.bcai-tools-4.0.37.vsix",
+                  "https://openvsx.eclipsecontent.org/bingcha/bcai-tools/4.0.37/bingcha.bcai-tools-4.0.37.vsix",
                   expected,
                   destination,
               )
@@ -51,7 +51,7 @@ jobs:
                   raise SystemExit(f"Existing Nx Console calibration artifact has SHA-256 {digest}, expected {expected}")
           else:
               temporary = acquire_https_vsix(
-                  "https://github.com/trailofbits/vsix-zoo/raw/refs/heads/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix",
+                  "https://raw.githubusercontent.com/trailofbits/vsix-zoo/refs/heads/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix",
                   expected,
                   destination,
               )
@@ -248,6 +248,7 @@ jobs:
     timeout-minutes: 20
     env:
       GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
+      GUARDRAILS_RUNTIME_BWRAP_SUDO: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -259,7 +260,7 @@ jobs:
           sudo apt-get install -y bubblewrap strace
           bwrap --version
           strace --version
-          bwrap \
+          sudo -n bwrap \
             --die-with-parent \
             --new-session \
             --unshare-net \

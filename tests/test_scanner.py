@@ -21,6 +21,7 @@ from ide_scanner.registry import _marketplace_metadata_findings, _repository_met
 from ide_scanner.report_bundle import build_report_bundle, iter_report_events, write_report_bundle
 from ide_scanner.sandbox_runner import (
     EXTERNAL_TRACE_ENV,
+    RUNTIME_BWRAP_SUDO_ENV,
     RUNTIME_EVENT_HANDSHAKE,
     RUNTIME_EVENT_OUTPUT_LIMIT_MARKER,
     RUNTIME_EVENT_PREFIX,
@@ -2952,6 +2953,16 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("--unshare-net", command)
         self.assertIn("--unshare-pid", command)
         self.assertEqual(command[-1], "/bin/true")
+
+    def test_sandbox_preflight_can_delegate_namespace_creation_to_passwordless_sudo(self) -> None:
+        completed = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.dict("os.environ", {RUNTIME_BWRAP_SUDO_ENV: "1"}), patch(
+            "ide_scanner.sandbox_runner.shutil.which", return_value="/usr/bin/tool",
+        ), patch("ide_scanner.sandbox_runner.subprocess.run", return_value=completed) as run:
+            result = sandbox_preflight()
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(run.call_args.args[0][:3], ["sudo", "-n", "bwrap"])
 
     def test_sandbox_preflight_fails_closed_when_namespace_creation_is_denied(self) -> None:
         completed = MagicMock(returncode=1, stdout="", stderr="Operation not permitted")
