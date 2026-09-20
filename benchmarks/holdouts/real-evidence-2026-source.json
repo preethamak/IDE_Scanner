@@ -1,11 +1,11 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.19.8",
+  "corpus_version": "2026.09.21.9",
   "holdout": {
     "status": "fresh-labeled",
     "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisories, MalwareBazaar sample records, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
-    "frozen_at": "2026-09-19T00:00:00Z"
+    "frozen_at": "2026-09-21T00:00:00Z"
   },
   "advisory_snapshot": {
     "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
@@ -17,7 +17,7 @@
       "extension_id": "nrwl.angular-console",
       "version": "18.94.0",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.94.0/vspackage",
+      "artifact_url": "https://github.com/nrwl/nx-console/releases/download/vscode-v18.94.0/nx-console.vsix",
       "local_path": "../external/artifacts/public-holdout-2026-09-18/nrwl-angular-console-18.94.0.vsix",
       "sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3",
       "label_evidence": {
@@ -35,7 +35,7 @@
       "extension_id": "streetsidesoftware.code-spell-checker",
       "version": "4.5.6",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/streetsidesoftware/vsextensions/code-spell-checker/4.5.6/vspackage",
+      "artifact_url": "https://github.com/streetsidesoftware/vscode-spell-checker/releases/download/code-spell-checker-v4.5.6/code-spell-checker-4.5.6.vsix",
       "local_path": "../external/artifacts/code-spell-checker-4.5.6/code-spell-checker-4.5.6.vsix",
       "sha256": "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44",
       "label_evidence": {
@@ -53,7 +53,7 @@
       "extension_id": "redhat.vscode-yaml",
       "version": "1.24.0",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/vscode-yaml/1.24.0/vspackage",
+      "artifact_url": "https://github.com/redhat-developer/vscode-yaml/releases/download/1.24.0/vscode-yaml-1.24.0-298.vsix",
       "local_path": "../external/artifacts/vscode-yaml-1.24.0/vscode-yaml-1.24.0-298.vsix",
       "sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168",
       "label_evidence": {
@@ -71,7 +71,7 @@
       "extension_id": "rust-lang.rust-analyzer",
       "version": "0.3.2971",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/rust-lang/vsextensions/rust-analyzer/0.3.2971/vspackage",
+      "artifact_url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-no-server.vsix",
       "local_path": "../external/artifacts/rust-analyzer-no-server-2026-07-13/rust-analyzer-no-server.vsix",
       "sha256": "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa",
       "label_evidence": {
@@ -182,9 +182,12 @@
       "extension_id": "ms-python.python",
       "version": "2026.5.2026070801",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/ms-python/vsextensions/python/2026.5.2026070801/vspackage",
-      "local_path": "../external/artifacts/public-holdout-2026-09-18/ms-python.python-2026.5.2026070801.vsix",
-      "sha256": "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa",
+      "artifact_url": "https://packages.chocolatey.org/vscode-python.2026.5.2026070801.nupkg",
+      "archive_source": {
+        "archive_sha256": "9c6d6337b7476c2cb26648203537f66e56db020165f5b8a99899f3d8783ebd91",
+        "member": "tools/ms-python.python-2026.5.2026070801.vsix"
+      },
+      "sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8",
       "label_evidence": {
         "source_type": "independent_review",
         "source_url": "https://marketplace.visualstudio.com/items?itemName=ms-python.python",
@@ -193,7 +196,7 @@
         "evidence_scope": "exact-artifact",
         "extension_id": "ms-python.python",
         "version": "2026.5.2026070801",
-        "artifact_sha256": "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa"
+        "artifact_sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8"
       }
     }
   ]

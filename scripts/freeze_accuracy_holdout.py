@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from ide_scanner.artifact_input import ArtifactInputError, acquire_https_vsix  # noqa: E402
+from ide_scanner.artifact_input import ArtifactInputError, acquire_https_archive_member, acquire_https_vsix  # noqa: E402
 from scripts.build_publication_accuracy_gate import LABELS, SHA256_RE, _validate_label_evidence  # noqa: E402
 from scripts.verify_holdout_provenance import verify_holdout_provenance  # noqa: E402
 
@@ -96,6 +96,7 @@ def freeze_holdout(
             local_path=local_path,
             source_root=Path(source_path).resolve().parent,
             artifact_vault=vault_root,
+            archive_source=item.get("archive_source"),
         )
         artifacts.append({
             "extension_id": extension_id,
@@ -193,6 +194,7 @@ def _acquire_or_verify(
     local_path: Any = None,
     source_root: Path | None = None,
     artifact_vault: Path | None = None,
+    archive_source: Any = None,
 ) -> None:
     if target.exists():
         if target.is_file() and _sha256(target) == expected_sha256:
@@ -224,7 +226,18 @@ def _acquire_or_verify(
     failures: list[str] = []
     for url in urls:
         try:
-            temporary = acquire_https_vsix(url, expected_sha256, destination)
+            if archive_source is None:
+                temporary = acquire_https_vsix(url, expected_sha256, destination)
+            else:
+                if not isinstance(archive_source, dict):
+                    raise ArtifactInputError("archive_source must be an object")
+                temporary = acquire_https_archive_member(
+                    url,
+                    str(archive_source.get("archive_sha256") or ""),
+                    str(archive_source.get("member") or ""),
+                    expected_sha256,
+                    destination,
+                )
         except ArtifactInputError as exc:
             failures.append(f"{url}: {exc}")
             continue

@@ -255,6 +255,12 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
         entrypoint = _extension_main(manifest)
         home.mkdir()
         workspace.mkdir()
+        if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+            # A privileged Bubblewrap process maps itself to UID 65534 before
+            # resolving bind sources. Make only this disposable scan tree
+            # traversable so the mapped child can read its prepared inputs.
+            for directory in (root, root / "target", home, workspace):
+                directory.chmod(0o755)
         canaries = _write_canaries(home)
         _seed_runtime_workspace(workspace, manifest)
         _write_node_hook(hook_file, trace_file, home)
