@@ -27,7 +27,7 @@ def main() -> int:
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
     claim_scan.urllib.request.install_opener(
-        urllib_redirect_handler()
+        claim_scan.urllib.request.build_opener(urllib_redirect_handler())
     )
 
     exact_job_id = os.environ.get("SCAN_JOB_ID", "").strip() or None
