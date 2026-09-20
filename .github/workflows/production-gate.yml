@@ -23,7 +23,7 @@ jobs:
           mkdir -p benchmarks/external/artifacts/bcai-rosetta-4.0.37
           python - <<'PY'
           from pathlib import Path
-          from ide_scanner.artifact_input import acquire_https_vsix
+          from ide_scanner.artifact_input import acquire_https_archive_member, acquire_https_vsix
 
           destination = Path("benchmarks/external/artifacts/bcai-rosetta-4.0.37")
           target = destination / "bcai-rosetta-4.0.37.vsix"
@@ -60,14 +60,17 @@ jobs:
           destination.mkdir(parents=True, exist_ok=True)
           target = destination / "code-runner-0.12.2.vsix"
           expected = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
+          package_sha256 = "395ce4df59cb244028110ec6e5921220c55e161164c37e83271d978cd236cb7b"
           if target.exists():
               import hashlib
               digest = hashlib.sha256(target.read_bytes()).hexdigest()
               if digest != expected:
                   raise SystemExit(f"Existing Code Runner calibration artifact has SHA-256 {digest}, expected {expected}")
           else:
-              temporary = acquire_https_vsix(
-                  "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/formulahendry/vsextensions/code-runner/0.12.2/vspackage",
+              temporary = acquire_https_archive_member(
+                  "https://packages.chocolatey.org/vscode-code-runner.0.12.2.nupkg",
+                  package_sha256,
+                  "tools/formulahendry.code-runner-0.12.2.vsix",
                   expected,
                   destination,
               )

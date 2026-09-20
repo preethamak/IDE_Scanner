@@ -112,8 +112,19 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
             "error": f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence, but strace is not installed.",
         }
 
+    try:
+        bwrap_command = _bwrap_command()
+    except ValueError as exc:
+        return {
+            "schema_version": "guardrails.sandbox-preflight.v1",
+            "status": "unavailable",
+            "backend": "bubblewrap",
+            "execution": "controlled-bubblewrap",
+            "isolation": {"network": "disabled", "process": "isolated-pid-namespace"},
+            "error": str(exc),
+        }
     command = [
-        *_bwrap_command(),
+        *bwrap_command,
         "--die-with-parent",
         "--new-session",
         "--unshare-net",
@@ -140,9 +151,12 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
         "/bin/true",
     ]
     external_trace_path: Path | None = None
+    external_trace_dir: Path | None = None
     if _external_trace_requested() and external_trace:
-        with tempfile.NamedTemporaryFile(prefix="guardrails-preflight-", suffix=".strace") as handle:
-            external_trace_path = Path(handle.name)
+        external_trace_dir = Path(tempfile.mkdtemp(prefix="guardrails-preflight-"))
+        external_trace_path = external_trace_dir / "preflight.strace"
+        external_trace_path.touch(mode=0o666)
+        os.chmod(external_trace_path, 0o666)
     if _external_trace_requested() and external_trace:
         trace_prefix = [external_trace]
         if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -189,6 +203,8 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
     finally:
         if external_trace_path is not None:
             external_trace_path.unlink(missing_ok=True)
+        if external_trace_dir is not None:
+            shutil.rmtree(external_trace_dir, ignore_errors=True)
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "Bubblewrap exited unsuccessfully").strip()
@@ -656,6 +672,8 @@ def _run_isolated(
                 f"{EXTERNAL_TRACE_ENV}=1 requires strace for external syscall evidence; execution was refused."
             )
         external_trace_prefix = trace_file.parent / f"{trace_file.name}.{time.monotonic_ns()}.strace"
+        external_trace_prefix.touch(mode=0o666)
+        os.chmod(external_trace_prefix, 0o666)
         trace_prefix = [external_trace]
         if os.environ.get(RUNTIME_BWRAP_SUDO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
             if shutil.which("sudo") is None:

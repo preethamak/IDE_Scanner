@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ide_scanner.artifact_input import ArtifactInputError, acquire_https_vsix
+from ide_scanner.artifact_input import ArtifactInputError, acquire_https_archive_member, acquire_https_vsix
 
 
 class _Response(io.BytesIO):
@@ -19,6 +19,31 @@ class _Response(io.BytesIO):
 
 
 class ArtifactInputTests(unittest.TestCase):
+    def test_hash_pinned_archive_member_is_acquired_without_extracting_other_members(self) -> None:
+        import zipfile
+
+        output = io.BytesIO()
+        member = bytes([0x50, 0x4B, 0x03, 0x04]) + b"trusted"
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("tools/extension.vsix", member)
+            archive.writestr("tools/ignored.txt", b"ignored")
+        content = output.getvalue()
+        archive_digest = hashlib.sha256(content).hexdigest()
+        member_digest = hashlib.sha256(member).hexdigest()
+        opener = type("Opener", (), {"open": lambda self, request, timeout: _Response(content)})()
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "ide_scanner.artifact_input.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ), patch("ide_scanner.artifact_input.urllib.request.build_opener", return_value=opener):
+            path = acquire_https_archive_member(
+                "https://example.com/package.nupkg",
+                archive_digest,
+                "tools/extension.vsix",
+                member_digest,
+                Path(tmp),
+            )
+            self.assertEqual(path.read_bytes(), member)
+
     def test_hash_pinned_public_https_artifact_is_acquired(self) -> None:
         content = b"PK\x03\x04vsix"
         digest = hashlib.sha256(content).hexdigest()

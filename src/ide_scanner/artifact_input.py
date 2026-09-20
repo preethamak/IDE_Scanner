@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
+from zipfile import BadZipFile, ZipFile
 
 MAX_REMOTE_ARTIFACT_BYTES = 512 * 1024 * 1024
 REMOTE_ARTIFACT_TIMEOUT_SECONDS = 60
@@ -65,6 +66,51 @@ def acquire_https_vsix(url: str, expected_sha256: str, destination_dir: Path | N
         if isinstance(exc, ArtifactInputError):
             raise
         raise ArtifactInputError(f"Remote artifact acquisition failed: {exc}") from exc
+
+
+def acquire_https_archive_member(
+    url: str,
+    archive_sha256: str,
+    member: str,
+    expected_sha256: str,
+    destination_dir: Path | None = None,
+) -> Path:
+    """Acquire one hash-pinned VSIX member from a hash-pinned ZIP wrapper."""
+    archive_hash = _validated_sha256(archive_sha256, "archive")
+    member_hash = _validated_sha256(expected_sha256, "member")
+    member_name = str(member or "").strip().replace("\\", "/")
+    if not member_name or member_name.startswith("/") or ".." in Path(member_name).parts:
+        raise ArtifactInputError("Archive member must be a relative path without parent traversal")
+    destination = Path(destination_dir) if destination_dir else Path(tempfile.gettempdir())
+    destination.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ide-scanner-archive-") as temporary:
+        archive_path = acquire_https_vsix(url, archive_hash, Path(temporary))
+        try:
+            with ZipFile(archive_path) as archive:
+                info = archive.getinfo(member_name)
+                if info.is_dir() or info.file_size > MAX_REMOTE_ARTIFACT_BYTES:
+                    raise ArtifactInputError("Archive member is empty or exceeds the 512 MiB acquisition limit")
+                payload = archive.read(info)
+        except (BadZipFile, KeyError, OSError, RuntimeError) as exc:
+            raise ArtifactInputError(f"Remote archive member could not be read: {exc}") from exc
+        if hashlib.sha256(payload).hexdigest() != member_hash:
+            raise ArtifactInputError("Remote archive member SHA-256 does not match the required digest")
+        fd, name = tempfile.mkstemp(prefix="ide-scanner-member-", suffix=".vsix", dir=str(destination))
+        output = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as target:
+                target.write(payload)
+            return output
+        except OSError as exc:
+            output.unlink(missing_ok=True)
+            raise ArtifactInputError(f"Remote archive member could not be stored: {exc}") from exc
+
+
+def _validated_sha256(value: str, label: str) -> str:
+    digest = str(value or "").strip().lower()
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ArtifactInputError(f"A valid {label} SHA-256 is required")
+    return digest
 
 
 def _require_public_host(hostname: str) -> None:
