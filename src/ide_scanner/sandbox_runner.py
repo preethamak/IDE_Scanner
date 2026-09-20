@@ -44,6 +44,17 @@ EXTERNAL_TRACE_ENV = "GUARDRAILS_RUNTIME_EXTERNAL_TRACE"
 RUNTIME_EVENT_HANDSHAKE = "GUARDRAILS_RUNTIME_HANDSHAKE_V1:"
 RUNTIME_EVENT_PREFIX = "GUARDRAILS_RUNTIME_EVENT_V1:"
 RUNTIME_EVENT_OUTPUT_LIMIT_MARKER = "GUARDRAILS_RUNTIME_EVENT_OUTPUT_LIMIT"
+# Bubblewrap itself creates these relative mount/namespace paths before the
+# extension process starts. They are infrastructure evidence, not extension
+# behavior; retaining them creates dozens of misleading INFO findings in an
+# otherwise clean runtime report.
+_SANDBOX_SETUP_RELATIVE_PATHS = frozenset({
+    "uid_map", "gid_map", "setgroups", "newroot", "oldroot", "proc", "dev",
+    "usr", "local", "bin", "sbin", "lib", "lib64", "etc", "null", "zero",
+    "full", "random", "urandom", "shm", "pts", "ptmx", "tmp", "home",
+    "guardrails", "workspace", "target", "runner", "node-runtime-hook.js",
+    "activate-entrypoint.js",
+})
 
 
 def _external_trace_requested() -> bool:
@@ -1017,12 +1028,17 @@ function createVscodeStub() {
   fileSystemError.NoPermissions = () => Object.assign(new fileSystemError('No permissions'), { code: 'NoPermissions' });
   fileSystemError.FileIsADirectory = () => Object.assign(new fileSystemError('File is a directory'), { code: 'FileIsADirectory' });
   fileSystemError.FileNotADirectory = () => Object.assign(new fileSystemError('File is not a directory'), { code: 'FileNotADirectory' });
-  inertClass.file = (p) => ({ fsPath: String(p), toString: () => String(p) });
-  inertClass.parse = (p) => ({ fsPath: String(p), toString: () => String(p) });
-  inertClass.joinPath = (base, ...parts) => ({
-    fsPath: [base && base.fsPath, ...parts].filter(Boolean).join('/'),
-    toString() { return this.fsPath; },
-  });
+  inertClass.file = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
+  inertClass.parse = (p) => ({ fsPath: String(p), path: String(p), scheme: 'file', toString: () => String(p) });
+  inertClass.joinPath = (base, ...parts) => {
+    const fsPath = require('path').posix.normalize([base && (base.fsPath || base.path), ...parts].filter(Boolean).join('/'));
+    return {
+      fsPath,
+      path: fsPath,
+      scheme: 'file',
+      toString() { return this.fsPath; },
+    };
+  };
   const registerCommand = (name, handler) => {
     const command = String(name || '');
     record({kind: 'command_registered', command});
@@ -1057,27 +1073,56 @@ function createVscodeStub() {
     },
   });
   const vscode = {
+    version: '1.99.0',
     commands: { registerCommand, executeCommand },
     window: {
       showInformationMessage: async () => undefined,
       showWarningMessage: async () => undefined,
       showErrorMessage: async () => undefined,
       createWebviewPanel,
-      createOutputChannel: () => ({ append() {}, appendLine() {}, clear() {}, dispose() {}, hide() {}, show() {} }),
+      createTreeView: () => ({
+        onDidExpandElement: noop,
+        onDidCollapseElement: noop,
+        onDidChangeSelection: noop,
+        onDidChangeVisibility: noop,
+        reveal() {},
+        dispose() {},
+      }),
+      createOutputChannel: () => ({
+        append() {}, appendLine() {}, clear() {}, dispose() {}, hide() {}, show() {},
+        info() {}, error() {}, warn() {}, debug() {}, trace() {},
+      }),
       createStatusBarItem: () => disposable,
       createTextEditorDecorationType: () => disposable,
       registerTreeDataProvider: () => disposable,
       registerWebviewViewProvider: () => disposable,
+      onDidChangeVisibleTextEditors: noop,
+      onDidChangeActiveTextEditor: noop,
+      onDidChangeTextEditorSelection: noop,
+      onDidChangeTextEditorVisibleRanges: noop,
+      onDidChangeTextEditorOptions: noop,
+      onDidChangeTextEditorViewColumn: noop,
+      onDidChangeActiveColorTheme: noop,
+      onDidChangeTabs: noop,
+      tabGroups: { all: [], onDidChangeTabs: noop, close: async () => undefined },
+      activeTextEditor: undefined,
+      visibleTextEditors: [],
     },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: process.env.VSCODE_CWD || process.cwd() } }],
       textDocuments: [],
       fs: namespace({
-        readFile: async () => Buffer.from('{}'),
+        readFile: async (uri) => {
+          const path = String(uri && (uri.fsPath || uri.path) || '');
+          if (path.endsWith('/eventLog.json') || path.endsWith('\\eventLog.json')) {
+            return Buffer.from(JSON.stringify({id: 'memento', data: {}}));
+          }
+          return Buffer.from('{}');
+        },
         stat: async () => ({ type: 1 }),
       }),
       getConfiguration: () => ({
-        get: () => undefined,
+        get: (_section, defaultValue) => defaultValue,
         has: () => false,
         inspect: () => undefined,
         update: async () => undefined,
@@ -1086,6 +1131,7 @@ function createVscodeStub() {
       onDidChangeTextDocument: noop,
       onDidOpenTextDocument: noop,
       onDidCloseTextDocument: noop,
+      getWorkspaceFolder: () => undefined,
       createFileSystemWatcher: () => ({ onDidCreate: noop, onDidChange: noop, onDidDelete: noop, dispose() {} }),
     },
     env: {
@@ -1107,7 +1153,20 @@ function createVscodeStub() {
     ConfigurationTarget: inertEnum,
     FileSystemError: fileSystemError,
     languages: { getLanguages: async () => [], registerCompletionItemProvider: () => disposable },
+    tests: {
+      createTestController: () => ({
+        items: { add() {}, delete() {}, replace() {}, forEach() {} },
+        createTestItem: (id, label) => ({ id: String(id), label: String(label), children: { add() {}, delete() {}, forEach() {} } }),
+        createRunProfile: () => disposable,
+        createTestRun: () => ({
+          enqueued() {}, started() {}, passed() {}, failed() {}, skipped() {}, errored() {},
+          appendOutput() {}, end() {},
+        }),
+        dispose() {},
+      }),
+    },
     Uri: inertClass,
+    RelativePattern: inertClass,
     ExtensionContext: inertClass,
     Disposable: inertClass,
     EventEmitter: class { constructor() { this.event = noop; } fire() {} dispose() {} },
@@ -1142,8 +1201,26 @@ function createVscodeStub() {
     FoldingRangeKind: inertEnum,
     SemanticTokenTypes: inertEnum,
     UIKind: inertEnum,
+    LogLevel: inertEnum,
+    TestRunProfileKind: inertEnum,
+    TestTag: inertClass,
+    TestMessage: inertClass,
     CodeActionKind: inertEnum,
   };
+  // Preserve the explicitly modeled APIs above while letting ordinary event
+  // registration calls from host-heavy extensions remain inert. Missing host
+  // events must not turn a safe package into a synthetic activation failure;
+  // the capability hooks above still record filesystem, process, and network
+  // behavior independently.
+  for (const api of ['window', 'workspace', 'languages', 'commands', 'extensions', 'env', 'l10n']) {
+    vscode[api] = new Proxy(vscode[api], {
+      get(target, property) {
+        if (property in target) return target[property];
+        target[property] = noop;
+        return target[property];
+      },
+    });
+  }
   // Keep unknown VS Code classes inert rather than failing module loading on
   // an API that is irrelevant to the package's activation path. The fallback
   // is intentionally top-level only; it does not fabricate filesystem,
@@ -1196,8 +1273,8 @@ async function run() {{
     asAbsolutePath: (relativePath) => path.resolve(target, String(relativePath || '')),
     extensionMode: 1,
     extension: {{ id: 'guardrails.runtime', extensionPath: target, packageJSON: {{}} }},
-    globalState: {{ get: () => undefined, keys: () => [], update: async () => undefined }},
-    workspaceState: {{ get: () => undefined, keys: () => [], update: async () => undefined }},
+    globalState: {{ get: (_key, defaultValue) => defaultValue, keys: () => [], update: async () => undefined }},
+    workspaceState: {{ get: (_key, defaultValue) => defaultValue, keys: () => [], update: async () => undefined }},
     globalStorageUri: {{ fsPath: path.join(process.env.HOME || target, '.globalStorage') }},
     storageUri: {{ fsPath: path.join(process.env.HOME || target, '.workspaceStorage') }},
     secrets: {{ get: async () => undefined, store: async () => undefined, delete: async () => undefined }}
@@ -1301,6 +1378,8 @@ def _external_trace_observations(
         syscall = syscall_match.group(1)
         lower = line.lower()
         path = _first_strace_string(line)
+        if path.replace("\\", "/").strip("/") in _SANDBOX_SETUP_RELATIVE_PATHS and "/" not in path.strip("/"):
+            continue
         if syscall in {"open", "openat", "openat2", "creat"} and path:
             if path in canary_set or any(path.endswith(suffix) for suffix in sensitive_suffixes):
                 observations.append({

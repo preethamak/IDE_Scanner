@@ -4388,6 +4388,11 @@ def _declared_entrypoints(manifest: dict[str, Any], path: Path) -> set[str]:
 
 def _normalize_package_path(value: str) -> str:
     normalized = value.strip().replace("\\", "/")
+    # A few published VSIX manifests spell package-relative entrypoints with
+    # a leading slash. Treat that spelling like the runtime harness does;
+    # otherwise coverage reports a false missing entrypoint even though the
+    # bytes are present inside the artifact.
+    normalized = normalized.lstrip("/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized

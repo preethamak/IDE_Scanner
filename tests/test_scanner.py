@@ -3245,6 +3245,26 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process_exec", kinds)
         self.assertIn("filesystem_write", kinds)
 
+    def test_external_syscall_trace_ignores_bubblewrap_setup_paths(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 mkdir("proc", 0755) = 0\n'
+                '123 openat(AT_FDCWD, "uid_map", O_WRONLY) = 3\n'
+                '123 openat(AT_FDCWD, "/target/user-data.json", O_WRONLY|O_CREAT) = 3\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(result, [])
+
+        self.assertTrue(valid)
+        self.assertEqual(observations, [{
+            "kind": "filesystem_write",
+            "path": "/target/user-data.json",
+            "api": "strace.openat",
+        }])
+
     def test_external_syscall_trace_wraps_bubblewrap_when_requested(self) -> None:
         completed = subprocess.CompletedProcess(["strace"], 0, "", "")
         which = lambda name: "/usr/bin/bwrap" if name == "bwrap" else "/usr/bin/strace"
