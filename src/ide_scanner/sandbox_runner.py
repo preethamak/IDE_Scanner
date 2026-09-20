@@ -910,6 +910,17 @@ function safeString(value) {
   try { return JSON.stringify(value); } catch (_) { return String(value); }
 }
 
+const canaryValue = process.env.IDE_SCANNER_CANARY || '';
+const canaryEncodings = [
+  canaryValue,
+  Buffer.from(canaryValue, 'utf8').toString('base64'),
+  Buffer.from('IDE_SCANNER_CANARY=' + canaryValue + '\n', 'utf8').toString('base64'),
+].filter(Boolean);
+function containsCanary(value) {
+  const text = safeString(value);
+  return canaryEncodings.some((encoded) => text.includes(encoded));
+}
+
 function record(event) {
   const payload = JSON.stringify(Object.assign({ts: Date.now()}, event));
   const mac = crypto.createHmac('sha256', transportSecret).update(payload).digest('hex');
@@ -979,7 +990,7 @@ function fakeRequest(destination) {
   return {
     write(value) {
       const text = safeString(value);
-      record({kind: 'network_write', target: destination || 'unknown', contains_canary: text.includes(process.env.IDE_SCANNER_CANARY || ''), bytes: text.length});
+      record({kind: 'network_write', target: destination || 'unknown', contains_canary: containsCanary(text), bytes: text.length});
       return true;
     },
     end() { if (events.response) setImmediate(() => events.response({ statusCode: 204, on() {} })); return undefined; },
@@ -1020,7 +1031,7 @@ try {
       const init = args[1];
       if (init && typeof init === 'object' && init.body !== undefined) {
         const body = safeString(init.body);
-        record({kind: 'network_write', target: destination, contains_canary: body.includes(process.env.IDE_SCANNER_CANARY || ''), bytes: body.length});
+        record({kind: 'network_write', target: destination, contains_canary: containsCanary(body), bytes: body.length});
       }
       return Promise.resolve({
         status: 204,

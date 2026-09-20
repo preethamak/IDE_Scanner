@@ -41,7 +41,7 @@ SAFE_CONTROLS = (
         "ms-python.python",
         "2026.5.2026070801",
         Path(__file__).parents[1] / "benchmarks" / "external" / "artifacts" / "public-holdout-2026-09-18" / "ms-python.python-2026.5.2026070801.vsix",
-        "95d8af5d113124f8795a31fffe9eae75fafc7ed4de73ae1a90656cf166aebefa",
+        "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8",
     ),
 )
 
