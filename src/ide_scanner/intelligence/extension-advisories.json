@@ -1,5 +1,5 @@
 {
-  "snapshot_version": "2026-09-19.5",
+  "snapshot_version": "2026-09-19.6",
   "entries": [
     {
       "extension_id": "nrwl.angular-console",
@@ -62,6 +62,32 @@
       "source": "https://www.nextron-systems.com/2025/11/28/malicious-vs-code-extension-impersonating-material-icon-theme-found-in-marketplace/",
       "source_secondary": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
       "summary": "Nextron Systems reported this exact Marketplace artifact as a malicious Material Icon Theme impersonator; the VSIX Zoo manifest independently preserves the reported hash."
+    },
+    {
+      "extension_id": "msjsdreact.react-native-vscode",
+      "version": "1.13.1",
+      "artifact_sha256": "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d",
+      "advisory_id": "MALWAREBAZAAR-GLASSWORM-REACT-NATIVE-2025-1.13.1",
+      "severity": "CRITICAL",
+      "published_at": "2025-11-28T00:00:00Z",
+      "policy_action": "block",
+      "threat_classification": "malicious",
+      "source": "https://bazaar.abuse.ch/sample/bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d/",
+      "source_secondary": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+      "summary": "MalwareBazaar and the VSIX Zoo preserve this exact VSIX as a GlassWorm campaign sample targeting React Native developers, with credential-theft and crypto-wallet capabilities."
+    },
+    {
+      "extension_id": "priskinski.Theme-AllHallowsEve-remake",
+      "version": "1.0.0",
+      "artifact_sha256": "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8",
+      "advisory_id": "MALWAREBAZAAR-PRISKINSKI-THEME-2025-1.0.0",
+      "severity": "CRITICAL",
+      "published_at": "2025-12-10T00:00:00Z",
+      "policy_action": "block",
+      "threat_classification": "malicious",
+      "source": "https://bazaar.abuse.ch/sample/a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8/",
+      "source_secondary": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+      "summary": "MalwareBazaar and the VSIX Zoo preserve this exact theme VSIX as a ReversingLabs-disclosed Trojan carrying a Rust payload disguised as an image asset."
     },
     {
       "extension_id": "bingcha.bcai-tools",

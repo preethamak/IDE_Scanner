@@ -1,16 +1,16 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.19.7",
+  "corpus_version": "2026.09.19.8",
   "holdout": {
     "status": "fresh-labeled",
-    "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisory, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
+    "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisories, MalwareBazaar sample records, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
     "frozen_at": "2026-09-19T00:00:00Z"
   },
   "advisory_snapshot": {
     "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
-    "snapshot_version": "2026-09-19.5",
-    "sha256": "a93582ccdec16771c5a56de6ed3eb809ae12576089e0f485a55723e55ed344e8"
+    "snapshot_version": "2026-09-19.6",
+    "sha256": "02aec3cc83a9dd3937548dc94abc12ad94c169b9e2891e20172a9a433e052f9c"
   },
   "artifacts": [
     {
@@ -109,7 +109,7 @@
       "label": "known_malicious",
       "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.95.0/vspackage",
       "artifact_mirrors": [
-        "https://github.com/trailofbits/vsix-zoo/raw/refs/heads/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix"
+        "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix"
       ],
       "sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
       "label_evidence": {
@@ -128,7 +128,7 @@
       "extension_id": "Iconkieftwo.icon-theme-materiall",
       "version": "5.29.1",
       "label": "known_malicious",
-      "artifact_url": "https://github.com/trailofbits/vsix-zoo/raw/refs/heads/main/samples/glassworm/icon-theme-materiall.vsix",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/glassworm/icon-theme-materiall.vsix",
       "sha256": "0878f3c59755ffaf0b639c1b2f6e8fed552724a50eb2878c3ba21cf8eb4e2ab6",
       "label_evidence": {
         "source_type": "independent_threat_report",
@@ -143,75 +143,39 @@
       }
     },
     {
-      "extension_id": "DorianN612.remote-text-fetcher",
-      "version": "0.0.1",
+      "extension_id": "msjsdreact.react-native-vscode",
+      "version": "1.13.1",
       "label": "known_malicious",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/DorianN612/vsextensions/remote-text-fetcher/0.0.1/vspackage",
-      "local_path": "malicious/DorianN612.remote-text-fetcher-0.0.1.vsix",
-      "sha256": "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/malwarebazaar/react-native-vscode.1.13.1.vsix",
+      "sha256": "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d",
       "label_evidence": {
-        "source_type": "independent_threat_report",
-        "source_url": "https://www.knostic.ai/blog/new-malicious-vs-code-extension-backdoor-remote-text-fetcher",
+        "source_type": "trusted_threat_feed_and_independent_hash_report",
+        "source_url": "https://bazaar.abuse.ch/sample/bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d/",
+        "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
         "retrieved_at": "2026-09-19T00:00:00Z",
         "evidence_scope": "exact-artifact",
-        "extension_id": "DorianN612.remote-text-fetcher",
-        "version": "0.0.1",
-        "artifact_sha256": "8136e6e1260e85c860c26245e7622c8bc2f82d741afb445e9ddccaee78990f4b",
-        "advisory_id": "KNOSTIC-REMOTE-TEXT-FETCHER-2026-0.0.1"
+        "extension_id": "msjsdreact.react-native-vscode",
+        "version": "1.13.1",
+        "artifact_sha256": "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d",
+        "advisory_id": "MALWAREBAZAAR-GLASSWORM-REACT-NATIVE-2025-1.13.1"
       }
     },
     {
-      "extension_id": "NoahBit.api-reactor",
-      "version": "0.0.1",
-      "label": "known_malicious",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/NoahBit/vsextensions/api-reactor/0.0.1/vspackage",
-      "local_path": "malicious/NoahBit.api-reactor-0.0.1.vsix",
-      "sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
-      "label_evidence": {
-        "source_type": "independent_threat_report",
-        "source_url": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
-        "retrieved_at": "2026-09-19T00:00:00Z",
-        "evidence_scope": "exact-artifact",
-        "extension_id": "NoahBit.api-reactor",
-        "version": "0.0.1",
-        "artifact_sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
-        "advisory_id": "KNOSTIC-API-REACTOR-2026-0.0.1"
-      }
-    },
-    {
-      "extension_id": "KoltinSmith.project-restructure-nodejs",
+      "extension_id": "priskinski.Theme-AllHallowsEve-remake",
       "version": "1.0.0",
       "label": "known_malicious",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/KoltinSmith/vsextensions/project-restructure-nodejs/1.0.0/vspackage",
-      "local_path": "malicious/KoltinSmith.project-restructure-nodejs-1.0.0.vsix",
-      "sha256": "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/malwarebazaar/priskinski.theme-allhallowseve-remake-1.0.0.vsix",
+      "sha256": "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8",
       "label_evidence": {
-        "source_type": "independent_threat_report",
-        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+        "source_type": "trusted_threat_feed_and_independent_hash_report",
+        "source_url": "https://bazaar.abuse.ch/sample/a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8/",
+        "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
         "retrieved_at": "2026-09-19T00:00:00Z",
         "evidence_scope": "exact-artifact",
-        "extension_id": "KoltinSmith.project-restructure-nodejs",
+        "extension_id": "priskinski.Theme-AllHallowsEve-remake",
         "version": "1.0.0",
-        "artifact_sha256": "366052e4cd801cb4a3fb09376e79288a3d22e820ba21b41d4a07627d8674c6a0",
-        "advisory_id": "KNOSTIC-KOLTINSMITH-2026-1.0.0"
-      }
-    },
-    {
-      "extension_id": "sunsetHightlight.sunset-highlight",
-      "version": "0.0.2",
-      "label": "known_malicious",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/sunsetHightlight/vsextensions/sunset-highlight/0.0.2/vspackage",
-      "local_path": "malicious/sunsetHightlight.sunset-highlight-0.0.2.vsix",
-      "sha256": "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
-      "label_evidence": {
-        "source_type": "independent_threat_report",
-        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
-        "retrieved_at": "2026-09-19T00:00:00Z",
-        "evidence_scope": "exact-artifact",
-        "extension_id": "sunsetHightlight.sunset-highlight",
-        "version": "0.0.2",
-        "artifact_sha256": "217244bbc47e6cd2d24aff82e670d97bb66711ab4edcca44976c42ff2baa56db",
-        "advisory_id": "KNOSTIC-SUNSETHIGHLIGHT-2026-0.0.2"
+        "artifact_sha256": "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8",
+        "advisory_id": "MALWAREBAZAAR-PRISKINSKI-THEME-2025-1.0.0"
       }
     },
     {
