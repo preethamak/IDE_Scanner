@@ -1489,6 +1489,7 @@ def _write_entrypoint_runner(path: Path, manifest: dict[str, Any]) -> None:
             encoding="utf-8",
         )
         return
+    safe_main = main.lstrip("/\\")
     path.write_text(
         f"""
     const path = require('path');
@@ -1508,7 +1509,7 @@ process.on('unhandledRejection', (err) => {{
     // VSIX manifests in the wild sometimes write a leading slash even
     // though the entrypoint is package-relative. Never let a manifest turn
     // that spelling into a host-absolute path outside the mounted artifact.
-    const mainFile = path.resolve(target, {json.dumps(main.lstrip('/\\\\'))});
+    const mainFile = path.resolve(target, {json.dumps(safe_main)});
 async function run() {{
   let mod;
   try {{
