@@ -316,6 +316,27 @@ class ScannerTests(unittest.TestCase):
 
         self.assertTrue(_runtime_required_for_report(report))
 
+    def test_manifest_theme_surface_classifies_icon_extension(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "icon-pack",
+                    "version": "1.0.0",
+                    "description": "Icons for Visual Studio Code",
+                    "main": "./extension.js",
+                    "contributes": {"iconThemes": [{"id": "icon-pack", "path": "./icons.json"}]},
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            report = scan_extension(root)
+
+        capability_ids = {item["id"] for item in report.capabilities}
+        self.assertIn("theme_surface", capability_ids)
+        self.assertTrue(_runtime_required_for_report(report))
+
     def test_theme_process_capability_enters_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

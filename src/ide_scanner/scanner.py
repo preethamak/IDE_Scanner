@@ -1598,6 +1598,15 @@ def _add_manifest_findings(
             _add_lifecycle_script_chain_findings(extension_id, version, script_name, str(scripts[script_name]), findings)
 
     contributes = manifest.get("contributes") if isinstance(manifest.get("contributes"), dict) else {}
+    theme_surfaces = [
+        key for key in ("themes", "iconThemes", "productIconThemes")
+        if key in contributes
+    ]
+    if theme_surfaces:
+        # Manifest contribution is stronger than a name/description keyword:
+        # icon packs and color themes often call themselves "icons" or use a
+        # publisher brand, while their actual IDE surface is declarative.
+        capabilities.setdefault("theme_surface", {"id": "theme_surface", "evidence": []})["evidence"].extend(theme_surfaces)
     for key in ("debuggers", "taskDefinitions", "terminal"):
         if key in contributes:
             findings.append(_finding(
