@@ -3350,7 +3350,7 @@ def _apply_sandbox_observations(extensions: list[ExtensionReport], observations:
         extension = by_id.get(extension_id)
         if extension is None:
             continue
-        for item in items:
+        for item in _aggregate_sandbox_observations(items):
             if not isinstance(item, dict):
                 continue
             finding = _sandbox_observation_finding(extension, item)
@@ -3366,6 +3366,71 @@ def _apply_sandbox_observations(extensions: list[ExtensionReport], observations:
             extension.risk_score,
             extension.score_details,
         ) = _classify_findings(extension.findings)
+
+
+_AGGREGATED_RUNTIME_OBSERVATIONS = frozenset({
+    # These events prove that a capability was exercised, but repeated events
+    # are not separate security incidents. Keep one finding and preserve a
+    # bounded sample plus the exact count in its evidence.
+    "secret_read",
+    "secret_exfil",
+    "canary_exposed",
+    "download_execute",
+    "persistence",
+    "destructive",
+    "network_attempt",
+    "unexpected_network",
+    "process_exec",
+    "filesystem_write",
+    "runtime_lifecycle_error",
+    "runtime_entrypoint_error",
+})
+_RUNTIME_SAMPLE_FIELDS = ("path", "command", "destination", "api", "script", "phase")
+_RUNTIME_SAMPLE_LIMIT = 25
+
+
+def _aggregate_sandbox_observations(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeated runtime events without discarding their evidence.
+
+    A language server can write hundreds of cache files or make several
+    connection attempts during one activation. Rendering each syscall as a
+    separate finding is noisy and makes capability evidence look like an
+    incident count. High-specificity observations remain visible, but each
+    behavior is represented once with ``observation_count`` and bounded
+    samples for investigation.
+    """
+    grouped: dict[str, dict[str, Any]] = {}
+    order: list[dict[str, Any]] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind") or raw.get("type") or raw.get("rule_id") or "").strip()
+        if kind not in _AGGREGATED_RUNTIME_OBSERVATIONS:
+            order.append(dict(raw))
+            continue
+        aggregate = grouped.get(kind)
+        if aggregate is None:
+            aggregate = dict(raw)
+            aggregate["observation_count"] = 0
+            for field in _RUNTIME_SAMPLE_FIELDS:
+                if raw.get(field) not in (None, ""):
+                    aggregate[f"{field}_samples"] = []
+            grouped[kind] = aggregate
+            order.append(aggregate)
+        try:
+            raw_count = max(1, int(raw.get("observation_count") or 1))
+        except (TypeError, ValueError):
+            raw_count = 1
+        aggregate["observation_count"] = int(aggregate.get("observation_count") or 0) + raw_count
+        for field in _RUNTIME_SAMPLE_FIELDS:
+            value = raw.get(field)
+            if value in (None, ""):
+                continue
+            key = f"{field}_samples"
+            samples = aggregate.setdefault(key, [])
+            if value not in samples and len(samples) < _RUNTIME_SAMPLE_LIMIT:
+                samples.append(value)
+    return order
 
 
 def _apply_threat_feed(extensions: list[ExtensionReport], feed: dict[str, dict[str, Any]]) -> None:
@@ -3555,6 +3620,7 @@ def _sandbox_observation_finding(extension: ExtensionReport, item: dict[str, Any
         file_refs,
         "Review the authenticated runtime evidence. Dynamic observations are strong evidence but not authoritative malware without confirmed intelligence.",
         evidence,
+        evidence_type="dynamic",
     )
 
 
@@ -5022,6 +5088,8 @@ def _finding(
     file_refs: list[str],
     recommendation: str,
     evidence: dict[str, Any] | None = None,
+    *,
+    evidence_type: str = "static",
 ) -> Finding:
     payload = f"{extension_id}:{version}:{rule_id}:{','.join(file_refs)}:{evidence_summary}"
     return Finding(
@@ -5033,7 +5101,7 @@ def _finding(
         severity=severity,  # type: ignore[arg-type]
         confidence=confidence,
         score=score_finding(severity, confidence),
-        evidence_type="static",
+        evidence_type=evidence_type,
         evidence_summary=evidence_summary,
         file_refs=file_refs,
         recommendation=recommendation,

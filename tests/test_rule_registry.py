@@ -11,6 +11,11 @@ class RuleRegistryTests(unittest.TestCase):
 
         self.assertEqual(len(rules), 97)
         self.assertTrue(all(rule.engine for rule in rules))
+
+    def test_runtime_rules_are_published_as_dynamic_sandbox_rules(self) -> None:
+        rules = {rule.rule_id: rule for rule in rule_registry()}
+        self.assertEqual(rules["runtime-network-attempt"].engine, "dynamic-sandbox")
+        self.assertEqual(rules["observed-secret-exfil"].engine, "dynamic-sandbox")
         self.assertTrue(all(rule.decision_effect for rule in rules))
         self.assertTrue(all(rule.confidence_basis for rule in rules))
 

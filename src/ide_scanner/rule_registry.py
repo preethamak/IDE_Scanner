@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.21-policy-v3-calibration.33-runtime-exit-evidence"
+RULESET_VERSION = "2026.09.21-policy-v3-calibration.34-runtime-attribution"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -590,6 +590,8 @@ def _title(rule_id: str) -> str:
 
 
 def _engine_for(rule_id: str, tags: list[str]) -> str:
+    if rule_id.startswith(("runtime-", "observed-", "sandbox-")):
+        return "dynamic-sandbox"
     if "semgrep" in tags:
         return "semgrep"
     if "yara" in tags:

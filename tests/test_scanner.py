@@ -45,6 +45,7 @@ from ide_scanner.scanner import (
     _add_ast_findings,
     _apply_local_dynamic_runtime,
     _apply_sandbox_provider,
+    _aggregate_sandbox_observations,
     _dedupe_findings,
     _find_sensitive_api_text,
     _is_generated_code_blob,
@@ -3127,6 +3128,35 @@ class ScannerTests(unittest.TestCase):
         )
         self.assertTrue(all(finding is not None and finding.to_dict()["actionability"] == "contextual" for finding in findings))
 
+    def test_runtime_observations_are_aggregated_with_bounded_samples(self) -> None:
+        observations = _aggregate_sandbox_observations([
+            {"kind": "filesystem_write", "path": f"/workspace/cache-{index}.json", "api": "fs.writeFile"}
+            for index in range(40)
+        ])
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["kind"], "filesystem_write")
+        self.assertEqual(observations[0]["observation_count"], 40)
+        self.assertEqual(len(observations[0]["path_samples"]), 25)
+
+    def test_runtime_finding_is_labeled_dynamic_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"runtime-label","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            finding = _sandbox_observation_finding(
+                extension,
+                {"kind": "process_exec", "command": "language-server --stdio", "observation_count": 3},
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.evidence_type, "dynamic")
+        self.assertEqual(finding.evidence["observation_count"], 3)
+
     def test_sandbox_capability_only_observations_do_not_route_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3299,6 +3329,27 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations, [{
             "kind": "filesystem_write",
             "path": "/target/user-data.json",
+            "api": "strace.openat",
+        }])
+
+    def test_external_syscall_trace_ignores_bubblewrap_root_and_device_plumbing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 mkdir("/newroot/usr", 0755) = 0\n'
+                '123 openat(AT_FDCWD, "/dev/tty", O_WRONLY) = 3\n'
+                '123 execve("/usr/bin/bwrap", ["bwrap"], 0x0) = 0\n'
+                '123 openat(AT_FDCWD, "/workspace/user-data.json", O_WRONLY|O_CREAT) = 3\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(result, [])
+
+        self.assertTrue(valid)
+        self.assertEqual(observations, [{
+            "kind": "filesystem_write",
+            "path": "/workspace/user-data.json",
             "api": "strace.openat",
         }])
 
