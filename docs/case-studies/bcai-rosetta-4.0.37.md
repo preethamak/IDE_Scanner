@@ -24,12 +24,17 @@ replaced by an empty snapshot. The scanner still returned:
 
 - verdict: `review`
 - decision: `review`
-- risk score: `55`
+- risk score: `57`
 - malware score: `0` (no authoritative intelligence was supplied for this run)
 - high-specificity exposure finding: `remote-credential-broker`
 - contextual supporting evidence: broad activation, credential-oriented input,
   network access, filesystem access, process execution, shell execution, and
   environment-file references
+
+This result was reproduced against the exact VSIX with ruleset
+`2026.09.21-policy-v3-calibration.36-manifest-capability-contract`; the scan
+completed with 100% artifact coverage. The score is a diagnostic index, not a
+probability of compromise.
 
 This is the correct conservative outcome for static-only corroboration: the
 scanner identifies a remote token-broker trust boundary and requires review,
