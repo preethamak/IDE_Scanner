@@ -1814,16 +1814,22 @@ class ScannerTests(unittest.TestCase):
             )
             (root / "server.node").write_bytes(b"native")
             (root / "payload.zip").write_bytes(b"packed")
+            (root / "payload-two.zip").write_bytes(b"packed-two")
+            (root / "payload-three.zip").write_bytes(b"packed-three")
 
             report = scan_extension(root)
 
         self.assertEqual(report.verdict, "clean")
         self.assertEqual(report.malware_score, 0)
         self.assertGreater(report.risk_score, 0)
-        self.assertEqual(report.artifact_inventory["files_hashed"], 3)
-        self.assertEqual(len(report.artifact_inventory["risky_artifacts"]), 2)
+        self.assertEqual(report.artifact_inventory["files_hashed"], 5)
+        self.assertEqual(len(report.artifact_inventory["risky_artifacts"]), 4)
         self.assertIn("native-or-packed-artifact", {finding.rule_id for finding in report.findings})
         self.assertIn("packed-artifact", {finding.rule_id for finding in report.findings})
+        packed = [finding for finding in report.findings if finding.rule_id == "packed-artifact"]
+        self.assertEqual(len(packed), 1)
+        self.assertEqual(packed[0].evidence["count"], 3)
+        self.assertEqual(len(packed[0].file_refs), 3)
 
     def test_wasm_requires_runtime_and_only_visible_loaders_emit_context(self) -> None:
         with TemporaryDirectory() as tmp:

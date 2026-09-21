@@ -98,6 +98,13 @@ class RealArtifactCalibrationTests(unittest.TestCase):
                 self.assertEqual(extension["malware_score"], 0)
                 self.assertTrue(extension["findings"])
                 self.assertTrue(all(item.get("actionability") == "contextual" for item in extension["findings"]))
+                for rule_id in ("ast-dynamic-call-target", "packed-artifact"):
+                    repeated = [item for item in extension["findings"] if item.get("rule_id") == rule_id]
+                    self.assertLessEqual(len(repeated), 1, rule_id)
+                    if repeated:
+                        evidence = repeated[0].get("evidence") or {}
+                        self.assertGreaterEqual(int(evidence.get("count") or evidence.get("target_count") or 1), 1)
+                        self.assertTrue(repeated[0].get("file_refs"))
 
     @unittest.skipUnless(
         BCAI_ARTIFACT.is_file(),
