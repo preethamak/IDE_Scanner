@@ -32,7 +32,7 @@ replaced by an empty snapshot. The scanner still returned:
   environment-file references
 
 This result was reproduced against the exact VSIX with ruleset
-`2026.09.21-policy-v3-calibration.36-manifest-capability-contract`; the scan
+`2026.09.21-policy-v3-calibration.37-manifest-capability-runtime-evidence`; the scan
 completed with 100% artifact coverage. The score is a diagnostic index, not a
 probability of compromise.
 

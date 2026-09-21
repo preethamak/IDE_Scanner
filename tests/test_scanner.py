@@ -897,7 +897,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.4")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.5")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
@@ -3272,7 +3272,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(finding.evidence_type, "dynamic")
         self.assertEqual(finding.evidence["observation_count"], 3)
 
-    def test_sandbox_capability_only_observations_do_not_route_review(self) -> None:
+    def test_sandbox_undeclared_process_or_network_routes_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -3296,8 +3296,12 @@ class ScannerTests(unittest.TestCase):
             )
 
         extension = report["extensions"][0]
-        self.assertEqual(extension["decision"], "allow")
-        self.assertEqual(extension["public_outcome"], "clear")
+        self.assertEqual(extension["decision"], "review")
+        self.assertEqual(extension["verdict"], "suspicious")
+        self.assertEqual(extension["public_outcome"], "investigate")
+        self.assertEqual(extension["malware_score"], 0)
+        self.assertEqual(extension["score_details"]["components"]["observed_behavior"], 60)
+        self.assertEqual(extension["score_details"]["risk_score"], extension["risk_score"])
         self.assertEqual(extension["analysis_status"], "complete")
 
     def test_sandbox_rejects_unsafe_runtime_inputs(self) -> None:
