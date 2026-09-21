@@ -5042,6 +5042,15 @@ _CONTEXTUAL_OCCURRENCE_RULES = frozenset({
     "process-execution",
 })
 
+# A repeated high-specificity semantic chain can occur in several bundled
+# modules (for example, one client module per provider). It remains review
+# evidence, but repeating the same sentence once per file makes a report look
+# like several independent incidents. Aggregate only this narrowly defined
+# review signal and retain every source path/count in evidence. Correlated
+# download/execute, persistence, and credential-exfiltration findings remain
+# separate because multiple distinct paths are decision-relevant there.
+_REVIEW_OCCURRENCE_RULES = frozenset({"remote-credential-broker"})
+
 
 def _is_contextual_occurrence_rule(rule_id: str) -> bool:
     """Return whether repeated weak observations can share one report row."""
@@ -5067,12 +5076,13 @@ def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
 
 
 def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
-    """Merge repeated low-signal capability notes without hiding evidence.
+    """Merge narrowly repeatable notes without hiding evidence.
 
     A finding remains separate when its rule is not in the allowlist or when
-    policy has promoted it beyond ``contextual``. Aggregated findings carry the
-    union of file references and an occurrence count so callers can still
-    investigate every location and distinguish one use from many uses.
+    policy has promoted it beyond the allowed actionability. Aggregated
+    findings carry the union of file references and an occurrence count so
+    callers can still investigate every location and distinguish one use from
+    many uses.
     """
     grouped: dict[tuple[str, str, str, str, str], Finding] = {}
     occurrence_counts: dict[tuple[str, str, str, str, str], int] = {}
@@ -5092,10 +5102,14 @@ def _aggregate_contextual_findings(findings: list[Finding]) -> list[Finding]:
             finding.evidence_type,
             summary_key,
         )
-        if (
-            not _is_contextual_occurrence_rule(finding.rule_id)
-            or finding_actionability(finding) != "contextual"
-        ):
+        aggregateable = (
+            _is_contextual_occurrence_rule(finding.rule_id)
+            and finding_actionability(finding) == "contextual"
+        ) or (
+            finding.rule_id in _REVIEW_OCCURRENCE_RULES
+            and finding_actionability(finding) == "review"
+        )
+        if not aggregateable:
             output.append(finding)
             continue
 

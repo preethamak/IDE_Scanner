@@ -142,6 +142,37 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertNotIn("occurrence_count", result[0].evidence or {})
 
+    def test_repeated_remote_broker_review_evidence_is_aggregated_with_paths(self) -> None:
+        findings = [
+            Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="remote-credential-broker",
+                category="cross-extension-exposure",
+                severity="HIGH",
+                confidence=0.84,
+                score=78,
+                evidence_type="static",
+                evidence_summary="Code appears to obtain or forward bearer tokens through a separately configured remote token broker.",
+                file_refs=[path],
+                recommendation="Verify endpoint ownership, token scope, retention, and user disclosure.",
+                evidence={
+                    "evidence_class": "exposure",
+                    "correlation": "same-file-semantic-chain",
+                },
+            )
+            for path in ("dist/provider-a.js", "dist/provider-b.js")
+        ]
+
+        result = _dedupe_findings(findings)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].file_refs, ["dist/provider-a.js", "dist/provider-b.js"])
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], result[0].file_refs)
+        self.assertEqual(result[0].evidence["correlation"], "same-file-semantic-chain")
+
     def test_repeated_contextual_shell_capability_is_aggregated(self) -> None:
         findings = [
             Finding(
