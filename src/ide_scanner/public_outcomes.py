@@ -114,9 +114,7 @@ def apply_public_assessment(extension: ExtensionReport) -> None:
     # compact contract, while a theme exposing process/network/native powers is
     # a meaningful declaration mismatch even without a hand-maintained profile.
     unexpected_capabilities = (
-        sorted(set(capability_ids) - expected)
-        if profile
-        else sorted(set(capability_ids) & forbidden)
+        sorted(set(capability_ids) & forbidden)
         if contract_class != "unknown"
         else []
     )

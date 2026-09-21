@@ -4231,8 +4231,10 @@ def _contract_unexpected_capabilities(extension: ExtensionReport) -> list[str]:
         for item in class_contract(class_id).get("forbidden", [])
         if str(item)
     }
-    if profile:
-        return sorted((observed - expected) | (observed & forbidden))
+    # The positive capability lists are explanatory baselines, not complete
+    # allowlists: language tools often use network/filesystem helpers that are
+    # absent from a compact profile. Only an explicit forbidden capability is
+    # strong enough to change the decision at this layer.
     return sorted(observed & forbidden)
 
 
