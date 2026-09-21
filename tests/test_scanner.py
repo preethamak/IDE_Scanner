@@ -44,6 +44,7 @@ from ide_scanner.scanner import (
     _build_report,
     _add_ast_findings,
     _apply_local_dynamic_runtime,
+    _apply_security_decision,
     _apply_sandbox_provider,
     _aggregate_sandbox_observations,
     _dedupe_findings,
@@ -57,6 +58,7 @@ from ide_scanner.scanner import (
     _semgrep_scope_exclusion,
     _sandbox_observation_finding,
     _runtime_required_for_report,
+    _runtime_unexpected_capability_finding,
     scan_extension,
     scan_marketplace_extension,
     scan_targets,
@@ -294,6 +296,67 @@ class ScannerTests(unittest.TestCase):
             sandbox.assert_not_called()
             self.assertEqual(runtime_bundle["required_extension_ids"], [])
             self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
+
+    def test_theme_with_an_entrypoint_receives_runtime_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "pretty-theme",
+                    "version": "1.0.0",
+                    "description": "A color theme with an activation entrypoint",
+                    "main": "./extension.js",
+                    "activationEvents": ["onStartupFinished"],
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            report = scan_extension(root)
+
+        self.assertTrue(_runtime_required_for_report(report))
+
+    def test_theme_process_capability_enters_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "pretty-theme",
+                    "version": "1.0.0",
+                    "description": "A color theme",
+                    "main": "./extension.js",
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "require('child_process').spawn('sh', ['-c', 'echo theme']);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+            _apply_security_decision(report)
+
+        self.assertIn("process_execution", {item["id"] for item in report.capabilities})
+        self.assertEqual(report.decision, "review")
+
+    def test_runtime_process_not_declared_is_review_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"publisher","name":"runtime-theme","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+            finding = _runtime_unexpected_capability_finding(
+                report,
+                {"kind": "process_exec", "command": "hidden-tool", "observation_count": 2},
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.rule_id, "observed-unexpected-capability")
+        self.assertEqual(finding.evidence_type, "dynamic")
+        self.assertEqual(finding.to_dict()["actionability"], "review")
 
     def test_local_runtime_requires_native_code_coverage(self) -> None:
         with TemporaryDirectory() as tmp:

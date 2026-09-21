@@ -29,6 +29,7 @@ from .ast_analyzer import (
 )
 from .bundle_analysis import analyze_generated_bundle
 from .calibration import calibrated_score, max_calibrated_score
+from .capability_contracts import class_contract, classify_extension, expected_capabilities
 from .classification_policy import (
     POLICY_VERSION,
     effective_finding_severity,
@@ -140,6 +141,7 @@ OBSERVED_RULES = {
     "observed-destructive-behavior",
     "observed-process-exec",
     "observed-filesystem-write",
+    "observed-unexpected-capability",
 }
 CORRELATED_RULES = {
     "agent-data-exfil-chain",
@@ -1091,7 +1093,18 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
         for item in report.capabilities
         if isinstance(item, dict)
     }
-    return bool(capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES)
+    if capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES:
+        return True
+    # A theme normally has no executable entrypoint. If it does, run it in the
+    # controlled namespace even when static inspection did not recognize a
+    # network/process capability. This is the boundary that catches hidden or
+    # obfuscated behavior without forcing declarative themes through a fake
+    # runtime path.
+    classification = classify_extension(report)
+    if classification.get("primary") == "theme":
+        coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
+        return bool(coverage.get("resolved_entrypoints"))
+    return False
 
 
 def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:
@@ -3357,6 +3370,9 @@ def _apply_sandbox_observations(extensions: list[ExtensionReport], observations:
             if finding is None:
                 continue
             extension.findings.append(finding)
+            unexpected = _runtime_unexpected_capability_finding(extension, item)
+            if unexpected is not None:
+                extension.findings.append(unexpected)
         (
             extension.verdict,
             extension.verdict_reason,
@@ -3366,6 +3382,61 @@ def _apply_sandbox_observations(extensions: list[ExtensionReport], observations:
             extension.risk_score,
             extension.score_details,
         ) = _classify_findings(extension.findings)
+
+
+def _runtime_unexpected_capability_finding(
+    extension: ExtensionReport,
+    item: dict[str, Any],
+) -> Finding | None:
+    """Escalate runtime process/network behavior hidden from static analysis.
+
+    Filesystem writes are intentionally excluded: caches and generated state
+    are normal runtime behavior. A process or network observation that has no
+    corresponding static capability is materially different, especially for a
+    theme or other low-power package, and deserves review rather than being
+    silently treated as an ordinary capability note.
+    """
+    kind = str(item.get("kind") or item.get("type") or "").strip()
+    runtime_capability = {
+        "process_exec": "process_execution",
+        "network_attempt": "network",
+        "unexpected_network": "network",
+    }.get(kind)
+    if not runtime_capability:
+        return None
+    declared = {
+        str(capability.get("id") or "")
+        for capability in extension.capabilities
+        if isinstance(capability, dict) and capability.get("id")
+    }
+    if runtime_capability in declared:
+        return None
+    evidence = {
+        "evidence_class": "observed",
+        "runtime_kind": kind,
+        "capability": runtime_capability,
+        "declared_capabilities": sorted(declared),
+        "observation_count": int(item.get("observation_count") or 1),
+    }
+    if item.get("path_samples"):
+        evidence["path_samples"] = list(item["path_samples"])
+    if item.get("destination_samples"):
+        evidence["destination_samples"] = list(item["destination_samples"])
+    if item.get("command_samples"):
+        evidence["command_samples"] = list(item["command_samples"])
+    return _finding(
+        extension.extension_id,
+        extension.version,
+        "observed-unexpected-capability",
+        "dynamic-sandbox",
+        "HIGH",
+        0.86,
+        f"Sandbox observed {runtime_capability.replace('_', ' ')} that static analysis did not declare.",
+        [],
+        "Review the exact runtime trace and package declaration; hidden process or network behavior is not expected for this artifact.",
+        evidence,
+        evidence_type="dynamic",
+    )
 
 
 _AGGREGATED_RUNTIME_OBSERVATIONS = frozenset({
@@ -3812,6 +3883,36 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
             ),
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
+        if required:
+            declared = {
+                str(capability.get("id") or "")
+                for capability in extension.capabilities
+                if isinstance(capability, dict) and capability.get("id")
+            }
+            observed_capabilities = sorted({
+                capability
+                for item in items
+                if isinstance(item, dict)
+                for capability in (
+                    {
+                        "process_exec": "process_execution",
+                        "network_attempt": "network",
+                        "unexpected_network": "network",
+                    }.get(str(item.get("kind") or "")),
+                )
+                if capability
+            })
+            undeclared = sorted(set(observed_capabilities) - declared)
+            extension.capability_assessment = {
+                "behavioral_verification": {
+                    "status": "complete" if provider_status == "completed" else "failed",
+                    "matches_declaration": provider_status == "completed" and not undeclared,
+                    "observed_capabilities": observed_capabilities,
+                    "undeclared_capabilities": undeclared,
+                    "observation_count": len(items) if isinstance(items, list) else 0,
+                    "provider": "dynamic_sandbox",
+                }
+            }
 
 
 def _build_report(
@@ -4074,6 +4175,14 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         extension.decision = "incomplete"
         extension.decision_reason = str(extension.artifact_inventory.get("skipped_reason") or "Executable analysis did not complete.")
         return
+    contract_unexpected = _contract_unexpected_capabilities(extension)
+    if contract_unexpected:
+        extension.decision = "review"
+        extension.decision_reason = (
+            "Observed capabilities fall outside the extension's functional contract: "
+            f"{', '.join(contract_unexpected[:5])}."
+        )
+        return
     added_capabilities = list(extension.baseline_diff.get("added_capabilities") or [])
     added_findings = list(extension.baseline_diff.get("added_findings") or [])
     artifact_changed = bool(extension.baseline_diff.get("artifact_changed"))
@@ -4086,6 +4195,45 @@ def _apply_security_decision(extension: ExtensionReport) -> None:
         return
     extension.decision = "allow"
     extension.decision_reason = "Analysis completed without actionable evidence or unapproved baseline changes."
+
+
+def _contract_unexpected_capabilities(extension: ExtensionReport) -> list[str]:
+    """Return capabilities that contradict a known functional class.
+
+    Capability findings are intentionally contextual in isolation. A theme that
+    also exposes process, network, native, or credential powers is different:
+    those powers contradict the package's declared job and should enter review
+    even when static capability rules alone would otherwise be non-actionable.
+    Unknown packages are not penalized by this check; they remain governed by
+    their direct evidence and provenance.
+    """
+    classification = classify_extension(extension)
+    class_id = str(classification.get("primary") or "unknown")
+    if class_id == "unknown":
+        return []
+    profile = None
+    try:
+        from .capability_contracts import extension_profile
+
+        profile = extension_profile(extension.extension_id)
+    except (ImportError, TypeError):
+        profile = None
+    expected = expected_capabilities(profile, class_id)
+    if not expected:
+        return []
+    observed = {
+        str(item.get("id") or "")
+        for item in extension.capabilities
+        if isinstance(item, dict) and item.get("id")
+    }
+    forbidden = {
+        str(item)
+        for item in class_contract(class_id).get("forbidden", [])
+        if str(item)
+    }
+    if profile:
+        return sorted((observed - expected) | (observed & forbidden))
+    return sorted(observed & forbidden)
 
 
 def _analysis_status(extension: ExtensionReport, coverage: dict[str, Any], incomplete: bool) -> str:

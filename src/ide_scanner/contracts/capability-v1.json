@@ -16,7 +16,9 @@
       "forbidden": [
         "process_execution",
         "credential_input",
-        "native_code"
+        "native_code",
+        "network",
+        "agentic"
       ]
     },
     "formatter_linter": {
