@@ -179,7 +179,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             raise ValueError(f"No extension target was found at {args.file}")
         print(section("Local file target"))
         print(table(["Type", "Path"], [[item.get("type"), item.get("path")] for item in targets], max_widths=[12, 88]))
-        print(color("Scanning the selected local artifact without executing extension code…", "brand_cyan"))
+        print(color("Scanning the selected local artifact with deterministic static analysis…", "brand_cyan"))
         report = _run_with_profile(
             args.profile,
             lambda: scan_paths([item["path"] for item in targets], online=args.online or args.profile == "deep"),
@@ -192,7 +192,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 return 130
         print(color(f"Creating a stable local snapshot of {len(selected_rows)} installed extension(s)…", "brand_cyan"))
         with snapshot_installations(selected_rows) as snapshot_rows:
-            print(color("Scanning the snapshots without executing extension code…", "brand_cyan"))
+            print(color("Scanning the snapshots with deterministic static analysis…", "brand_cyan"))
             report = _run_with_profile(
                 args.profile,
                 lambda: scan_paths([row["path"] for row in snapshot_rows], online=args.online or args.profile == "deep"),
