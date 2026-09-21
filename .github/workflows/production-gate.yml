@@ -161,6 +161,11 @@ jobs:
             --threat-feed benchmarks/threat-feed.json \
             --format json \
             --out production-fixtures.json
+      - name: Audit rule-level noise and routing
+        run: |
+          python scripts/audit_report.py \
+            --report production-fixtures.json \
+            --out production-rule-audit.json
       - name: Scan exact real-artifact calibration input
         env:
           IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
@@ -247,6 +252,7 @@ jobs:
           name: scanner-production-gate
           path: |
             production-fixtures.json
+            production-rule-audit.json
             production-gate.json
             bcai-calibration.json
             nx-console-calibration.json

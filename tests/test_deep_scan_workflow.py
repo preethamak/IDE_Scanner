@@ -44,6 +44,8 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert 'item.get("rule_id") == "known-malicious-extension"' in workflow
     assert "bcai-calibration.json" in workflow
     assert "code-runner-cve-calibration.json" in workflow
+    assert "Audit rule-level noise and routing" in workflow
+    assert "production-rule-audit.json" in workflow
     assert "formulahendry-code-runner-0.12.2/*.vsix" in workflow
     assert "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144" in workflow
     assert 'item.get("rule_id") == "known-vulnerable-extension"' in workflow
@@ -64,6 +66,14 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert '"secret_exfil" not in observed_kinds.get("unknown.shadow-helper", [])' in workflow
     assert 'provider.get("status") != "completed"' in workflow
     assert 'execution.get("external_syscall_trace") is not True' in workflow
+
+
+def test_publication_holdout_uploads_rule_level_audit() -> None:
+    workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "publication-holdout.yml").read_text(encoding="utf-8")
+
+    assert "Audit holdout rule-level evidence" in workflow
+    assert "scripts/audit_report.py" in workflow
+    assert "holdout-rule-audit.json" in workflow
 
 
 def test_worker_preserves_claimed_platform_artifact_for_90_days() -> None:
