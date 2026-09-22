@@ -92,3 +92,29 @@ def test_rust_sidecar_hash_mismatch_does_not_execute(tmp_path: Path, monkeypatch
 
     assert result[0]["status"] == "cache-hash-mismatch"
     assert not (tmp_path / "extension" / "server" / "rust-analyzer").exists()
+
+
+def test_packaged_rust_sidecar_is_hash_verified(tmp_path: Path, monkeypatch) -> None:
+    binary = b"packaged-but-wrong"
+    monkeypatch.setattr(
+        runtime_dependencies,
+        "RUNTIME_DEPENDENCY_LOCK",
+        {"rust-analyzer:test-release": {
+            "dependency": "rust-analyzer",
+            "release_tag": "test-release",
+            "version": "0.0.1",
+            "platform": "linux-x86_64",
+            "binary_sha256": "0" * 64,
+            "cache_subpath": "rust-analyzer-test/rust-analyzer",
+        }},
+    )
+    target = tmp_path / "extension"
+    packaged = target / "server" / "rust-analyzer"
+    packaged.parent.mkdir(parents=True)
+    packaged.write_bytes(binary)
+    packaged.chmod(0o755)
+
+    result = runtime_dependencies.provision_for_extension(target, _manifest())
+
+    assert result[0]["status"] == "packaged-hash-mismatch"
+    assert result[0]["actual_sha256"] == hashlib.sha256(binary).hexdigest()

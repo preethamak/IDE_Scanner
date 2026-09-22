@@ -58,6 +58,7 @@ from ide_scanner.scanner import (
     _semgrep_scope_exclusion,
     _sandbox_observation_finding,
     _runtime_required_for_report,
+    _runtime_execution_failure,
     _runtime_unexpected_capability_finding,
     scan_extension,
     scan_marketplace_extension,
@@ -452,6 +453,37 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(runtime_bundle["runs"][0]["status"], "failed")
             self.assertIn("no declared Node activation entrypoint", runtime_bundle["runs"][0]["error"])
             self.assertEqual(runtime_bundle["extensions"]["publisher.native"][0]["kind"], "sandbox_error")
+
+    def test_required_runtime_sidecar_failure_is_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "rust-without-sidecar.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.rust"
+            report.version = "1.0.0"
+            report.artifact_hash = "e" * 64
+            report.capabilities = [{"id": "native_code", "evidence": ["server/rust-analyzer"]}]
+            runtime = {
+                "mode": "executed",
+                "plan": {
+                    "instrumentation": {"entrypoint_status": "declared"},
+                    "runtime_dependencies": [{
+                        "dependency": "rust-analyzer",
+                        "required": True,
+                        "status": "missing-cache",
+                    }],
+                },
+                "extensions": {"publisher.rust": [{"kind": "entrypoint_executed"}]},
+            }
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox", return_value=runtime):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+            self.assertEqual(runtime_bundle["runs"][0]["status"], "failed")
+            self.assertIn("rust-analyzer", runtime_bundle["runs"][0]["error"])
+            self.assertIn("missing-cache", runtime_bundle["runs"][0]["error"])
 
     def test_ast_dynamic_call_targets_are_aggregated_per_file(self) -> None:
         findings: list[Finding] = []

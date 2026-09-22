@@ -1138,6 +1138,18 @@ def _runtime_execution_failure(runtime: dict[str, Any], items: list[dict[str, An
     execution path; otherwise the required provider is incomplete.
     """
     plan = runtime.get("plan") if isinstance(runtime.get("plan"), dict) else {}
+    dependencies = plan.get("runtime_dependencies") if isinstance(plan.get("runtime_dependencies"), list) else []
+    failed_dependencies = [
+        item for item in dependencies
+        if isinstance(item, dict)
+        and item.get("required") is True
+        and str(item.get("status") or "") not in {"packaged", "provisioned"}
+    ]
+    if failed_dependencies:
+        dependency = failed_dependencies[0]
+        name = str(dependency.get("dependency") or "required runtime sidecar")
+        status = str(dependency.get("status") or "unknown")
+        return f"Required runtime sidecar {name} was not verified ({status})."
     instrumentation = plan.get("instrumentation") if isinstance(plan.get("instrumentation"), dict) else {}
     entrypoint_status = str(instrumentation.get("entrypoint_status") or "")
     if entrypoint_status != "not-applicable":
