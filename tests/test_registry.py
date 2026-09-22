@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ide_scanner.registry import MarketplaceDownloadError, _degzip_if_needed, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
+from ide_scanner.registry import MarketplaceDownloadError, _degzip_if_needed, _download_to_file, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
 
 
 OPENVSX_EXTENSION = {
@@ -25,6 +25,19 @@ OPENVSX_EXTENSION = {
 
 
 class RegistryTests(unittest.TestCase):
+    def test_marketplace_downloader_rejects_private_or_non_https_urls(self) -> None:
+        with self.assertRaisesRegex(MarketplaceDownloadError, "public HTTPS"):
+            _download_to_file("http://127.0.0.1/extension.vsix", tempfile.TemporaryFile(), 1024, 5)
+
+    def test_marketplace_downloader_uses_redirect_handler_for_public_destination_checks(self) -> None:
+        with patch("ide_scanner.registry._require_public_download_url"), patch("ide_scanner.registry._PublicRedirectHandler") as handler:
+            handler.return_value = object()
+            with patch("ide_scanner.registry.urllib.request.build_opener") as build:
+                build.return_value.open.side_effect = OSError("test failure")
+                with self.assertRaisesRegex(MarketplaceDownloadError, "download failed"):
+                    _download_to_file("https://example.com/extension.vsix", tempfile.TemporaryFile(), 1024, 5)
+                build.assert_called_once_with(handler.return_value)
+
     def test_gzip_unwrapping_runs_in_bounded_worker(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             artifact = Path(temp) / "wrapped.vsix"
