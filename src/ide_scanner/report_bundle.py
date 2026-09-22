@@ -360,13 +360,18 @@ def _security_dimensions(extension: ExtensionReport) -> dict[str, Any]:
         for finding in extension.findings:
             if finding.category not in categories:
                 continue
-            weight = severity_weight.get(finding.severity, 0)
+            # Dimension scores are user-facing risk summaries. Apply the same
+            # evidence policy as verdicts and headlines so a raw HIGH/MEDIUM
+            # detector label that is explicitly contextual cannot deduct
+            # points from a legitimate extension's security posture.
+            effective_severity = effective_finding_severity(finding)
+            weight = severity_weight.get(effective_severity, 0)
             evidence_class = str((finding.evidence or {}).get("evidence_class") or "weak")
             if evidence_class in {"weak", "reputation"}:
                 weight = max(1 if weight else 0, weight // 2)
             if weight:
                 score -= weight
-                deductions.append({"rule_id": finding.rule_id, "points": weight, "severity": finding.severity})
+                deductions.append({"rule_id": finding.rule_id, "points": weight, "severity": effective_severity})
         final_score = max(0, score)
         dimensions[dimension] = {
             "score": final_score,

@@ -1,7 +1,8 @@
 import unittest
+from types import SimpleNamespace
 
 from ide_scanner.classification_policy import effective_finding_severity, finding_actionability
-from ide_scanner.report_bundle import _rank_findings, grade_extension
+from ide_scanner.report_bundle import _rank_findings, _security_dimensions, grade_extension
 from ide_scanner.scanner import _classify_findings, _finding
 
 
@@ -18,6 +19,18 @@ class ClassificationPolicyV3Tests(unittest.TestCase):
         verdict, _, _, severity, _, risk, _ = _classify_findings([finding])
         self.assertEqual(finding_actionability(finding), "contextual")
         self.assertEqual((verdict, severity, risk), ("clean", "INFO", 0))
+
+    def test_contextual_raw_high_does_not_deduct_from_security_dimension(self) -> None:
+        finding = self.finding("process-execution", "capability", "HIGH")
+        extension = SimpleNamespace(
+            findings=[finding],
+            analysis_coverage={"status": "complete", "coverage_percent": 100, "providers": {}},
+        )
+
+        dimensions = _security_dimensions(extension)
+
+        self.assertEqual(dimensions["behavior_safety"]["score"], 100)
+        self.assertEqual(dimensions["behavior_safety"]["deductions"], [])
 
     def test_webview_hardening_note_is_low_without_review(self) -> None:
         finding = self.finding("webview-csp-missing", "capability")
