@@ -111,6 +111,14 @@ DEEP_REQUIRED_PROVIDERS = frozenset({"semgrep", "yara", "dependency_intelligence
 ARTIFACT_ORIGINS = frozenset({"user_uploaded_vsix", "installed_directory", "local_directory", "archive_artifact", "source_snapshot"})
 SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
+# A local extension can contain generated language-server/runtime payloads that
+# are valid artifacts but are not a safe unit for an all-local inventory scan.
+# Enforce a hard budget before hashing, Semgrep, or AST work. Exceeding it is
+# an explicit incomplete result (never an allow/clean result), so publication
+# gates can quarantine the artifact instead of risking a false negative or a
+# worker that never finishes.
+MAX_EXTENSION_FILES = 50_000
+MAX_EXTENSION_BYTES = 512 * 1024 * 1024
 MAX_SOURCE_PREVIEW_BYTES = 200 * 1024
 MAX_SOURCE_PREVIEWS = 40
 # Multi-megabyte entrypoints are treated as generated for correlation and AST
@@ -598,6 +606,7 @@ def _load_registry_snapshot(path: Path | str) -> dict[str, Any]:
 
 
 def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
+    _enforce_extension_resource_budget(path)
     manifest, manifest_status = _read_manifest_status(path / "package.json")
     name = str(manifest.get("name") or path.name)
     publisher = str(manifest.get("publisher") or "unknown")
@@ -4611,6 +4620,40 @@ def _walk_extension_files(path: Path) -> list[Path]:
     return files
 
 
+def _enforce_extension_resource_budget(path: Path) -> None:
+    """Reject oversized local artifacts before expensive analysis begins.
+
+    The caller isolates this exception into an explicit incomplete report. We
+    intentionally do not truncate a package and call it analyzed: partial
+    executable coverage would make a clean result unsafe to publish.
+    """
+    if not path.is_dir():
+        return
+    total_bytes = 0
+    file_count = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS]
+        for filename in filenames:
+            candidate = Path(dirpath, filename)
+            if candidate.is_symlink():
+                continue
+            try:
+                size = candidate.stat().st_size
+            except OSError as exc:
+                raise ValueError(f"Artifact resource budget could not stat {candidate}: {exc}") from exc
+            file_count += 1
+            total_bytes += size
+            if file_count > MAX_EXTENSION_FILES:
+                raise ValueError(
+                    f"Artifact exceeds scan resource budget: {file_count} files > {MAX_EXTENSION_FILES}"
+                )
+            if total_bytes > MAX_EXTENSION_BYTES:
+                raise ValueError(
+                    "Artifact exceeds scan resource budget: "
+                    f"{total_bytes} bytes > {MAX_EXTENSION_BYTES}"
+                )
+
+
 def _declared_entrypoints(manifest: dict[str, Any], path: Path) -> tuple[set[str], list[str]]:
     entrypoints: set[str] = set()
     optional_missing: list[str] = []
@@ -4716,18 +4759,28 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
     missing = list(coverage.get("missing_entrypoints") or [])
     failures = list(coverage.get("read_failures") or [])
     oversized = list(coverage.get("oversized_files") or [])
-    limitations: list[str] = []
+    # Preserve request/worker-level limitations already attached to the
+    # coverage object. Rebuilding this list from structural fields alone used
+    # to erase the real reason an artifact was quarantined (for example, an
+    # extension-size budget failure) and replace it with the less useful
+    # generic ``scan-aborted`` manifest label.
+    limitations: list[str] = list(coverage.get("limitations") or [])
+
+    def add_limitation(value: str) -> None:
+        if value and value not in limitations:
+            limitations.append(value)
+
     manifest_validation = coverage.get("manifest_validation")
     if isinstance(manifest_validation, dict) and not manifest_validation.get("valid"):
-        limitations.append(
+        add_limitation(
             f"Manifest (package.json) is not trustworthy: {manifest_validation.get('status') or 'invalid'}"
         )
     if missing:
-        limitations.append(f"Missing declared entrypoint(s): {', '.join(missing[:3])}")
+        add_limitation(f"Missing declared entrypoint(s): {', '.join(missing[:3])}")
     if failures:
-        limitations.append(f"Could not read {len(failures)} executable file(s)")
+        add_limitation(f"Could not read {len(failures)} executable file(s)")
     if oversized:
-        limitations.append(f"Skipped {len(oversized)} executable file(s) larger than {MAX_TEXT_BYTES} bytes")
+        add_limitation(f"Skipped {len(oversized)} executable file(s) larger than {MAX_TEXT_BYTES} bytes")
     required = candidates - set(oversized) - set(failures)
     if required - analyzed:
         limitations.append(f"Did not analyze {len(required - analyzed)} executable candidate(s)")
@@ -4747,7 +4800,7 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
         provider["required"] = True
         providers[name] = provider
         if provider.get("status") != "completed":
-            limitations.append(f"Required provider {name} did not complete")
+            add_limitation(f"Required provider {name} did not complete")
     completed_required_providers = sorted(
         name
         for name in required_providers
@@ -4768,7 +4821,7 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
         # yet the artifact ships generated/minified runtime code. Reporting 100%
         # here would claim full analysis of code that was never inspected.
         executable_file_coverage = 0
-        limitations.append(
+        add_limitation(
             f"No analyzable entrypoint was reachable; {len(excluded_generated)} generated/minified "
             "runtime file(s) were present but not analyzed"
         )

@@ -484,6 +484,23 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report["summary"]["by_analysis_status"], {"failed": 1})
         self.assertIn("0 clean, 1 incomplete", report["human_summary"][0])
 
+    def test_oversized_artifact_is_quarantined_before_expensive_analysis(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"oversized","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+            with patch("ide_scanner.scanner.MAX_EXTENSION_BYTES", 1):
+                report = scan_targets(paths=[root], include_posture=False)
+
+        extension = report["extensions"][0]
+        self.assertEqual(extension["analysis_status"], "failed")
+        self.assertEqual(extension["decision"], "incomplete")
+        self.assertIn("exceeds scan resource budget", extension["decision_reason"])
+        self.assertEqual(extension["scanned_files"], 0)
+
     def test_isolated_local_failure_preserves_manifest_identity(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
