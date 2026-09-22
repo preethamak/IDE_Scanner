@@ -18,9 +18,15 @@ def test_real_holdout_provenance_matches_exact_advisories() -> None:
     result = verify_holdout_provenance(SOURCE, ADVISORIES)
 
     assert result["status"] == "verified"
-    assert result["artifact_count"] == 10
+    assert result["artifact_count"] == 11
     assert result["malicious_artifacts_with_exact_advisories"] == 5
     assert result["advisory_snapshot_version"] == "2026-09-19.6"
+    assert any(
+        item["extension_id"] == "dracula-theme.theme-dracula"
+        and item["version"] == "2.25.1"
+        and item["label"] == "known_safe"
+        for item in json.loads(SOURCE.read_text(encoding="utf-8"))["artifacts"]
+    )
 
 
 def test_provenance_rejects_changed_evidence_hash() -> None:
