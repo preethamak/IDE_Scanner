@@ -309,7 +309,10 @@ def _runtime_contract(actual: dict[str, Any]) -> dict[str, Any]:
     return {
         "coverage_status": str(coverage.get("status") or ""),
         "required_providers_complete": coverage.get("required_providers_complete") is True,
-        "required": provider.get("required") is True,
+        # Preserve an absent/malformed declaration as unknown. Treating it as
+        # ``False`` would let a missing provider masquerade as explicitly
+        # not-applicable coverage.
+        "required": provider.get("required") if isinstance(provider.get("required"), bool) else None,
         "provider_status": str(provider.get("status") or ""),
         "execution": str(provider.get("execution") or ""),
         "runtime_policy": str(provider.get("policy") or ""),
@@ -329,13 +332,15 @@ def _runtime_contract_violations(contract: dict[str, Any]) -> list[str]:
             "executed": True,
             "external_syscall_trace": True,
         }
-    else:
+    elif contract.get("required") is False:
         expected = {
             "provider_status": "not-applicable",
             "execution": "policy-gated",
             "runtime_policy": "capability-gated-v1",
             "executed": False,
         }
+    else:
+        return ["runtime contract required flag is missing or invalid"]
     mismatches = [
         f"runtime contract {field}={contract.get(field)!r} expected {value!r}"
         for field, value in expected.items()

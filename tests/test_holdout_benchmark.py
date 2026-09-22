@@ -128,6 +128,19 @@ class HoldoutBenchmarkTests(unittest.TestCase):
         self.assertFalse(result["gate"]["passed"])
         self.assertTrue(any("external_syscall_trace" in item for item in result["artifacts"][1]["violations"]))
 
+    def test_holdout_fails_when_runtime_required_flag_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            del report["extensions"][0]["analysis_coverage"]["providers"]["dynamic_sandbox"]["required"]
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertTrue(any("required flag is missing" in item for item in result["artifacts"][0]["violations"]))
+
     @staticmethod
     def _corpus() -> dict:
         return {
