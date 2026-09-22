@@ -18,7 +18,7 @@ def test_real_holdout_provenance_matches_exact_advisories() -> None:
     result = verify_holdout_provenance(SOURCE, ADVISORIES)
 
     assert result["status"] == "verified"
-    assert result["artifact_count"] == 10
+    assert result["artifact_count"] == 11
     assert result["malicious_artifacts_with_exact_advisories"] == 5
     assert result["advisory_snapshot_version"] == "2026-09-19.6"
 
