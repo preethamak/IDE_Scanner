@@ -303,6 +303,19 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "corpus.json", corpus),
                 )
 
+    def test_accepts_independent_threat_report_with_osv_compatible_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = holdout_corpus()
+            corpus["artifacts"][5]["label_evidence"]["source_type"] = "independent_threat_report_and_osv_record"
+            result = build_publication_accuracy_gate(
+                self.write(root, "regression.json", gate("regression")),
+                self.write(root, "holdout.json", holdout_gate()),
+                self.write(root, "corpus.json", corpus),
+            )
+
+            self.assertEqual(result["holdout"]["label_counts"], {"known_safe": 5, "known_malicious": 5})
+
     def test_rejects_static_only_holdout_from_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

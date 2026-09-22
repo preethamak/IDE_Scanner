@@ -34,6 +34,7 @@ LABEL_EVIDENCE_SOURCE_TYPES = {
     "independent_adjudication",
     "independent_review",
     "independent_threat_report",
+    "independent_threat_report_and_osv_record",
     "independent_hash_report_and_official_release",
     "maintainer_advisory_and_independent_hash_report",
     "trusted_threat_feed_and_independent_hash_report",
@@ -47,6 +48,7 @@ SAFE_LABEL_EVIDENCE_SOURCE_TYPES = {
 MALICIOUS_LABEL_EVIDENCE_SOURCE_TYPES = {
     "independent_adjudication",
     "independent_threat_report",
+    "independent_threat_report_and_osv_record",
     "maintainer_advisory_and_independent_hash_report",
     "trusted_threat_feed_and_independent_hash_report",
     "malware_removal_and_independent_hash_report",
