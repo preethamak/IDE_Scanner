@@ -203,17 +203,17 @@
       "extension_id": "dracula-theme.theme-dracula",
       "version": "2.25.1",
       "label": "known_safe",
-      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/dracula-theme/vsextensions/theme-dracula/2.25.1/vspackage",
-      "sha256": "8a319b762a9b0d0999615a990b1d97e16eca44d57750375d5afcfef71fef7dc0",
+      "artifact_url": "https://open-vsx.org/api/dracula-theme/theme-dracula/2.25.1/file/dracula-theme.theme-dracula-2.25.1.vsix",
+      "sha256": "f4d8c28fc64874b1b959cc90dbd39c84d5d35c9cf203e32b7a758dc9abf5b1cb",
       "label_evidence": {
         "source_type": "independent_review",
-        "source_url": "https://marketplace.visualstudio.com/items?itemName=dracula-theme.theme-dracula",
+        "source_url": "https://open-vsx.org/api/dracula-theme/theme-dracula/2.25.1",
         "publisher_source_url": "https://github.com/dracula/visual-studio-code",
         "retrieved_at": "2026-09-22T04:13:55Z",
         "evidence_scope": "exact-artifact",
         "extension_id": "dracula-theme.theme-dracula",
         "version": "2.25.1",
-        "artifact_sha256": "8a319b762a9b0d0999615a990b1d97e16eca44d57750375d5afcfef71fef7dc0"
+        "artifact_sha256": "f4d8c28fc64874b1b959cc90dbd39c84d5d35c9cf203e32b7a758dc9abf5b1cb"
       }
     }
   ]
