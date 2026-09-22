@@ -12,7 +12,7 @@ static-only and used an empty advisory snapshot for behavior calibration.
 | `redhat.vscode-yaml@1.24.0` | known safe | allow | clean | 0 | contextual capabilities only |
 | `rust-lang.rust-analyzer@0.3.2971` | known safe | allow | clean | 0 | contextual capabilities only |
 | `ms-python.python@2026.5.2026070801` | known safe | allow | clean | 0 | agent/process/network capabilities remained contextual |
-| `bingcha.bcai-tools@4.0.37` | known malicious | review | review | 55 | remote credential-broker exposure without intelligence |
+| `bingcha.bcai-tools@4.0.37` | known malicious | review | review | 57 | remote credential-broker exposure without intelligence |
 
 Observed rates in this snapshot:
 
@@ -44,7 +44,7 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`811c963de6684a377fe03ca2722a90efaf5f00c8`, policy `3.1.0-calibration.5`,
+`c8f3888abe1f05d7d86338b23f179914bc952dca`, policy `3.1.0-calibration.5`,
 and ruleset `2026.09.22-policy-v3-calibration.38-complete-rule-catalog` (116
 rules). The BCAI behavior-only replay remains `REVIEW` without the advisory
 and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory enabled.
@@ -53,7 +53,8 @@ Neither run is a substitute for the required deep-runtime publication holdout.
 ## Latest canonical diagnostic replay
 
 The current calibration test suite was rerun against six exact safe controls
-and the exact BCAI artifact. All retained scans completed; the safe controls
+and the exact BCAI artifact with scanner build
+`c8f3888abe1f05d7d86338b23f179914bc952dca`. All retained scans completed; the safe controls
 remained `allow`/`clean`, and BCAI was `block`/`malicious` with authoritative
 malware score and risk score `100` when the verified advisory was enabled.
 This is useful evidence that capability signals remain contextual on this small
