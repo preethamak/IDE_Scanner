@@ -1092,12 +1092,11 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
 def _runtime_required_for_report(report: ExtensionReport) -> bool:
     """Require dynamic coverage only when it can answer a security question.
 
-    A VS Code extension can have a JavaScript activation entrypoint without
-    requesting sensitive powers. Running every such entrypoint in the sandbox
-    creates noise and incorrectly treats ordinary themes, UI helpers, and
-    similarly low-power packages as runtime-required. Static analysis still
-    covers their executable files; the dynamic provider records them as
-    ``not-applicable`` under the capability policy.
+    A resolvable activation entrypoint is itself an executable trust boundary.
+    Running it in the sandbox gives the scanner a chance to observe behavior
+    that static rules did not recognize, so a missing capability label cannot
+    silently turn into a false negative. Purely declarative packages such as
+    themes remain ``not-applicable`` when they ship no executable entrypoint.
 
     Sensitive capabilities remain runtime-required even when no activation
     entrypoint is declared, which covers native/WASM payloads and lifecycle
@@ -1112,16 +1111,8 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
     }
     if capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES:
         return True
-    # A theme normally has no executable entrypoint. If it does, run it in the
-    # controlled namespace even when static inspection did not recognize a
-    # network/process capability. This is the boundary that catches hidden or
-    # obfuscated behavior without forcing declarative themes through a fake
-    # runtime path.
-    classification = classify_extension(report)
-    if classification.get("primary") == "theme":
-        coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
-        return bool(coverage.get("resolved_entrypoints"))
-    return False
+    coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
+    return bool(coverage.get("resolved_entrypoints"))
 
 
 def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:

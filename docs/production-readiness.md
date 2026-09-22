@@ -172,9 +172,12 @@ runtime pass so opaque or obfuscated behavior is not silently treated as safe.
 
 The website Deep Scan workflow invokes the same path with `--profile deep
 --runtime`; its callback and publication checks require complete required-provider
-coverage. Local environments without namespace permission must report the
-runtime provider as failed/incomplete, never silently fall back to host
-execution or claim dynamic coverage.
+coverage. Every resolvable activation entrypoint is exercised in the sandbox,
+even when static analysis did not identify a sensitive capability. Local
+environments without namespace permission must report the runtime provider as
+failed/incomplete, never silently fall back to host execution or claim dynamic
+coverage. Purely declarative packages with no executable entrypoint remain
+explicitly not-applicable.
 
 Run the worker preflight before starting a large runtime-enabled batch:
 
