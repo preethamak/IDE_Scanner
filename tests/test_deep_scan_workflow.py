@@ -13,6 +13,8 @@ def test_worker_uses_supported_scanner_module_entrypoint() -> None:
     assert "IDE_SCANNER_BUILD_SHA: ${{ inputs.scanner_build || github.sha }}" in workflow
     assert '"scan"' in worker
     assert "\n          ide-scanner scan" not in workflow
+    assert "IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH" not in worker
+    assert "IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH" not in workflow
 
 
 def test_worker_verifies_real_bubblewrap_namespace_isolation() -> None:

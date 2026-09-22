@@ -156,11 +156,6 @@ jobs:
           # local CLI retains its conservative 50 MiB default.
           IDE_SCANNER_MAX_VSIX_BYTES: 268435456
           IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT: 180
-          # Some Marketplace releases publish a stale VsixSha256 property.
-          # The worker may still analyze the exact bounded bytes, while the
-          # report exposes the mismatch and keeps the observed SHA-256 as the
-          # immutable artifact identity. Local/CLI scans remain fail-closed.
-          IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH: "1"
           IDE_SCANNER_ARTIFACT_STORE: ${{ runner.temp }}/ide-scanner-artifacts
           IDE_SCANNER_RUNTIME_TIMEOUT: "20"
           IDE_SCANNER_WORKER_ARTIFACTS: ${{ runner.temp }}/ide-scanner-worker-artifacts

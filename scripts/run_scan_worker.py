@@ -104,7 +104,6 @@ def run_scan(job: dict[str, object], bundle_path: Path) -> bool:
     environment = os.environ.copy()
     environment["IDE_SCANNER_BUILD_SHA"] = os.environ.get("IDE_SCANNER_BUILD_SHA", "")
     environment["SCAN_TARGET_PLATFORM"] = target_platform
-    environment["IDE_SCANNER_ALLOW_REGISTRY_SHA_MISMATCH"] = "1"
     completed = subprocess.run(command, env=environment, check=False)
     return completed.returncode == 0 and bundle_path.exists()
 
