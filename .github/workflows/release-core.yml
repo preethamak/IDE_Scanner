@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the canonical scanner source
-        run: python -m pip install --upgrade pip setuptools wheel && python -m pip install .
+        run: python -m pip install --upgrade pip setuptools wheel pytest && python -m pip install .
       - name: Run scanner contract tests
         run: PYTHONPATH=src python -m unittest discover -s tests -v
       - name: Build distribution wheel
