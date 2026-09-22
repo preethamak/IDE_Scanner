@@ -12,6 +12,11 @@ import urllib.error
 import re
 from pathlib import Path
 
+try:
+    from scripts.secure_http import install_secure_opener, validate_endpoint_url
+except ModuleNotFoundError:  # Direct `python scripts/callback_scan.py` execution.
+    from secure_http import install_secure_opener, validate_endpoint_url  # type: ignore[no-redef]
+
 CALLBACK_ATTEMPTS = 4
 CALLBACK_RETRY_DELAYS_SECONDS = (2, 5, 10)
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -42,6 +47,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def submit_callback(payload: bytes) -> str:
+    validate_endpoint_url(
+        os.environ["SCAN_CALLBACK_URL"],
+        label="scan callback URL",
+        allowed_hosts_env="SCAN_INTERNAL_ALLOWED_HOSTS",
+    )
+    install_secure_opener()
     last_error: BaseException | None = None
     for attempt in range(CALLBACK_ATTEMPTS):
         try:

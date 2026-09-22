@@ -6,6 +6,11 @@ import urllib.error
 import urllib.request
 import re
 
+try:
+    from scripts.secure_http import SameOriginPostRedirect, validate_endpoint_url
+except ModuleNotFoundError:  # Direct `python scripts/claim_scan.py` execution.
+    from secure_http import SameOriginPostRedirect, validate_endpoint_url  # type: ignore[no-redef]
+
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 USER_AGENT = "ide-scanner-github-actions/1"
 
@@ -22,6 +27,11 @@ def main() -> int:
         target_platform = str(job.get("target_platform") or "").strip().lower()
         if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
             raise RuntimeError("Scan claim target platform is invalid")
+        validate_endpoint_url(
+            str(job["callback_url"]),
+            label="scan callback URL",
+            allowed_hosts_env="SCAN_INTERNAL_ALLOWED_HOSTS",
+        )
         write_outputs({
             "has_job": "true",
             "job_id": str(job["id"]),
@@ -57,6 +67,7 @@ def claim_job(
         "github_run_id": os.environ.get("SCAN_GITHUB_RUN_ID") or None,
         "github_sha": os.environ.get("SCAN_GITHUB_SHA") or None,
     }
+    validate_endpoint_url(claim_url, label="scan claim URL")
     request = urllib.request.Request(
         claim_url,
         data=json.dumps(payload).encode(),
@@ -76,18 +87,8 @@ def claim_job(
         raise RuntimeError(f"Scan claim returned HTTP {error.code} from {claim_url}") from error
 
 
-class _PostPreservingRedirect(urllib.request.HTTPRedirectHandler):
-    # urllib raises on a 307/308 answer to a POST instead of following it. The
-    # claim endpoint sits behind hosts that can redirect to the canonical apex
-    # domain, so re-issue the POST (method, body and headers preserved) to the
-    # new location rather than crashing the claim step.
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return urllib.request.Request(
-            newurl,
-            data=req.data,
-            method=req.get_method(),
-            headers={**dict(req.header_items()), "User-Agent": USER_AGENT},
-        )
+class _PostPreservingRedirect(SameOriginPostRedirect):
+    """Compatibility name used by the worker and its transport tests."""
 
 
 def write_outputs(values: dict[str, str]) -> None:

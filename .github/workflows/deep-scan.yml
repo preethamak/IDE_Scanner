@@ -173,6 +173,10 @@ jobs:
           SCAN_GITHUB_SHA: ${{ inputs.scanner_build || github.sha }}
           SCAN_RUNNER_SECRET: ${{ secrets.SCAN_RUNNER_SECRET }}
           SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
+          # Callback URLs come from the claim response; keep report signatures
+          # on the GuardRails control-plane origin even if queue data is stale
+          # or tampered with.
+          SCAN_INTERNAL_ALLOWED_HOSTS: abscissa.dev
         run: |
           python scripts/run_scan_worker.py
       - uses: actions/upload-artifact@v4

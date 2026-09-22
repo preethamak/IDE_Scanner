@@ -44,7 +44,7 @@ class CallbackScanTests(unittest.TestCase):
         response.__enter__.return_value.read.return_value = b'{"scan_id":"scan-1"}'
 
         with (
-            patch.dict(callback_scan.os.environ, {"SCAN_CALLBACK_SECRET": "secret", "SCAN_CALLBACK_URL": "https://example.invalid/callback"}),
+            patch.dict(callback_scan.os.environ, {"SCAN_CALLBACK_SECRET": "secret", "SCAN_CALLBACK_URL": "https://example.invalid/callback", "SCAN_INTERNAL_ALLOWED_HOSTS": "example.invalid"}),
             patch.object(callback_scan.urllib.request, "urlopen", side_effect=[transient, response]) as urlopen,
             patch.object(callback_scan.time, "sleep") as sleep,
         ):
@@ -69,7 +69,7 @@ class CallbackScanTests(unittest.TestCase):
         )
 
         with (
-            patch.dict(callback_scan.os.environ, {"SCAN_CALLBACK_SECRET": "secret", "SCAN_CALLBACK_URL": "https://example.invalid/callback"}),
+            patch.dict(callback_scan.os.environ, {"SCAN_CALLBACK_SECRET": "secret", "SCAN_CALLBACK_URL": "https://example.invalid/callback", "SCAN_INTERNAL_ALLOWED_HOSTS": "example.invalid"}),
             patch.object(callback_scan.urllib.request, "urlopen", side_effect=rejected) as urlopen,
             patch.object(callback_scan.time, "sleep") as sleep,
             self.assertRaisesRegex(RuntimeError, "HTTP 422"),

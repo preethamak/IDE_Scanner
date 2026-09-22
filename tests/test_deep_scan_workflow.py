@@ -26,6 +26,7 @@ def test_worker_verifies_real_bubblewrap_namespace_isolation() -> None:
     assert "-- /usr/bin/true" in workflow
     assert "strace" in workflow
     assert "GUARDRAILS_RUNTIME_EXTERNAL_TRACE: \"1\"" in workflow
+    assert "SCAN_INTERNAL_ALLOWED_HOSTS: abscissa.dev" in workflow
 
 
 def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:

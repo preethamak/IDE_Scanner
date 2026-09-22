@@ -39,6 +39,7 @@ class ClaimScanTests(unittest.TestCase):
             "SCAN_RUNNER_ID": "github-actions-123",
             "SCAN_RUNNER_SECRET": "test-secret",
             "SCAN_GITHUB_SHA": "a" * 40,
+            "SCAN_INTERNAL_ALLOWED_HOSTS": "scanner.example",
             "GITHUB_OUTPUT": str(self.output),
         }
 
@@ -101,11 +102,27 @@ class ClaimScanTests(unittest.TestCase):
             "https://web.example/claim", data=b'{"runner_id":"r"}', method="POST",
             headers={"Authorization": "Bearer test-secret", "Content-Type": "application/json"},
         )
-        redirected = handler.redirect_request(original, None, 307, "Temporary Redirect", {}, "https://apex.example/claim")
-        self.assertEqual(redirected.full_url, "https://apex.example/claim")
+        redirected = handler.redirect_request(original, None, 307, "Temporary Redirect", {}, "https://web.example/v2/claim")
+        self.assertEqual(redirected.full_url, "https://web.example/v2/claim")
         self.assertEqual(redirected.get_method(), "POST")
         self.assertEqual(redirected.data, b'{"runner_id":"r"}')
         self.assertEqual(redirected.get_header("Authorization"), "Bearer test-secret")
+
+    def test_redirect_handler_rejects_cross_origin_secret_forwarding(self):
+        handler = claim_scan._PostPreservingRedirect()
+        original = claim_scan.urllib.request.Request(
+            "https://web.example/claim", data=b"payload", method="POST",
+            headers={"Authorization": "Bearer test-secret"},
+        )
+        with self.assertRaisesRegex(Exception, "across origins"):
+            handler.redirect_request(original, None, 307, "Temporary Redirect", {}, "https://evil.example/collect")
+
+    def test_claim_rejects_http_callback_url(self):
+        payload = {"id": "job-1", "extension_id": "publisher.extension", "version": "1.2.3", "callback_url": "http://scanner.example/callback"}
+        with patch.dict("os.environ", self.environment, clear=True), patch.object(
+            claim_scan.urllib.request, "urlopen", return_value=Response(200, payload)
+        ), self.assertRaisesRegex(RuntimeError, "callback URL must use https"):
+            claim_scan.main()
 
 
 if __name__ == "__main__":

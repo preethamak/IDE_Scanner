@@ -5,6 +5,11 @@ import os
 import urllib.request
 import re
 
+try:
+    from scripts.secure_http import install_secure_opener, validate_endpoint_url
+except ModuleNotFoundError:  # Direct `python scripts/enqueue_scan.py` execution.
+    from secure_http import install_secure_opener, validate_endpoint_url  # type: ignore[no-redef]
+
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 USER_AGENT = "ide-scanner-github-actions/1"
 
@@ -21,6 +26,8 @@ def main() -> int:
         return 0
     if not all((extension_id, version, purpose)):
         raise RuntimeError("extension id, version, and purpose must be provided together")
+    validate_endpoint_url(os.environ["SCAN_ENQUEUE_URL"], label="scan enqueue URL")
+    install_secure_opener()
     payload = json.dumps({
         "jobs": [{
             "extension_id": extension_id,
