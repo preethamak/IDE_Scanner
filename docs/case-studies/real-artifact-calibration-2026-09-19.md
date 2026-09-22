@@ -44,14 +44,15 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`52cbe37a6ac28fd448fb9e23045448c0fc28bb6f`. The BCAI behavior-only replay
-remains `REVIEW` without the advisory and the exact-hash replay is
-`BLOCK/MALICIOUS` with the advisory enabled. Neither run is a substitute for
-the required deep-runtime publication holdout.
+`d3491930f333e12e421cf5645866ffac0c511886`, policy `3.1.0-calibration.5`,
+and ruleset `2026.09.22-policy-v3-calibration.38-complete-rule-catalog` (116
+rules). The BCAI behavior-only replay remains `REVIEW` without the advisory
+and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory enabled.
+Neither run is a substitute for the required deep-runtime publication holdout.
 
 ## Latest canonical diagnostic replay
 
-The current calibration test suite was rerun against five exact safe controls
+The current calibration test suite was rerun against six exact safe controls
 and the exact BCAI artifact. All retained scans completed; the safe controls
 remained `allow`/`clean`, and BCAI was `block`/`malicious` with authoritative
 malware score and risk score `100` when the verified advisory was enabled.
