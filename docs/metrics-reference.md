@@ -418,7 +418,9 @@ SHA-256 values, document artifact-specific label evidence, contain both
 `known_safe` and `known_malicious` exact artifacts, and use non-fixture source
 types. Label evidence must use an approved independent source type such as
 `independent_review`, `independent_threat_report`, or a maintainer/advisory
-source paired with an independent hash report; an operator assertion alone is
+source paired with an independent hash report. An independent threat report
+that also publishes an OSV-compatible record is admissible when the source of
+record and exact artifact hash remain explicit; an operator assertion alone is
 not admissible. The script requires every holdout artifact to scan completely under one
 full scanner build and rejects an `unknown` build. The website publication
 scripts consume this combined artifact and will not activate a regression-only
