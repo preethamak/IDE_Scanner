@@ -2174,6 +2174,14 @@ class ScannerTests(unittest.TestCase):
             entries[("nrwl.angular-console", "18.95.0")]["source_secondary"],
             "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
         )
+        self.assertEqual(
+            entries[("AzureCdnInfo.edrtester", "1.0.4")]["artifact_sha256"],
+            "d4101a5bc86747f499ef347548e92eb3e1b09ce6acaf34bd1ee07f66400b18af",
+        )
+        self.assertEqual(
+            entries[("AzureCdnInfo.edrtester", "1.0.4")]["advisory_id"],
+            "CLR-2026-3045",
+        )
 
     def test_bundled_advisory_snapshot_contains_independently_reported_backdoors(self) -> None:
         from ide_scanner.scanner import _load_extension_advisories

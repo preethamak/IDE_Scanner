@@ -1,16 +1,16 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.21.9",
+  "corpus_version": "2026.09.22.2",
   "holdout": {
     "status": "fresh-labeled",
     "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisories, MalwareBazaar sample records, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
-    "frozen_at": "2026-09-21T00:00:00Z"
+    "frozen_at": "2026-09-22T23:08:11Z"
   },
   "advisory_snapshot": {
     "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
-    "snapshot_version": "2026-09-19.6",
-    "sha256": "02aec3cc83a9dd3937548dc94abc12ad94c169b9e2891e20172a9a433e052f9c"
+    "snapshot_version": "2026-09-22.1",
+    "sha256": "4ca83ee79f23ac4cc0bfd41ccd6b3f3c9dbec7a7b29ad60c82d5de26808171a0"
   },
   "artifacts": [
     {
@@ -197,6 +197,41 @@
         "extension_id": "ms-python.python",
         "version": "2026.5.2026070801",
         "artifact_sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8"
+      }
+    },
+    {
+      "extension_id": "dracula-theme.theme-dracula",
+      "version": "2.25.1",
+      "label": "known_safe",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/dracula-theme/vsextensions/theme-dracula/2.25.1/vspackage",
+      "sha256": "8a319b762a9b0d0999615a990b1d97e16eca44d57750375d5afcfef71fef7dc0",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=dracula-theme.theme-dracula",
+        "publisher_source_url": "https://github.com/dracula/visual-studio-code",
+        "retrieved_at": "2026-09-22T04:13:55Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "dracula-theme.theme-dracula",
+        "version": "2.25.1",
+        "artifact_sha256": "8a319b762a9b0d0999615a990b1d97e16eca44d57750375d5afcfef71fef7dc0"
+      }
+    },
+    {
+      "extension_id": "AzureCdnInfo.edrtester",
+      "version": "1.0.4",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/AzureCdnInfo/vsextensions/edrtester/1.0.4/vspackage",
+      "sha256": "d4101a5bc86747f499ef347548e92eb3e1b09ce6acaf34bd1ee07f66400b18af",
+      "label_evidence": {
+        "source_type": "independent_threat_report_and_osv_record",
+        "source_url": "https://research.codelake.dev/advisories/clr-2026-3045-edrtester/",
+        "source_secondary_url": "https://osv.dev/list?ecosystem=VSCode",
+        "retrieved_at": "2026-09-22T23:08:11Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "AzureCdnInfo.edrtester",
+        "version": "1.0.4",
+        "artifact_sha256": "d4101a5bc86747f499ef347548e92eb3e1b09ce6acaf34bd1ee07f66400b18af",
+        "advisory_id": "CLR-2026-3045"
       }
     }
   ]
