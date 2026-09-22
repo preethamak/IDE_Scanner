@@ -537,10 +537,14 @@ def _evidence_record(finding: dict[str, Any], *, include_raw_evidence: bool) -> 
 
 
 def _rank_findings(findings: list[Any]) -> list[Any]:
+    actionability_rank = {"block": 4, "review": 3, "low": 2, "contextual": 1}
     severity_rank = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
     return sorted(findings, key=lambda item: (
-        severity_rank.get(str(getattr(item, "severity", "")), 0),
+        actionability_rank.get(finding_actionability(item), 0),
+        severity_rank.get(effective_finding_severity(item), 0),
+        finding_evidence_class(item) in {"confirmed", "vulnerability", "correlated"},
         int(getattr(item, "score", 0) or 0),
+        float(getattr(item, "confidence", 0) or 0),
         str(getattr(item, "rule_id", "")),
     ), reverse=True)
 

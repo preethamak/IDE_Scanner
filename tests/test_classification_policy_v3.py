@@ -1,7 +1,7 @@
 import unittest
 
 from ide_scanner.classification_policy import effective_finding_severity, finding_actionability
-from ide_scanner.report_bundle import grade_extension
+from ide_scanner.report_bundle import _rank_findings, grade_extension
 from ide_scanner.scanner import _classify_findings, _finding
 
 
@@ -92,6 +92,14 @@ class ClassificationPolicyV3Tests(unittest.TestCase):
     def test_dashboard_grade_keeps_actionable_high_severity(self) -> None:
         finding = self.finding("vulnerable-npm-dependency", "dependency", "HIGH", {"exact": True})
         self.assertEqual(grade_extension("review", 30, 0, [finding]), "C")
+
+    def test_report_headlines_rank_actionable_evidence_above_context(self) -> None:
+        contextual = self.finding("process-execution", "capability", "HIGH")
+        correlated = self.finding("credential-exfiltration-chain", "correlated", "MEDIUM")
+        self.assertEqual(
+            [item.rule_id for item in _rank_findings([contextual, correlated])],
+            ["credential-exfiltration-chain", "process-execution"],
+        )
 
 
 if __name__ == "__main__":
