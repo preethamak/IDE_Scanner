@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-advisories", help="Versioned JSON feed of exact extension vulnerability advisories. Defaults to the bundled snapshot.")
     scan.add_argument("--registry-snapshot", help="Replay registry and dependency intelligence captured in an earlier JSON report.")
     scan.add_argument("--sandbox-observations", help="JSON observations from an external sandbox run. The scanner imports this evidence but does not execute extensions.")
-    scan.add_argument("--runtime", action="store_true", help="Run a capability-gated dynamic pass for local or marketplace artifacts inside Bubblewrap; low-capability packages are recorded as not applicable.")
+    scan.add_argument("--runtime", action="store_true", help="Run a bounded Bubblewrap pass for resolvable activation entrypoints and sensitive capability surfaces; purely declarative packages are recorded as not applicable.")
     scan.add_argument("--runtime-timeout", type=int, default=15, help="Maximum seconds per controlled runtime action (1-300).")
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     scan.add_argument("--skip-posture", action="store_true", help="Skip local IDE/client posture checks; useful for portable extension corpus scans.")
