@@ -198,6 +198,11 @@ def _summary(
 
 
 def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
+    ranked_findings = _rank_findings(extension.findings)
+    headline_findings = [
+        finding for finding in ranked_findings
+        if finding_actionability(finding) in {"block", "review", "low"}
+    ]
     return ExtensionSummary(
         extension_id=extension.extension_id,
         name=extension.name,
@@ -212,7 +217,10 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         grade=grade_extension(extension.verdict, extension.risk_score, extension.malware_score, extension.findings),
         verdict_state=_verdict_state(extension),
         verdict_label=_verdict_label(extension),
-        top_findings=[finding.rule_id for finding in _rank_findings(extension.findings)[:5]],
+        # Context-only capability and posture signals remain in the exact
+        # detail report, but headline evidence must not present them as
+        # security alerts when no action is required.
+        top_findings=[finding.rule_id for finding in headline_findings[:5]],
         finding_count=len(extension.findings),
         dependency_count=len(extension.dependencies),
         activation_summary=_activation_summary(extension),

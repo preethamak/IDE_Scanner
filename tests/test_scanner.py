@@ -963,6 +963,9 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(suspicious["artifact_sha256"]), 64)
         self.assertIn("credential-exfiltration-chain", suspicious["top_findings"])
 
+        safe = next(row for row in rows if row["extension_id"] == "trusted.trusted-formatter")
+        self.assertEqual(safe["top_findings"], [])
+
         detail = bundle["extensions"][suspicious["detail_ref"]]
         raw = next(item for item in report["extensions"] if item["extension_id"] == "unknown.shadow-helper")
         for field in ("analysis_status", "decision", "severity", "risk_score", "malware_score"):
