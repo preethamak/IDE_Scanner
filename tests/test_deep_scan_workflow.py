@@ -86,6 +86,7 @@ def test_worker_preserves_claimed_platform_artifact_for_90_days() -> None:
     assert "IDE_SCANNER_ARTIFACT_STORE: ${{ runner.temp }}/ide-scanner-artifacts" in workflow
     assert "${{ runner.temp }}/ide-scanner-artifacts" in workflow
     assert "jobs_per_worker" in workflow
+    assert 'SCAN_EMPTY_CLAIM_RETRIES: "5"' in workflow
     assert "retention-days: 90" in workflow
     assert "retention-days: 7" not in workflow
 
