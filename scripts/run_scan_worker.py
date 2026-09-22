@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -19,6 +20,7 @@ TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 def main() -> int:
     max_jobs = bounded_jobs(os.environ.get("SCAN_JOBS_PER_WORKER", "1"))
+    empty_claim_retries = bounded_retries(os.environ.get("SCAN_EMPTY_CLAIM_RETRIES", "5"))
     artifact_root = Path(
         os.environ.get(
             "IDE_SCANNER_WORKER_ARTIFACTS",
@@ -39,7 +41,12 @@ def main() -> int:
         job_id = exact_job_id if index == 0 and exact_job_id else None
         if index == 0 and not job_id and enqueued_job_id:
             job_id = enqueued_job_id
-        job = claim_scan.claim_job(claim_url(), job_id=job_id, runner_suffix=str(index))
+        job = claim_with_retries(
+            claim_url(),
+            job_id=job_id,
+            runner_suffix=str(index),
+            retries=0 if job_id else empty_claim_retries,
+        )
         if job is None:
             break
 
@@ -155,6 +162,34 @@ def bounded_jobs(value: str) -> int:
     if not 1 <= jobs <= 32:
         raise RuntimeError("SCAN_JOBS_PER_WORKER must be an integer between 1 and 32")
     return jobs
+
+
+def bounded_retries(value: str) -> int:
+    try:
+        retries = int(value)
+    except ValueError as error:
+        raise RuntimeError("SCAN_EMPTY_CLAIM_RETRIES must be an integer between 0 and 16") from error
+    if not 0 <= retries <= 16:
+        raise RuntimeError("SCAN_EMPTY_CLAIM_RETRIES must be an integer between 0 and 16")
+    return retries
+
+
+def claim_with_retries(
+    url: str,
+    *,
+    job_id: str | None,
+    runner_suffix: str,
+    retries: int,
+) -> dict[str, object] | None:
+    """Retry empty claims briefly to absorb concurrent conditional-update races."""
+    for attempt in range(retries + 1):
+        job = claim_scan.claim_job(url, job_id=job_id, runner_suffix=runner_suffix)
+        if job is not None:
+            return job
+        if attempt >= retries:
+            break
+        time.sleep(min(1.0, 0.2 * (2**attempt)))
+    return None
 
 
 class temporary_environment:

@@ -17,6 +17,17 @@ def test_bounded_jobs_rejects_unbounded_worker_drain() -> None:
             raise AssertionError(f"expected {value!r} to be rejected")
 
 
+def test_bounded_retries_rejects_unbounded_claim_retries() -> None:
+    assert run_scan_worker.bounded_retries("5") == 5
+    for value in ("-1", "17", "not-a-number"):
+        try:
+            run_scan_worker.bounded_retries(value)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError(f"expected {value!r} to be rejected")
+
+
 def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
     job = {
         "id": "job-1",
@@ -30,6 +41,7 @@ def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
             "SCAN_CLAIM_URLS": "https://example.invalid/claim",
             "SCAN_RUNNER_ID": "runner-1",
             "SCAN_JOBS_PER_WORKER": "4",
+            "SCAN_EMPTY_CLAIM_RETRIES": "0",
             "IDE_SCANNER_WORKER_ARTIFACTS": str(tmp_path),
         },
         clear=True,
@@ -43,6 +55,35 @@ def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
     assert claim_job.call_count == 2
     assert run_scan.call_count == 1
     assert submit_result.call_count == 1
+    urllib_module.request.install_opener.assert_called_once()
+
+
+def test_worker_retries_transient_empty_claim(tmp_path: Path) -> None:
+    job = {
+        "id": "job-1",
+        "extension_id": "publisher.extension",
+        "version": "1.0.0",
+        "callback_url": "https://example.invalid/callback",
+    }
+    with patch.dict(
+        "os.environ",
+        {
+            "SCAN_CLAIM_URLS": "https://example.invalid/claim",
+            "SCAN_RUNNER_ID": "runner-1",
+            "SCAN_JOBS_PER_WORKER": "1",
+            "SCAN_EMPTY_CLAIM_RETRIES": "1",
+            "IDE_SCANNER_WORKER_ARTIFACTS": str(tmp_path),
+        },
+        clear=True,
+    ), patch.object(run_scan_worker.claim_scan, "urllib") as urllib_module, patch.object(
+        run_scan_worker.claim_scan, "claim_job", side_effect=[None, job]
+    ) as claim_job, patch.object(run_scan_worker, "run_scan", return_value=True), patch.object(
+        run_scan_worker, "submit_result", return_value=True
+    ), patch.object(run_scan_worker.time, "sleep") as sleep:
+        assert run_scan_worker.main() == 0
+
+    assert claim_job.call_count == 2
+    sleep.assert_called_once_with(0.2)
     urllib_module.request.install_opener.assert_called_once()
 
 
