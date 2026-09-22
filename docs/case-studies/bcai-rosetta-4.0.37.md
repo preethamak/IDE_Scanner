@@ -55,13 +55,30 @@ malware label.
 ```bash
 PYTHONPATH=src ./.venv/bin/python -m ide_scanner.cli scan \
   --path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix \
-  --offline --skip-posture --profile standard \
-  --format json --out /tmp/bcai-rosetta-guardrails.json
+  --offline --skip-posture \
+  --profile standard \
+  --format json \
+  --out /tmp/bcai-rosetta-guardrails.json
 ```
 
-For an advisory-free calibration run, pass a locally created JSON snapshot
-with `{"snapshot_version":"empty-test","entries":[]}` using
-`--extension-advisories`. Do not use that mode for publication decisions.
+The default bundled advisory snapshot is used by that command. To reproduce
+the behavior-only result above, pass an explicit empty snapshot:
+
+```bash
+printf '%s\n' '{"snapshot_version":"empty-test","entries":[]}' \
+  > /tmp/empty-extension-advisories.json
+PYTHONPATH=src ./.venv/bin/python -m ide_scanner.cli scan \
+  --path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix \
+  --offline --skip-posture \
+  --profile standard \
+  --extension-advisories /tmp/empty-extension-advisories.json \
+  --format json \
+  --out /tmp/bcai-rosetta-behavior-only.json
+```
+
+Do not use the behavior-only mode for publication decisions. It is a
+calibration and false-negative regression pass; production blocking requires
+the verified intelligence snapshot and exact artifact identity.
 
 ## Publication language
 
