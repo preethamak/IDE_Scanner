@@ -44,7 +44,9 @@ from ide_scanner.scanner import (
     _build_report,
     _add_ast_findings,
     _apply_local_dynamic_runtime,
+    _apply_security_decision,
     _apply_sandbox_provider,
+    _aggregate_sandbox_observations,
     _dedupe_findings,
     _find_sensitive_api_text,
     _is_generated_code_blob,
@@ -56,6 +58,7 @@ from ide_scanner.scanner import (
     _semgrep_scope_exclusion,
     _sandbox_observation_finding,
     _runtime_required_for_report,
+    _runtime_unexpected_capability_finding,
     scan_extension,
     scan_marketplace_extension,
     scan_targets,
@@ -138,6 +141,37 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(len(result), 2)
         self.assertNotIn("occurrence_count", result[0].evidence or {})
+
+    def test_repeated_remote_broker_review_evidence_is_aggregated_with_paths(self) -> None:
+        findings = [
+            Finding(
+                finding_id=path,
+                extension_id="publisher.tool",
+                version="1.0.0",
+                rule_id="remote-credential-broker",
+                category="cross-extension-exposure",
+                severity="HIGH",
+                confidence=0.84,
+                score=78,
+                evidence_type="static",
+                evidence_summary="Code appears to obtain or forward bearer tokens through a separately configured remote token broker.",
+                file_refs=[path],
+                recommendation="Verify endpoint ownership, token scope, retention, and user disclosure.",
+                evidence={
+                    "evidence_class": "exposure",
+                    "correlation": "same-file-semantic-chain",
+                },
+            )
+            for path in ("dist/provider-a.js", "dist/provider-b.js")
+        ]
+
+        result = _dedupe_findings(findings)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].file_refs, ["dist/provider-a.js", "dist/provider-b.js"])
+        self.assertEqual(result[0].evidence["occurrence_count"], 2)
+        self.assertEqual(result[0].evidence["occurrence_files"], result[0].file_refs)
+        self.assertEqual(result[0].evidence["correlation"], "same-file-semantic-chain")
 
     def test_repeated_contextual_shell_capability_is_aggregated(self) -> None:
         findings = [
@@ -293,6 +327,88 @@ class ScannerTests(unittest.TestCase):
             sandbox.assert_not_called()
             self.assertEqual(runtime_bundle["required_extension_ids"], [])
             self.assertEqual(runtime_bundle["runs"][0]["status"], "not-applicable")
+
+    def test_theme_with_an_entrypoint_receives_runtime_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "pretty-theme",
+                    "version": "1.0.0",
+                    "description": "A color theme with an activation entrypoint",
+                    "main": "./extension.js",
+                    "activationEvents": ["onStartupFinished"],
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            report = scan_extension(root)
+
+        self.assertTrue(_runtime_required_for_report(report))
+
+    def test_manifest_theme_surface_classifies_icon_extension(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "icon-pack",
+                    "version": "1.0.0",
+                    "description": "Icons for Visual Studio Code",
+                    "main": "./extension.js",
+                    "contributes": {"iconThemes": [{"id": "icon-pack", "path": "./icons.json"}]},
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            report = scan_extension(root)
+
+        capability_ids = {item["id"] for item in report.capabilities}
+        self.assertIn("theme_surface", capability_ids)
+        self.assertTrue(_runtime_required_for_report(report))
+
+    def test_theme_process_capability_enters_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "pretty-theme",
+                    "version": "1.0.0",
+                    "description": "A color theme",
+                    "main": "./extension.js",
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "require('child_process').spawn('sh', ['-c', 'echo theme']);",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+            _apply_security_decision(report)
+
+        self.assertIn("process_execution", {item["id"] for item in report.capabilities})
+        self.assertEqual(report.decision, "review")
+
+    def test_runtime_process_not_declared_is_review_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"publisher","name":"runtime-theme","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+            finding = _runtime_unexpected_capability_finding(
+                report,
+                {"kind": "process_exec", "command": "hidden-tool", "observation_count": 2},
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.rule_id, "observed-unexpected-capability")
+        self.assertEqual(finding.evidence_type, "dynamic")
+        self.assertEqual(finding.to_dict()["actionability"], "review")
 
     def test_local_runtime_requires_native_code_coverage(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -781,7 +897,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.4")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.5")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
@@ -1698,16 +1814,22 @@ class ScannerTests(unittest.TestCase):
             )
             (root / "server.node").write_bytes(b"native")
             (root / "payload.zip").write_bytes(b"packed")
+            (root / "payload-two.zip").write_bytes(b"packed-two")
+            (root / "payload-three.zip").write_bytes(b"packed-three")
 
             report = scan_extension(root)
 
         self.assertEqual(report.verdict, "clean")
         self.assertEqual(report.malware_score, 0)
         self.assertGreater(report.risk_score, 0)
-        self.assertEqual(report.artifact_inventory["files_hashed"], 3)
-        self.assertEqual(len(report.artifact_inventory["risky_artifacts"]), 2)
+        self.assertEqual(report.artifact_inventory["files_hashed"], 5)
+        self.assertEqual(len(report.artifact_inventory["risky_artifacts"]), 4)
         self.assertIn("native-or-packed-artifact", {finding.rule_id for finding in report.findings})
         self.assertIn("packed-artifact", {finding.rule_id for finding in report.findings})
+        packed = [finding for finding in report.findings if finding.rule_id == "packed-artifact"]
+        self.assertEqual(len(packed), 1)
+        self.assertEqual(packed[0].evidence["count"], 3)
+        self.assertEqual(len(packed[0].file_refs), 3)
 
     def test_wasm_requires_runtime_and_only_visible_loaders_emit_context(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -3127,7 +3249,36 @@ class ScannerTests(unittest.TestCase):
         )
         self.assertTrue(all(finding is not None and finding.to_dict()["actionability"] == "contextual" for finding in findings))
 
-    def test_sandbox_capability_only_observations_do_not_route_review(self) -> None:
+    def test_runtime_observations_are_aggregated_with_bounded_samples(self) -> None:
+        observations = _aggregate_sandbox_observations([
+            {"kind": "filesystem_write", "path": f"/workspace/cache-{index}.json", "api": "fs.writeFile"}
+            for index in range(40)
+        ])
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["kind"], "filesystem_write")
+        self.assertEqual(observations[0]["observation_count"], 40)
+        self.assertEqual(len(observations[0]["path_samples"]), 25)
+
+    def test_runtime_finding_is_labeled_dynamic_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"runtime-label","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            extension = scan_extension(root)
+            finding = _sandbox_observation_finding(
+                extension,
+                {"kind": "process_exec", "command": "language-server --stdio", "observation_count": 3},
+            )
+
+        self.assertIsNotNone(finding)
+        assert finding is not None
+        self.assertEqual(finding.evidence_type, "dynamic")
+        self.assertEqual(finding.evidence["observation_count"], 3)
+
+    def test_sandbox_undeclared_process_or_network_routes_review(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "package.json").write_text(
@@ -3151,8 +3302,12 @@ class ScannerTests(unittest.TestCase):
             )
 
         extension = report["extensions"][0]
-        self.assertEqual(extension["decision"], "allow")
-        self.assertEqual(extension["public_outcome"], "clear")
+        self.assertEqual(extension["decision"], "review")
+        self.assertEqual(extension["verdict"], "suspicious")
+        self.assertEqual(extension["public_outcome"], "investigate")
+        self.assertEqual(extension["malware_score"], 0)
+        self.assertEqual(extension["score_details"]["components"]["observed_behavior"], 60)
+        self.assertEqual(extension["score_details"]["risk_score"], extension["risk_score"])
         self.assertEqual(extension["analysis_status"], "complete")
 
     def test_sandbox_rejects_unsafe_runtime_inputs(self) -> None:
@@ -3299,6 +3454,27 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations, [{
             "kind": "filesystem_write",
             "path": "/target/user-data.json",
+            "api": "strace.openat",
+        }])
+
+    def test_external_syscall_trace_ignores_bubblewrap_root_and_device_plumbing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 mkdir("/newroot/usr", 0755) = 0\n'
+                '123 openat(AT_FDCWD, "/dev/tty", O_WRONLY) = 3\n'
+                '123 execve("/usr/bin/bwrap", ["bwrap"], 0x0) = 0\n'
+                '123 openat(AT_FDCWD, "/workspace/user-data.json", O_WRONLY|O_CREAT) = 3\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(result, [])
+
+        self.assertTrue(valid)
+        self.assertEqual(observations, [{
+            "kind": "filesystem_write",
+            "path": "/workspace/user-data.json",
             "api": "strace.openat",
         }])
 

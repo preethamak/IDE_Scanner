@@ -113,6 +113,11 @@ jobs:
             --report holdout-scan.json \
             --fail-on-regression \
             --out holdout-gate.json
+      - name: Audit holdout rule-level evidence
+        run: |
+          python scripts/audit_report.py \
+            --report holdout-scan.json \
+            --out holdout-rule-audit.json
       - name: Build publication accuracy gate
         run: |
           python scripts/build_publication_accuracy_gate.py \
@@ -132,6 +137,7 @@ jobs:
             runtime-preflight.json
             holdout-scan.json
             holdout-gate.json
+            holdout-rule-audit.json
             publication-accuracy-gate.json
           retention-days: 30
           if-no-files-found: warn
