@@ -108,6 +108,36 @@ class ScanWorkerPoolTests(unittest.TestCase):
             self.assertEqual(record["status"], "failed")
             self.assertEqual(record["stage"], "timeout")
 
+    def test_late_runner_cannot_overwrite_a_timeout(self) -> None:
+        fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            started = threading.Event()
+            release = threading.Event()
+
+            def slow_scan(**_kwargs: object):
+                from ide_scanner.scanner import scan_targets
+
+                started.set()
+                release.wait(2)
+                return scan_targets(paths=[fixture], include_posture=False)
+
+            def runner(job_store, job):
+                execute_marketplace_job(job_store, job, scan=slow_scan)
+
+            pool = ScanWorkerPool(store, max_workers=1, max_queue=1, job_timeout=1, runner=runner)
+            job = store.create("publisher.late")
+            self.assertTrue(pool.submit(job))
+            self.assertTrue(started.wait(2))
+            time.sleep(1.2)
+            self.assertEqual(store.get(job["id"])["stage"], "timeout")
+            release.set()
+            time.sleep(1.5)
+            record = store.get(job["id"])
+            self.assertEqual(record["status"], "failed")
+            self.assertEqual(record["stage"], "timeout")
+            self.assertIsNone(record.get("report_ref"))
+
     def test_cleanup_marks_interrupted_running_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))
