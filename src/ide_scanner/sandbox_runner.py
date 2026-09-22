@@ -35,6 +35,7 @@ CANARY_FILES = (
 MAX_RUNTIME_FILES = 100_000
 MAX_RUNTIME_BYTES = 2 * 1024 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 512 * 1024 * 1024
+MAX_RUNTIME_COMPRESSION_RATIO = 100
 MAX_RUNTIME_TIMEOUT_SECONDS = 300
 MAX_RUNTIME_MEMORY_BYTES = 1536 * 1024 * 1024
 MAX_RUNTIME_OPEN_FILES = 4096
@@ -334,6 +335,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
                 "max_files": MAX_RUNTIME_FILES,
                 "max_total_bytes": MAX_RUNTIME_BYTES,
                 "max_file_bytes": MAX_RUNTIME_FILE_BYTES,
+                "max_compression_ratio": MAX_RUNTIME_COMPRESSION_RATIO,
                 "max_memory_bytes": MAX_RUNTIME_MEMORY_BYTES,
                 "timeout_seconds_per_action": timeout_seconds,
             },
@@ -1859,20 +1861,33 @@ def _prepare_target(source: Path, destination: Path) -> Path:
             if len(members) > MAX_RUNTIME_FILES:
                 raise ValueError(f"Sandbox archive exceeds the {MAX_RUNTIME_FILES}-file limit")
             total_bytes = 0
+            compressed_bytes = 0
+            member_names: set[str] = set()
             for member in members:
                 name = member.filename.replace("\\", "/")
                 if not name or name.endswith("/"):
                     continue
+                if name in member_names:
+                    raise ValueError(f"Sandbox archive contains duplicate member: {name}")
+                member_names.add(name)
                 if member.flag_bits & 0x1:
                     raise ValueError("Sandbox refuses encrypted VSIX members")
                 if member.file_size < 0 or member.file_size > MAX_RUNTIME_FILE_BYTES:
                     raise ValueError(f"Sandbox archive member exceeds the {MAX_RUNTIME_FILE_BYTES}-byte limit")
                 total_bytes += member.file_size
+                compressed_bytes += max(1, member.compress_size)
                 if total_bytes > MAX_RUNTIME_BYTES:
                     raise ValueError(f"Sandbox archive exceeds the {MAX_RUNTIME_BYTES}-byte extraction limit")
                 target = (destination / name).resolve()
                 if destination.resolve() not in target.parents and target != destination.resolve():
                     raise ValueError("Sandbox archive contains a path traversal member")
+            if total_bytes / max(1, compressed_bytes) > MAX_RUNTIME_COMPRESSION_RATIO:
+                raise ValueError("Sandbox archive compression ratio exceeds the extraction limit")
+            for member in members:
+                name = member.filename.replace("\\", "/")
+                if not name or name.endswith("/"):
+                    continue
+                target = (destination / name).resolve()
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(member) as src, target.open("wb") as dst:
                     while True:

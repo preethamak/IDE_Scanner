@@ -3364,6 +3364,13 @@ class ScannerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 _prepare_target(archive, root / "extracted")
 
+            compressed = root / "compressed.vsix"
+            with zipfile.ZipFile(compressed, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+                handle.writestr("extension/package.json", "a" * 10_000)
+            with patch("ide_scanner.sandbox_runner.MAX_RUNTIME_COMPRESSION_RATIO", 1):
+                with self.assertRaisesRegex(ValueError, "compression ratio"):
+                    _prepare_target(compressed, root / "compressed-extracted")
+
     def test_sandbox_runner_runtime_instrumentation_observes_secret_exfil(self) -> None:
         self._skip_if_runtime_backend_unavailable()
         with TemporaryDirectory() as tmp:
