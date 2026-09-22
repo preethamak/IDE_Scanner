@@ -343,6 +343,15 @@ def _scan_request(
     jobs: int = 1,
     marketplace_artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
+    # Validate replayed intelligence before acquiring or scanning any artifact.
+    # A malformed/tampered snapshot is a request-level failure; delaying this
+    # check until after static analysis wastes work and can leave callers with
+    # the misleading impression that a partial scan was useful.
+    replayed_registry = (
+        _load_registry_snapshot(request.registry_snapshot_file)
+        if request.registry_snapshot_file is not None
+        else None
+    )
     targets: list[dict[str, str]] = []
     root = Path.cwd()
 
@@ -415,10 +424,9 @@ def _scan_request(
         sandbox_bundle = _merge_dynamic_runtime_bundle(sandbox_bundle, runtime_bundle)
     _apply_sandbox_observations(extensions, sandbox_bundle["extensions"])
     _apply_sandbox_provider(extensions, sandbox_bundle)
-    registry = (
-        _load_registry_snapshot(request.registry_snapshot_file)
-        if request.registry_snapshot_file is not None
-        else _capture_registry_snapshot(enrich_registry(extensions, online=request.online), source="live")
+    registry = replayed_registry or _capture_registry_snapshot(
+        enrich_registry(extensions, online=request.online),
+        source="live",
     )
     _apply_registry_findings(extensions, registry["findings"])
     dependency_errors = [

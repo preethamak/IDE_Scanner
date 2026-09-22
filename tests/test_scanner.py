@@ -1415,8 +1415,12 @@ class ScannerTests(unittest.TestCase):
                 "snapshot": {"sha256": "0" * 64},
             }), encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "digest does not match"):
-                scan_targets(include_fixtures=True, registry_snapshot_file=snapshot)
+            with patch(
+                "ide_scanner.scanner.scan_extension",
+                side_effect=AssertionError("artifact scanning must not start"),
+            ):
+                with self.assertRaisesRegex(ValueError, "digest does not match"):
+                    scan_targets(include_fixtures=True, registry_snapshot_file=snapshot)
 
     def test_registry_only_extension_id_can_be_marked_malicious(self) -> None:
         registry = {
