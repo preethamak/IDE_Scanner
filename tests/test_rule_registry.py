@@ -9,8 +9,25 @@ class RuleRegistryTests(unittest.TestCase):
     def test_all_rules_publish_engine_and_decision_semantics(self) -> None:
         rules = rule_registry()
 
-        self.assertEqual(len(rules), 98)
+        self.assertEqual(len(rules), 116)
         self.assertTrue(all(rule.engine for rule in rules))
+
+    def test_classifier_and_registry_rule_ids_are_published(self) -> None:
+        import ide_scanner.scanner as scanner
+
+        registered = {rule.rule_id for rule in rule_registry()}
+        for name in (
+            "CONFIRMED_RULES",
+            "OBSERVED_RULES",
+            "CORRELATED_RULES",
+            "CAPABILITY_RULES",
+            "DEPENDENCY_RULES",
+            "PROVENANCE_RULES",
+            "POSTURE_RULES",
+            "REPUTATION_RULES",
+            "EXPOSURE_RULES",
+        ):
+            self.assertFalse(set(getattr(scanner, name)) - registered, name)
 
     def test_runtime_rules_are_published_as_dynamic_sandbox_rules(self) -> None:
         rules = {rule.rule_id: rule for rule in rule_registry()}
