@@ -12,9 +12,8 @@ claim that GuardRails discovered the campaign first.
 - GuardRails advisory: `CLR-2026-3045`
 - Policy: `block`
 
-The primary report is [Codelake Research's advisory](https://research.codelake.dev/advisories/clr-2026-3045-edrtester/).
-The artifact is also listed in the [OSV VS Code ecosystem index](https://osv.dev/list?ecosystem=VSCode).
-The corresponding [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=AzureCdnInfo.edrtester)
+The source of record is [Codelake Research's advisory](https://research.codelake.dev/advisories/clr-2026-3045-edrtester/),
+which publishes an OSV-compatible record. The corresponding [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=AzureCdnInfo.edrtester)
 is retained as the official acquisition source in the frozen holdout manifest.
 
 ## Evidence boundary

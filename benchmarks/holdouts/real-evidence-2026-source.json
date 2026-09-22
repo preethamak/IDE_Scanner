@@ -10,7 +10,7 @@
   "advisory_snapshot": {
     "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
     "snapshot_version": "2026-09-22.1",
-    "sha256": "4ca83ee79f23ac4cc0bfd41ccd6b3f3c9dbec7a7b29ad60c82d5de26808171a0"
+    "sha256": "20a71f9538ff1b25cfcda52e30bdf4e4965ef7f314ad605c33434bcddc19b45b"
   },
   "artifacts": [
     {
@@ -225,7 +225,6 @@
       "label_evidence": {
         "source_type": "independent_threat_report_and_osv_record",
         "source_url": "https://research.codelake.dev/advisories/clr-2026-3045-edrtester/",
-        "source_secondary_url": "https://osv.dev/list?ecosystem=VSCode",
         "retrieved_at": "2026-09-22T23:08:11Z",
         "evidence_scope": "exact-artifact",
         "extension_id": "AzureCdnInfo.edrtester",
