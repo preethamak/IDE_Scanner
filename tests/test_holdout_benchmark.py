@@ -42,6 +42,24 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             self.assertEqual(result["summary"]["malicious_block_rate"], 0.0)
             self.assertEqual(result["summary"]["malicious_review_rate"], 1.0)
 
+    def test_behavior_only_holdout_accepts_review_without_advisory_block(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            report["extensions"][1]["decision"] = "review"
+            report_path = self._write(root, "report.json", report)
+
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                report_path,
+                require_malicious_block=False,
+            )
+
+        self.assertTrue(result["gate"]["passed"])
+        self.assertEqual(result["classification_mode"], "behavior-only")
+        self.assertEqual(result["summary"]["malicious_detection_rate"], 1.0)
+        self.assertEqual(result["summary"]["malicious_block_rate"], 0.0)
+
     def test_holdout_fails_when_safe_review_rate_exceeds_noise_ceiling(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

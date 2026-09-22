@@ -17,6 +17,9 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "--source benchmarks/holdouts/real-evidence-2026-source.json" in workflow
     assert "--profile deep" in workflow
     assert "--runtime" in workflow
+    assert "--behavior-only" in workflow
+    assert "empty-extension-advisories.json" in workflow
+    assert "--behavior-gate behavior-holdout-gate.json" in workflow
     assert "sandbox-preflight" in workflow
     assert "--jobs 1" in workflow
     assert "--timeout 180" in workflow

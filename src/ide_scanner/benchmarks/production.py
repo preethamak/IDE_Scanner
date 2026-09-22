@@ -97,6 +97,7 @@ def evaluate_holdout_corpus(
     report_path: Path | str,
     *,
     require_runtime: bool = True,
+    require_malicious_block: bool = True,
 ) -> dict[str, Any]:
     """Evaluate a frozen, independently labelled exact-artifact holdout.
 
@@ -119,6 +120,7 @@ def evaluate_holdout_corpus(
             expected,
             actual_by_identity.get(_expected_key(expected)),
             require_runtime=require_runtime,
+            require_malicious_block=require_malicious_block,
         )
         for expected in corpus["artifacts"]
     ]
@@ -149,6 +151,8 @@ def evaluate_holdout_corpus(
             "external_syscall_trace": external_syscall_trace,
             "runtime_timeout_seconds": execution.get("runtime_timeout_seconds", 0),
         },
+        "classification_mode": "intel-backed" if require_malicious_block else "behavior-only",
+        "advisory_snapshot": execution.get("extension_advisories") if isinstance(execution.get("extension_advisories"), dict) else {},
         "gate": {
             "passed": all(checks.values()),
             "checks": checks,
@@ -237,6 +241,7 @@ def _evaluate_holdout_artifact(
     actual: dict[str, Any] | None,
     *,
     require_runtime: bool,
+    require_malicious_block: bool,
 ) -> dict[str, Any]:
     violations: list[str] = []
     if actual is None:
@@ -257,8 +262,10 @@ def _evaluate_holdout_artifact(
         if decision == "block" or verdict == "malicious":
             violations.append("known-safe artifact was blocked or classified malicious")
     else:
-        if decision != "block":
+        if require_malicious_block and decision != "block":
             violations.append(f"known-malicious artifact was not blocked (decision={decision!r})")
+        if not require_malicious_block and decision not in {"review", "block"}:
+            violations.append(f"known-malicious artifact was not detected (decision={decision!r})")
         if verdict not in {"suspicious", "malicious"}:
             violations.append(f"known-malicious artifact verdict {verdict!r} is not suspicious or malicious")
     expected_hash = str((expected.get("artifact") or {}).get("sha256") or "").lower()
@@ -338,6 +345,7 @@ def _runtime_contract_violations(contract: dict[str, Any]) -> list[str]:
             "execution": "policy-gated",
             "runtime_policy": "capability-gated-v1",
             "executed": False,
+            "external_syscall_trace": False,
         }
     else:
         return ["runtime contract required flag is missing or invalid"]

@@ -112,6 +112,16 @@ The command still requires the public source URL and exact digest for every
 row. A rebuilt package, source checkout, or artifact with a different digest is
 rejected rather than used as a substitute.
 
+The publication holdout is evaluated twice against the same frozen bytes. The
+primary pass uses the versioned exact-hash advisory snapshot and requires every
+known-malicious artifact to block. A second behavior-only shadow pass uses an
+explicit empty advisory snapshot and requires every known-malicious artifact to
+route to review-or-higher without allowing it, while preserving the same safe
+review ceiling. This separates authoritative threat-intelligence blocking from
+independent behavioral recall and prevents the advisory feed from hiding a
+false-negative regression. Both passes must use the deep runtime profile and
+external syscall tracing before a public release can be activated.
+
 ## Dynamic runtime coverage
 
 `scan --runtime` applies the Bubblewrap runner to both local inputs (VSIX files,

@@ -68,10 +68,15 @@ def build_publication_accuracy_gate(
     regression_gate_path: Path | str,
     holdout_gate_path: Path | str,
     holdout_corpus_path: Path | str,
+    behavior_gate_path: Path | str | None = None,
 ) -> dict[str, Any]:
     regression_bytes, regression = _read_json(regression_gate_path)
     holdout_bytes, holdout_gate = _read_json(holdout_gate_path)
     corpus_bytes, holdout_corpus = _read_json(holdout_corpus_path)
+    behavior_bytes: bytes | None = None
+    behavior_gate: dict[str, Any] | None = None
+    if behavior_gate_path is not None:
+        behavior_bytes, behavior_gate = _read_json(behavior_gate_path)
 
     _validate_gate(regression, "regression")
     _validate_gate(holdout_gate, "holdout")
@@ -136,6 +141,63 @@ def build_publication_accuracy_gate(
     holdout_rule_matrix = _holdout_rule_matrix(holdout_gate, artifacts)
     _validate_rule_matrix(holdout_rule_matrix, label_counts)
 
+    behavior_result: dict[str, Any] | None = None
+    if behavior_gate is not None:
+        _validate_gate(behavior_gate, "behavior-only")
+        if behavior_gate.get("classification_mode") != "behavior-only":
+            raise ValueError("Behavior-only gate must declare classification_mode behavior-only")
+        behavior_identity = _identity(behavior_gate)
+        if behavior_identity != regression_identity:
+            raise ValueError("Behavior-only and primary gates do not share one scanner, policy, and ruleset identity.")
+        if str(behavior_gate.get("corpus_id") or "") != corpus_id or str(behavior_gate.get("corpus_version") or "") != corpus_version:
+            raise ValueError("Behavior-only gate does not match the frozen holdout corpus.")
+        behavior_runtime = _object(behavior_gate.get("runtime_evidence"))
+        if (
+            behavior_runtime.get("required") is not True
+            or behavior_runtime.get("runtime_enabled") is not True
+            or str(behavior_runtime.get("profile") or "") != "deep"
+            or behavior_runtime.get("external_syscall_trace") is not True
+        ):
+            raise ValueError("Behavior-only holdout must prove a required deep runtime scan with external syscall tracing")
+        behavior_snapshot = _object(behavior_gate.get("advisory_snapshot"))
+        if (
+            behavior_snapshot.get("status") != "completed"
+            or behavior_snapshot.get("entry_count") != 0
+            or not SHA256_RE.fullmatch(str(behavior_snapshot.get("sha256") or ""))
+        ):
+            raise ValueError("Behavior-only holdout must prove a completed empty advisory snapshot")
+        behavior_summary = _validate_holdout_results(
+            behavior_gate,
+            artifacts,
+            require_malicious_block=False,
+        )
+        behavior_gate_summary = _object(behavior_gate.get("summary"))
+        for key, expected_value in behavior_summary.items():
+            if behavior_gate_summary.get(key) != expected_value:
+                raise ValueError(f"The behavior-only holdout summary field {key!r} does not match its result rows")
+        behavior_rule_matrix = _holdout_rule_matrix(behavior_gate, artifacts)
+        _validate_rule_matrix(behavior_rule_matrix, label_counts)
+        behavior_result = {
+            "status": "behavior-only",
+            "complete": True,
+            "scanner_build": behavior_identity["scanner_build"],
+            "policy_version": behavior_identity["policy_version"],
+            "ruleset_version": behavior_identity["ruleset_version"],
+            "required_pass_rate": behavior_summary["required_pass_rate"],
+            "safe_evaluated": behavior_summary["safe_evaluated"],
+            "safe_block_rate": behavior_summary["safe_block_rate"],
+            "safe_review_rate": behavior_summary["safe_review_rate"],
+            "malicious_evaluated": behavior_summary["malicious_evaluated"],
+            "malicious_allow_rate": behavior_summary["malicious_allow_rate"],
+            "malicious_detection_rate": behavior_summary["malicious_detection_rate"],
+            "malicious_block_rate": behavior_summary["malicious_block_rate"],
+            "dynamic_required": _number(behavior_gate_summary.get("dynamic_required")),
+            "dynamic_not_applicable": _number(behavior_gate_summary.get("dynamic_not_applicable")),
+            "rule_matrix": behavior_rule_matrix,
+            "runtime_evidence": dict(behavior_runtime),
+            "advisory_snapshot": dict(behavior_snapshot),
+        }
+
     return {
         "schema_version": "1.0",
         "corpus_id": str(regression.get("corpus_id") or ""),
@@ -174,11 +236,13 @@ def build_publication_accuracy_gate(
             "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
             "provenance": corpus_provenance,
+            **({"behavior_only": behavior_result} if behavior_result is not None else {}),
         },
         "provenance": {
             "regression_gate_sha256": _sha256(regression_bytes),
             "holdout_gate_sha256": _sha256(holdout_bytes),
             "holdout_corpus_sha256": _sha256(corpus_bytes),
+            **({"behavior_gate_sha256": _sha256(behavior_bytes)} if behavior_bytes is not None else {}),
         },
     }
 
@@ -350,7 +414,12 @@ def _parse_timestamp(value: Any, label: str) -> datetime:
     return parsed
 
 
-def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[str, Any]]) -> dict[str, int | float]:
+def _validate_holdout_results(
+    gate: dict[str, Any],
+    corpus_artifacts: list[dict[str, Any]],
+    *,
+    require_malicious_block: bool = True,
+) -> dict[str, int | float]:
     results = gate.get("artifacts")
     if not isinstance(results, list) or len(results) != len(corpus_artifacts):
         raise ValueError("The holdout gate must retain one result row for every frozen artifact.")
@@ -367,6 +436,8 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
     malicious_blocked = 0
     malicious_reviewed = 0
     malicious_detected = 0
+    dynamic_required = 0
+    dynamic_not_applicable = 0
     required_passed = 0
     for index, result in enumerate(results):
         if not isinstance(result, dict):
@@ -397,6 +468,11 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
                 f"Holdout artifact {key[0]}@{key[1]} has incomplete runtime coverage: "
                 + "; ".join(runtime_errors)
             )
+        runtime_contract = _object(actual.get("runtime_contract"))
+        if runtime_contract.get("required") is True:
+            dynamic_required += 1
+        elif runtime_contract.get("required") is False:
+            dynamic_not_applicable += 1
         if artifact.get("label") == "known_safe":
             safe_evaluated += 1
             if _review_or_higher(actual):
@@ -414,7 +490,9 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
                 malicious_reviewed += 1
             if _review_or_higher(actual):
                 malicious_detected += 1
-            if decision != "block" or verdict not in {"suspicious", "malicious"}:
+            if verdict not in {"suspicious", "malicious"}:
+                raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} lacks a risk verdict")
+            if require_malicious_block and decision != "block":
                 raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} was not blocked with a risk verdict")
         expected_sha256 = str(_object(artifact.get("artifact")).get("sha256") or "").lower()
         if str(actual.get("artifact_sha256") or "").lower() != expected_sha256:
@@ -444,6 +522,8 @@ def _validate_holdout_results(gate: dict[str, Any], corpus_artifacts: list[dict[
         "malicious_review_rate": round(malicious_reviewed / malicious_evaluated, 4) if malicious_evaluated else 0.0,
         "malicious_detected": malicious_detected,
         "malicious_detection_rate": round(malicious_detected / malicious_evaluated, 4) if malicious_evaluated else 0.0,
+        "dynamic_required": dynamic_required,
+        "dynamic_not_applicable": dynamic_not_applicable,
         "incomplete_required": 0,
     }
 
@@ -506,6 +586,7 @@ def _runtime_contract_errors(contract: dict[str, Any]) -> list[str]:
             "execution": "controlled-bubblewrap",
             "runtime_policy": "capability-gated-v1",
             "executed": True,
+            "external_syscall_trace": True,
         }
     else:
         expected = {
@@ -513,6 +594,7 @@ def _runtime_contract_errors(contract: dict[str, Any]) -> list[str]:
             "execution": "policy-gated",
             "runtime_policy": "capability-gated-v1",
             "executed": False,
+            "external_syscall_trace": False,
         }
     return [
         f"{field}={contract.get(field)!r} expected {value!r}"
@@ -554,10 +636,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build the publication accuracy gate from regression and fresh holdout evidence.")
     parser.add_argument("--regression-gate", required=True, type=Path)
     parser.add_argument("--holdout-gate", required=True, type=Path)
+    parser.add_argument("--behavior-gate", required=True, type=Path)
     parser.add_argument("--holdout-corpus", required=True, type=Path)
     parser.add_argument("--out", "--output", required=True, type=Path)
     args = parser.parse_args()
-    result = build_publication_accuracy_gate(args.regression_gate, args.holdout_gate, args.holdout_corpus)
+    result = build_publication_accuracy_gate(
+        args.regression_gate,
+        args.holdout_gate,
+        args.holdout_corpus,
+        args.behavior_gate,
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.out), "status": "fresh-labeled", "holdout": result["holdout"]}, sort_keys=True))

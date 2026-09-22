@@ -126,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not require the report to prove runtime-enabled deep scanning (for offline calibration only).",
     )
     benchmark_holdout.add_argument(
+        "--behavior-only",
+        action="store_true",
+        help="Evaluate known-malicious artifacts for review-or-higher without exact advisory blocking; use as a shadow false-negative gate.",
+    )
+    benchmark_holdout.add_argument(
         "--fail-on-regression",
         action="store_true",
         help="Exit non-zero when the holdout gate fails.",
@@ -262,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.corpus,
                 args.report,
                 require_runtime=not args.allow_static_only,
+                require_malicious_block=not args.behavior_only,
             )
             _emit(result, args.output)
             return 1 if args.fail_on_regression and not result["gate"]["passed"] else 0

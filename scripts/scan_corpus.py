@@ -55,6 +55,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", choices=["quick", "standard", "deep", "benchmark"], default="quick", help="Static/deep scan profile label recorded in the corpus execution evidence.")
     parser.add_argument("--runtime", action="store_true", help="Run the required dynamic providers in an isolated Bubblewrap sandbox for each artifact.")
     parser.add_argument("--runtime-timeout", type=int, default=20, help="Dynamic runtime budget per artifact in seconds, from 1 to 120.")
+    parser.add_argument("--extension-advisories", help="Versioned exact-extension advisory snapshot passed to each isolated scanner worker.")
     parser.add_argument("--checkpoint-dir", type=Path, help="Private directory for per-artifact JSON checkpoints; enables resumable manifest scans.")
     parser.add_argument("--with-posture", action="store_true", help="Include local IDE/client posture once in the aggregate report.")
     parser.add_argument("--out", "--output", required=True, help="Aggregate JSON report path.")
@@ -160,6 +161,7 @@ def _scan_one(
     profile: str,
     runtime: bool = False,
     runtime_timeout: int = 20,
+    extension_advisories: str = "",
 ) -> dict[str, Any]:
     path = Path(target["path"])
     source = target.get("type", "vscode")
@@ -176,7 +178,14 @@ def _scan_one(
     with tempfile.TemporaryDirectory(prefix="guardrails-corpus-") as temp_dir:
         output = Path(temp_dir) / "report.json"
         stderr_path = Path(temp_dir) / "worker.stderr"
-        command = _worker_command(path, profile, output, runtime=runtime, runtime_timeout=runtime_timeout)
+        command = _worker_command(
+            path,
+            profile,
+            output,
+            runtime=runtime,
+            runtime_timeout=runtime_timeout,
+            extension_advisories=extension_advisories,
+        )
         environment = os.environ.copy()
         existing_pythonpath = environment.get("PYTHONPATH", "")
         environment["PYTHONPATH"] = os.pathsep.join(item for item in (str(ROOT / "src"), existing_pythonpath) if item)
@@ -242,7 +251,15 @@ def _scan_one(
             return _worker_error(path, source, target, f"Corpus worker returned an invalid report: {exc}")
 
 
-def _worker_command(path: Path, profile: str, output: Path, *, runtime: bool, runtime_timeout: int) -> list[str]:
+def _worker_command(
+    path: Path,
+    profile: str,
+    output: Path,
+    *,
+    runtime: bool,
+    runtime_timeout: int,
+    extension_advisories: str = "",
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -262,6 +279,8 @@ def _worker_command(path: Path, profile: str, output: Path, *, runtime: bool, ru
     ]
     if runtime:
         command.extend(["--runtime", "--runtime-timeout", str(runtime_timeout)])
+    if extension_advisories:
+        command.extend(["--extension-advisories", extension_advisories])
     return command
 
 
@@ -278,7 +297,12 @@ def _checkpoint_path(checkpoint_dir: Path, target: dict[str, str]) -> Path:
     return checkpoint_dir / f"{hashlib.sha256(identity).hexdigest()}.json"
 
 
-def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_timeout: int = 20) -> dict[str, Any]:
+def _checkpoint_context(
+    profile: str = "quick",
+    runtime: bool = False,
+    runtime_timeout: int = 20,
+    extension_advisories: str = "",
+) -> dict[str, Any]:
     return {
         "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
         "policy_version": POLICY_VERSION,
@@ -288,6 +312,32 @@ def _checkpoint_context(profile: str = "quick", runtime: bool = False, runtime_t
         "runtime_timeout_seconds": runtime_timeout if runtime else 0,
         "runtime_evidence_version": "2",
         "runtime_external_trace": bool(runtime and external_trace_available()),
+        "extension_advisories": str(extension_advisories or ""),
+    }
+
+
+def _extension_advisory_snapshot(path: str) -> dict[str, Any]:
+    """Return immutable identity for the advisory snapshot used by workers."""
+    if not path:
+        return {
+            "status": "bundled-default",
+            "snapshot_version": "bundled-default",
+            "sha256": "",
+            "entry_count": None,
+        }
+    snapshot_path = Path(path).expanduser().resolve()
+    try:
+        raw = snapshot_path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"extension advisory snapshot could not be read: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        raise ValueError("extension advisory snapshot must contain an entries array")
+    return {
+        "status": "completed",
+        "snapshot_version": str(payload.get("snapshot_version") or "unknown"),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "entry_count": len(payload["entries"]),
     }
 
 
@@ -352,9 +402,24 @@ def _write_checkpoint(
     temporary.replace(path)
 
 
-def _scan_one_safe(target: dict[str, str], *, timeout: int, profile: str, runtime: bool, runtime_timeout: int) -> dict[str, Any]:
+def _scan_one_safe(
+    target: dict[str, str],
+    *,
+    timeout: int,
+    profile: str,
+    runtime: bool,
+    runtime_timeout: int,
+    extension_advisories: str = "",
+) -> dict[str, Any]:
     try:
-        return _scan_one(target, timeout=timeout, profile=profile, runtime=runtime, runtime_timeout=runtime_timeout)
+        return _scan_one(
+            target,
+            timeout=timeout,
+            profile=profile,
+            runtime=runtime,
+            runtime_timeout=runtime_timeout,
+            extension_advisories=extension_advisories,
+        )
     except Exception as exc:  # noqa: BLE001 - one hostile artifact must not abort a corpus
         return _worker_error(Path(target["path"]), target.get("type", "vscode"), target, f"Corpus worker raised an isolated error: {exc}")
 
@@ -385,6 +450,7 @@ def _scan_pending(
     profile: str,
     runtime: bool,
     runtime_timeout: int,
+    extension_advisories: str,
     checkpoint_dir: Path | None,
     checkpoint_context: dict[str, Any],
     targets: list[dict[str, str]],
@@ -424,6 +490,7 @@ def _scan_pending(
                     profile=profile,
                     runtime=runtime,
                     runtime_timeout=runtime_timeout,
+                    extension_advisories=extension_advisories,
                 )
                 futures[future] = (index, weight)
                 running_units += weight
@@ -537,12 +604,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
     if args.checkpoint_dir and not args.manifest:
         raise ValueError("checkpoint-dir requires --manifest so exact artifact identity can be resumed safely")
+    advisory_snapshot = _extension_advisory_snapshot(args.extension_advisories or "")
     targets = _targets(args)
     if not targets:
         raise ValueError("no extension artifacts were discovered")
 
     checkpoint_dir = args.checkpoint_dir.resolve() if args.checkpoint_dir else None
-    checkpoint_context = _checkpoint_context(args.profile, args.runtime, args.runtime_timeout)
+    checkpoint_context = _checkpoint_context(
+        args.profile,
+        args.runtime,
+        args.runtime_timeout,
+        advisory_snapshot["sha256"] or args.extension_advisories,
+    )
     extensions_by_index: dict[int, dict[str, Any]] = {}
     pending: dict[int, dict[str, str]] = {}
     for index, target in enumerate(targets):
@@ -560,6 +633,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         profile=args.profile,
         runtime=args.runtime,
         runtime_timeout=args.runtime_timeout,
+        extension_advisories=args.extension_advisories or "",
         checkpoint_dir=checkpoint_dir,
         checkpoint_context=checkpoint_context,
         targets=targets,
@@ -657,6 +731,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 ) if args.manifest else 0,
                 "checkpoint_dir": str(checkpoint_dir) if checkpoint_dir else "",
                 "resumed_count": len(targets) - len(pending),
+                "extension_advisories": advisory_snapshot,
             }
         },
     )

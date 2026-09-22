@@ -150,6 +150,7 @@ def holdout_gate() -> dict:
                     "execution": "policy-gated",
                     "runtime_policy": "capability-gated-v1",
                     "executed": False,
+                    "external_syscall_trace": False,
                 },
             },
         })
@@ -176,6 +177,7 @@ def holdout_gate() -> dict:
                     "execution": "controlled-bubblewrap",
                     "runtime_policy": "capability-gated-v1",
                     "executed": True,
+                    "external_syscall_trace": True,
                 },
             },
         })
@@ -192,10 +194,19 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             regression = gate("regression")
+            behavior = holdout_gate()
+            behavior["classification_mode"] = "behavior-only"
+            behavior["advisory_snapshot"] = {
+                "status": "completed",
+                "snapshot_version": "empty.1",
+                "sha256": "c" * 64,
+                "entry_count": 0,
+            }
             result = build_publication_accuracy_gate(
                 self.write(root, "regression.json", regression),
                 self.write(root, "holdout.json", holdout_gate()),
                 self.write(root, "corpus.json", holdout_corpus()),
+                self.write(root, "behavior.json", behavior),
             )
         self.assertEqual(result["holdout"]["status"], "fresh-labeled")
         self.assertTrue(result["holdout"]["complete"])
@@ -205,6 +216,8 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         self.assertEqual(result["holdout"]["dynamic_required"], 5)
         self.assertEqual(result["holdout"]["dynamic_not_applicable"], 5)
         self.assertEqual(result["holdout"]["rule_matrix"]["download-and-execute"]["fired_on_known_malicious"], 5)
+        self.assertEqual(result["holdout"]["behavior_only"]["status"], "behavior-only")
+        self.assertEqual(result["holdout"]["behavior_only"]["malicious_detection_rate"], 1.0)
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
 
     def test_rejects_fixture_only_holdout(self) -> None:
