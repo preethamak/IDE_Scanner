@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.21-policy-v3-calibration.37-manifest-capability-runtime-evidence"
+RULESET_VERSION = "2026.09.22-policy-v3-calibration.38-complete-rule-catalog"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
