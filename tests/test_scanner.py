@@ -723,6 +723,67 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(provider["executed"])
         self.assertTrue(provider["external_syscall_trace"])
 
+    def test_runtime_evidence_does_not_collide_for_duplicate_installations(self) -> None:
+        first = MagicMock()
+        first.instance_id = "vscode-installation"
+        first.extension_id = "publisher.extension"
+        first.version = "1.0.0"
+        first.artifact_hash = "a" * 64
+        first.capabilities = [{"id": "process_execution"}]
+        first.analysis_coverage = {"resolved_entrypoints": ["extension.js"]}
+
+        second = MagicMock()
+        second.instance_id = "cursor-installation"
+        second.extension_id = "publisher.extension"
+        second.version = "1.0.0"
+        second.artifact_hash = "b" * 64
+        second.capabilities = [{"id": "process_execution"}]
+        second.analysis_coverage = {"resolved_entrypoints": ["extension.js"]}
+
+        runtime_bundle: dict[str, object] = {
+            "extensions": {},
+            "runs": [],
+            "required_extension_ids": [],
+        }
+        runtime = {"mode": "executed", "extensions": {"publisher.extension": [{"kind": "process_exec"}]}}
+        with patch("ide_scanner.scanner.run_sandbox", return_value=runtime):
+            _apply_local_dynamic_runtime(
+                [{"path": "/tmp/vscode-extension"}, {"path": "/tmp/cursor-extension"}],
+                [first, second],
+                runtime_bundle,
+                7,
+            )
+
+        self.assertEqual(
+            set(runtime_bundle["extensions"]),
+            {"publisher.extension", "cursor-installation"},
+        )
+        self.assertEqual(
+            runtime_bundle["runtime_required_instances"],
+            ["vscode-installation", "cursor-installation"],
+        )
+        self.assertEqual([len(runtime_bundle["extensions"][key]) for key in ("publisher.extension", "cursor-installation")], [1, 1])
+
+        _apply_sandbox_provider(
+            [first, second],
+            {
+                "metadata": {
+                    "status": "executed",
+                    "execution": "controlled-bubblewrap",
+                    "executed": True,
+                    "runtime_policy": "capability-gated-v1",
+                    "external_syscall_trace": True,
+                    "runtime_required_ids": ["publisher.extension"],
+                    "runtime_required_instances": runtime_bundle["runtime_required_instances"],
+                },
+                "extensions": runtime_bundle["extensions"],
+            },
+        )
+        self.assertEqual(
+            [item.analysis_coverage["providers"]["dynamic_sandbox"]["observation_count"] for item in (first, second)],
+            [1, 1],
+        )
+
     def test_failed_runtime_entrypoint_is_not_reported_as_completed(self) -> None:
         failed = subprocess.CompletedProcess(
             args=["node"], returncode=1, stdout="", stderr="activation failed",

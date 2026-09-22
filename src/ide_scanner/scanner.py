@@ -1115,6 +1115,32 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
     return bool(coverage.get("resolved_entrypoints"))
 
 
+def _runtime_instance_key(report: ExtensionReport) -> str:
+    """Return the collision-resistant key used for per-installation runtime evidence."""
+    return str(report.instance_id or f"{report.extension_id}@{report.version}")
+
+
+def _runtime_observations_for_report(
+    observations: dict[str, list[dict[str, Any]]],
+    report: ExtensionReport,
+) -> list[dict[str, Any]]:
+    """Read instance-keyed evidence with a legacy extension-ID fallback."""
+    instance_key = _runtime_instance_key(report)
+    if instance_key in observations:
+        value = observations[instance_key]
+        return value if isinstance(value, list) else []
+    value = observations.get(report.extension_id, [])
+    return value if isinstance(value, list) else []
+
+
+def _runtime_bundle_key(bundle: dict[str, Any], report: ExtensionReport) -> str:
+    """Preserve the legacy ID key until a duplicate installation needs disambiguation."""
+    extensions = bundle.get("extensions") if isinstance(bundle.get("extensions"), dict) else {}
+    if report.extension_id not in extensions:
+        return report.extension_id
+    return _runtime_instance_key(report)
+
+
 def _finalize_runtime_trace_metadata(runtime_bundle: dict[str, Any]) -> None:
     """Summarize actual trace evidence without confusing it with availability."""
     runs = runtime_bundle.get("runs") if isinstance(runtime_bundle.get("runs"), list) else []
@@ -1182,7 +1208,10 @@ def _apply_local_dynamic_runtime(
     """
     for target, report in zip(targets, extensions, strict=False):
         required = _runtime_required_for_report(report)
+        instance_key = _runtime_instance_key(report)
+        bundle_key = _runtime_bundle_key(runtime_bundle, report)
         run_record: dict[str, Any] = {
+            "instance_id": instance_key,
             "extension_id": report.extension_id,
             "version": report.version,
             "required": required,
@@ -1192,6 +1221,7 @@ def _apply_local_dynamic_runtime(
         }
         if required:
             runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
+            runtime_bundle.setdefault("runtime_required_instances", []).append(instance_key)
             try:
                 runtime = run_sandbox(
                     Path(target["path"]),
@@ -1199,9 +1229,7 @@ def _apply_local_dynamic_runtime(
                     timeout_seconds=timeout_seconds,
                 )
                 observed = runtime.get("extensions", {}) if isinstance(runtime, dict) else {}
-                items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
-                if not isinstance(items, list):
-                    items = []
+                items = _runtime_observations_for_report(observed, report) if isinstance(observed, dict) else []
                 runtime_failed = any(
                     isinstance(item, dict)
                     and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
@@ -1215,7 +1243,7 @@ def _apply_local_dynamic_runtime(
                         "evidence": execution_error,
                     })
                     runtime_failed = True
-                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                runtime_bundle.setdefault("extensions", {})[bundle_key] = [
                     item for item in items if isinstance(item, dict)
                 ]
                 run_record.update({
@@ -1238,7 +1266,7 @@ def _apply_local_dynamic_runtime(
                 if runtime_failed:
                     run_record["error"] = execution_error or "Runtime execution did not complete successfully."
             except Exception as exc:  # noqa: BLE001 - runtime failure is disclosed and fail-closed
-                runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
+                runtime_bundle.setdefault("extensions", {})[bundle_key] = [{
                     "kind": "sandbox_error",
                     "phase": "runtime",
                     "evidence": str(exc)[:500],
@@ -1298,7 +1326,10 @@ def scan_marketplace_extension(
         report = scan_vsix(scan_path, known_bad_hashes=known_bad_hashes, artifact_origin="archive_artifact")
         if dynamic_runtime and runtime_bundle is not None:
             runtime_required = _runtime_required_for_report(report)
+            instance_key = _runtime_instance_key(report)
+            bundle_key = _runtime_bundle_key(runtime_bundle, report)
             run_record: dict[str, Any] = {
+                "instance_id": instance_key,
                 "extension_id": report.extension_id,
                 "version": report.version,
                 "required": runtime_required,
@@ -1308,6 +1339,7 @@ def scan_marketplace_extension(
             }
             if runtime_required:
                 runtime_bundle.setdefault("required_extension_ids", []).append(report.extension_id)
+                runtime_bundle.setdefault("runtime_required_instances", []).append(instance_key)
                 try:
                     runtime = run_sandbox(
                         scan_path,
@@ -1315,9 +1347,7 @@ def scan_marketplace_extension(
                         timeout_seconds=runtime_timeout_seconds,
                     )
                     observed = runtime.get("extensions", {}) if isinstance(runtime, dict) else {}
-                    items = observed.get(report.extension_id, []) if isinstance(observed, dict) else []
-                    if not isinstance(items, list):
-                        items = []
+                    items = _runtime_observations_for_report(observed, report) if isinstance(observed, dict) else []
                     runtime_failed = any(
                         isinstance(item, dict)
                         and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
@@ -1331,7 +1361,7 @@ def scan_marketplace_extension(
                             "evidence": execution_error,
                         })
                         runtime_failed = True
-                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [
+                    runtime_bundle.setdefault("extensions", {})[bundle_key] = [
                         item for item in items if isinstance(item, dict)
                     ]
                     run_record.update({
@@ -1354,7 +1384,7 @@ def scan_marketplace_extension(
                     if runtime_failed:
                         run_record["error"] = execution_error or "Runtime execution did not complete successfully."
                 except Exception as exc:  # noqa: BLE001 - runtime failures become disclosed provider evidence
-                    runtime_bundle.setdefault("extensions", {})[report.extension_id] = [{
+                    runtime_bundle.setdefault("extensions", {})[bundle_key] = [{
                         "kind": "sandbox_error",
                         "phase": "runtime",
                         "evidence": str(exc)[:500],
@@ -3388,8 +3418,9 @@ def _apply_sandbox_observations(extensions: list[ExtensionReport], observations:
     if not observations:
         return
     by_id = {extension.extension_id: extension for extension in extensions}
-    for extension_id, items in observations.items():
-        extension = by_id.get(extension_id)
+    by_instance = {_runtime_instance_key(extension): extension for extension in extensions}
+    for observation_key, items in observations.items():
+        extension = by_instance.get(observation_key) or by_id.get(observation_key)
         if extension is None:
             continue
         for item in _aggregate_sandbox_observations(items):
@@ -3827,6 +3858,9 @@ def _merge_dynamic_runtime_bundle(
     base_metadata = sandbox_bundle.get("metadata") if isinstance(sandbox_bundle.get("metadata"), dict) else {}
     runs = runtime_bundle.get("runs") if isinstance(runtime_bundle.get("runs"), list) else []
     required_ids = runtime_bundle.get("required_extension_ids") if isinstance(runtime_bundle.get("required_extension_ids"), list) else []
+    base_required_ids = base_metadata.get("runtime_required_ids") if isinstance(base_metadata.get("runtime_required_ids"), list) else []
+    required_instances = runtime_bundle.get("runtime_required_instances") if isinstance(runtime_bundle.get("runtime_required_instances"), list) else []
+    base_required_instances = base_metadata.get("runtime_required_instances") if isinstance(base_metadata.get("runtime_required_instances"), list) else []
     metadata = dict(base_metadata)
     metadata.update({
         "status": "executed",
@@ -3836,9 +3870,14 @@ def _merge_dynamic_runtime_bundle(
         "backend": "bubblewrap",
         "runtime_policy": "capability-gated-v1",
         "runtime_runs": runs,
-        "runtime_required_ids": sorted({str(item) for item in required_ids if str(item)}),
+        "runtime_required_ids": sorted({str(item) for item in [*base_required_ids, *required_ids] if str(item)}),
+        "runtime_required_instances": sorted({
+            str(item)
+            for item in [*base_required_instances, *required_instances]
+            if str(item)
+        }),
         "observation_count": sum(len(value) for value in merged_extensions.values()),
-        "observed_kinds": _observation_kinds(merged_extensions),
+        "observed_kinds": _observation_kinds(merged_extensions, runs=runs),
         "external_syscall_trace": bool(
             runtime_bundle.get("external_syscall_trace") is True
             or base_metadata.get("external_syscall_trace") is True
@@ -3851,13 +3890,26 @@ def _merge_dynamic_runtime_bundle(
     return {"extensions": merged_extensions, "metadata": metadata}
 
 
-def _observation_kinds(observations: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+def _observation_kinds(
+    observations: dict[str, list[dict[str, Any]]],
+    *,
+    runs: list[dict[str, Any]] | None = None,
+) -> dict[str, list[str]]:
     """Expose bounded runtime event types without persisting raw paths/commands."""
-    return {
-        extension_id: sorted({str(item.get("kind")) for item in items if item.get("kind")})
-        for extension_id, items in observations.items()
-        if items
+    labels = {
+        str(item.get("instance_id")): str(item.get("extension_id"))
+        for item in (runs or [])
+        if isinstance(item, dict) and item.get("instance_id") and item.get("extension_id")
     }
+    result: dict[str, set[str]] = {}
+    for instance_key, items in observations.items():
+        if not items:
+            continue
+        label = labels.get(instance_key, instance_key)
+        result.setdefault(label, set()).update(
+            str(item.get("kind")) for item in items if item.get("kind")
+        )
+    return {key: sorted(values) for key, values in result.items()}
 
 
 def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:
@@ -3865,9 +3917,14 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
     observations = bundle.get("extensions") if isinstance(bundle.get("extensions"), dict) else {}
     status = str(metadata.get("status") or "not-requested")
     required_ids = {str(item).lower() for item in metadata.get("runtime_required_ids", []) if str(item)}
+    required_instances = {str(item) for item in metadata.get("runtime_required_instances", []) if str(item)}
     for extension in extensions:
-        items = observations.get(extension.extension_id, [])
-        required = extension.extension_id.lower() in required_ids
+        instance_key = _runtime_instance_key(extension)
+        items = _runtime_observations_for_report(observations, extension)
+        required = (
+            instance_key in required_instances
+            or (not required_instances and extension.extension_id.lower() in required_ids)
+        )
         provider_status = status
         execution = str(metadata.get("execution") or "not-run")
         executed = bool(metadata.get("executed"))
