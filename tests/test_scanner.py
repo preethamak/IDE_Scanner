@@ -2448,6 +2448,24 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(report.artifact_inventory["scan_incomplete"])
         self.assertIn("dist/missing.js", report.analysis_coverage["missing_entrypoints"])
 
+    def test_missing_optional_browser_entrypoint_does_not_invalidate_desktop_scan(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "out").mkdir()
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"desktop-browser-alternate","version":"1.0.0",'
+                '"main":"out/extension.js","browser":"dist/web/extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "out" / "extension.js").write_text("module.exports = {};", encoding="utf-8")
+
+            report = scan_extension(root)
+
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertEqual(report.analysis_coverage["missing_entrypoints"], [])
+        self.assertEqual(report.analysis_coverage["optional_missing_entrypoints"], ["dist/web/extension.js"])
+        self.assertIn("out/extension.js", report.analysis_coverage["resolved_entrypoints"])
+
     def test_suffixless_node_entrypoint_resolves_to_javascript(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
