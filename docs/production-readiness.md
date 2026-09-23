@@ -84,25 +84,28 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against scanner source revision
-`f27efc18d48fd07c4b81997913a63161ae79c9bf` and passed its behavioral checks:
+The latest local deterministic gate was rerun from release checkout
+`f63409f4933881ddd38775fcdd224a2c8ce50f7e` and passed its behavioral checks:
 all 8 required corpus artifacts were complete, both known-safe controls were
 allowed without review, and all 4 required known-malicious artifacts were
-blocked. The current scanner revision
-`ba2c632713de5876ce2113209a9fc4a55b30d000` adds secret scrubbing for every
-parser/provider subprocess and leaves verdict logic unchanged; its focused
-regression suite passed. The vendored CLI engine is parity-verified against
-that current revision. The identity-bound production gate still must run in
-CI with `--require-identity --expected-scanner-build`.
+blocked. The current scanner logic is the parser/provider-hardened release
+line introduced at `ba2c632713de5876ce2113209a9fc4a55b30d000`; the vendored
+CLI engine is parity-verified against the current release checkout. Five
+retained exact safe controls were also replayed against this checkout and all
+remained `allow`/`clean` with zero risk and malware scores. The local replay
+intentionally had an unknown report build because it was not identity-bound;
+the production gate still must run in CI with
+`--require-identity --expected-scanner-build`.
 This does not waive the
 privileged runtime holdout or authorize registry publication.
 
-A separate 146-artifact cohort replay on this build is diagnostic calibration
-evidence, not a public accuracy claim. It produced 135 complete allow results,
-three complete reviews, two complete suspicious results, and eight incomplete
-operational results; the incomplete results remain quarantined rather than
-being counted as clean. The cohort contains no independent labels, so it cannot
-be used to claim ecosystem precision or recall.
+A separate 146-artifact cohort replay from the earlier calibration pass is
+diagnostic evidence, not a public accuracy claim. It produced 135 complete
+allow results, three complete reviews, two complete suspicious results, and
+eight incomplete operational results; the incomplete results remain
+quarantined rather than being counted as clean. The cohort contains no
+independent labels, so it cannot be used to claim ecosystem precision or
+recall.
 
 The developer workstation cannot currently create the required Bubblewrap
 network/PID namespace (and does not have the required external syscall tracer
