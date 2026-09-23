@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.23-policy-v3-calibration.39-runtime-scope-calibration"
+RULESET_VERSION = "2026.09.23-policy-v3-calibration.40-environment-exfiltration"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
@@ -82,6 +82,16 @@ _RULE_OVERRIDES: dict[str, dict[str, object]] = {
         "recommendation": "Block the extension and investigate its credential collection paths and network destinations.",
         "false_positive_notes": "Legitimate migration or backup tools can exhibit similar behavior and require explicit user intent and documented destinations.",
         "benchmark_tags": ["credential", "filesystem", "network", "interprocedural"],
+    },
+    "environment-data-exfiltration": {
+        "title": "Whole environment reaches outbound request",
+        "category": "credential-access",
+        "evidence_class": "correlated",
+        "default_severity": "HIGH",
+        "description": "Detects the complete process environment, or a serialization of it, reaching an outbound request through a bounded local data flow.",
+        "recommendation": "Review the exact environment fields, destination, user disclosure, and whether the transfer is necessary. Sending the complete process environment is not ordinary telemetry.",
+        "false_positive_notes": "Legitimate telemetry should select documented fields rather than serialize the full process environment; selected process.env.KEY access is intentionally not sufficient for this rule.",
+        "benchmark_tags": ["credential", "environment", "network", "value-flow"],
     },
     "obfuscated-credential-harvesting-exfiltration": {
         "title": "Obfuscated credential harvesting and exfiltration",

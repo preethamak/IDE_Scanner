@@ -156,6 +156,7 @@ CORRELATED_RULES = {
     "credential-exfiltration-chain",
     "credential-harvesting-exfiltration",
     "credential-identifier-flow-to-network",
+    "environment-data-exfiltration",
     "destructive-transfer-chain",
     "download-and-execute",
     "install-download-execute",
@@ -178,6 +179,7 @@ BLOCKING_CORRELATED_RULES = CORRELATED_RULES - {
     "download-and-execute",
     "remote-vsix-install-chain",
     "destructive-transfer-chain",
+    "environment-data-exfiltration",
     "persistence-chain",
 }
 BLOCKING_OBSERVED_RULES = {
@@ -2323,6 +2325,21 @@ def _add_code_findings(
             {"evidence_class": "correlated", **identifier_credential_flow},
         ))
 
+    environment_data_flow = _has_environment_data_network_flow(text)
+    if environment_data_flow:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "environment-data-exfiltration",
+            "credential-access",
+            "HIGH",
+            0.93,
+            "Whole-process environment data is collected or serialized and reaches an outbound request.",
+            [rel],
+            "Review the exact environment fields, destination, user disclosure, and whether the transfer is necessary. Sending the complete process environment is not ordinary telemetry.",
+            {"evidence_class": "correlated", **environment_data_flow},
+        ))
+
     # Credential stealers commonly split collection and transmission across
     # helper functions specifically to defeat same-window scanners.  Require a
     # deliberately narrow combination before correlating package-wide: several
@@ -3210,6 +3227,68 @@ def _has_direct_credential_network_flow(text: str, secret_pattern: re.Pattern[st
         if re.search(rf"(?:body\s*:\s*{variable}\b|(?:write|send|post)\s*\(\s*{variable}\b)", tail):
             return True
     return False
+
+
+def _has_environment_data_network_flow(text: str) -> dict[str, Any] | None:
+    """Detect whole-environment collection reaching a local network sink.
+
+    ``process.env`` is common in build tooling and selected environment values
+    are normal telemetry or configuration. The high-specificity case is a full
+    environment object (or a serialization of it) that is then passed to an
+    outbound request. Keep this bounded to local assignments and request
+    arguments so unrelated environment reads and network clients stay clean.
+    """
+    whole_environment = re.compile(r"\bprocess\.env\b(?!\s*\.)", re.I)
+    assignment = re.compile(
+        r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]{1,1400})"
+    )
+    for match in assignment.finditer(text):
+        expression = match.group(2)
+        if not whole_environment.search(expression):
+            continue
+        variable = match.group(1)
+        tail_start = match.end()
+        tail = text[tail_start:min(len(text), tail_start + 4000)]
+        sink = NETWORK_SINK_RE.search(tail)
+        if not sink:
+            continue
+        sink_tail = tail[sink.start():min(len(tail), sink.start() + 1800)]
+        if not re.search(rf"\b{re.escape(variable)}\b", sink_tail):
+            continue
+        return {
+            "correlation": "same-variable-local-flow",
+            "collection": _truncate_evidence_text(expression),
+            "transfer": _truncate_evidence_text(sink_tail),
+            "sink": "network-request",
+        }
+
+    # Also catch an inline request body/query, while keeping the window tight
+    # enough not to turn a file-wide process.env + fetch co-occurrence into a
+    # verdict-driving finding.
+    for sink in NETWORK_SINK_RE.finditer(text):
+        start = max(0, sink.start() - 800)
+        end = min(len(text), sink.start() + 1600)
+        context = text[start:end]
+        collection = whole_environment.search(context)
+        if not collection:
+            continue
+        if not re.search(
+            r"(?:JSON\.stringify|Object\.(?:keys|entries|assign)|\.\.\.)[^;\n]{0,500}\bprocess\.env\b(?!\s*\.)",
+            context,
+            re.I,
+        ) and not re.search(
+            r"(?:body|data|payload|params|query|searchParams)\s*:[^;\n]{0,500}\bprocess\.env\b(?!\s*\.)",
+            context,
+            re.I,
+        ):
+            continue
+        return {
+            "correlation": "inline-environment-to-network-flow",
+            "collection": _truncate_evidence_text(collection.group(0)),
+            "transfer": _truncate_evidence_text(context),
+            "sink": "network-request",
+        }
+    return None
 
 
 def _has_systematic_credential_harvesting_exfiltration(

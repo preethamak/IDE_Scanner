@@ -9,7 +9,7 @@ class RuleRegistryTests(unittest.TestCase):
     def test_all_rules_publish_engine_and_decision_semantics(self) -> None:
         rules = rule_registry()
 
-        self.assertEqual(len(rules), 116)
+        self.assertEqual(len(rules), 117)
         self.assertTrue(all(rule.engine for rule in rules))
 
     def test_classifier_and_registry_rule_ids_are_published(self) -> None:
