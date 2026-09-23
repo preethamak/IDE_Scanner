@@ -110,6 +110,8 @@ def evaluate_holdout_corpus(
     *,
     require_runtime: bool = True,
     require_malicious_block: bool = True,
+    require_identity: bool = False,
+    expected_scanner_build: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate a frozen, independently labelled exact-artifact holdout.
 
@@ -151,11 +153,20 @@ def evaluate_holdout_corpus(
         "deep_profile": deep_profile if require_runtime else True,
         "external_syscall_trace": external_syscall_trace if require_runtime else True,
     }
+    report_identity = _report_identity(report)
+    if require_identity:
+        identity_is_complete = all(
+            report_identity[key] not in {"", "unknown", "legacy"}
+            for key in ("scanner_build", "policy_version", "ruleset_version")
+        )
+        if expected_scanner_build is not None:
+            identity_is_complete = identity_is_complete and report_identity["scanner_build"] == expected_scanner_build
+        checks["report_identity"] = identity_is_complete
     return {
         "schema_version": HOLDOUT_CORPUS_SCHEMA_VERSION,
         "corpus_id": corpus["corpus_id"],
         "corpus_version": corpus["corpus_version"],
-        "report_identity": _report_identity(report),
+        "report_identity": report_identity,
         "runtime_evidence": {
             "required": require_runtime,
             "runtime_enabled": runtime_enabled,

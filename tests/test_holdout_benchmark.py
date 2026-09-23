@@ -173,6 +173,34 @@ class HoldoutBenchmarkTests(unittest.TestCase):
         self.assertFalse(result["gate"]["passed"])
         self.assertTrue(any("required flag is missing" in item for item in result["artifacts"][0]["violations"]))
 
+    def test_holdout_can_require_an_exact_report_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", self._report()),
+                require_identity=True,
+                expected_scanner_build="a" * 40,
+            )
+
+        self.assertTrue(result["gate"]["passed"])
+        self.assertTrue(result["gate"]["checks"]["report_identity"])
+
+    def test_holdout_rejects_placeholder_or_unexpected_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            report.pop("scanner_build")
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+                require_identity=True,
+                expected_scanner_build="a" * 40,
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertFalse(result["gate"]["checks"]["report_identity"])
+
     @staticmethod
     def _corpus() -> dict:
         return {

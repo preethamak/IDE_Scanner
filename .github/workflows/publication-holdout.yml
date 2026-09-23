@@ -114,6 +114,8 @@ jobs:
             --corpus holdout-corpus.json \
             --report holdout-scan.json \
             --fail-on-regression \
+            --require-identity \
+            --expected-scanner-build "$IDE_SCANNER_BUILD_SHA" \
             --out holdout-gate.json
       - name: Create empty advisory snapshot for behavior-only shadow replay
         run: |
@@ -145,6 +147,8 @@ jobs:
             --report behavior-holdout-scan.json \
             --behavior-only \
             --fail-on-regression \
+            --require-identity \
+            --expected-scanner-build "$IDE_SCANNER_BUILD_SHA" \
             --out behavior-holdout-gate.json
       - name: Audit holdout rule-level evidence
         run: |

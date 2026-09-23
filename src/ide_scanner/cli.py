@@ -145,6 +145,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Exit non-zero when the holdout gate fails.",
     )
+    benchmark_holdout.add_argument(
+        "--require-identity",
+        action="store_true",
+        help="Require a non-placeholder scanner build, policy, and ruleset identity in the report.",
+    )
+    benchmark_holdout.add_argument(
+        "--expected-scanner-build",
+        default=None,
+        help="Require the report scanner build to equal this immutable revision.",
+    )
 
     agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
     agent.add_argument("--server", required=True, help="Base URL of the web app, for example http://127.0.0.1:8765.")
@@ -284,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.report,
                 require_runtime=not args.allow_static_only,
                 require_malicious_block=not args.behavior_only,
+                require_identity=args.require_identity,
+                expected_scanner_build=args.expected_scanner_build,
             )
             _emit(result, args.output)
             return 1 if args.fail_on_regression and not result["gate"]["passed"] else 0
