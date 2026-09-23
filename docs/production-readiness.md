@@ -151,6 +151,13 @@ while confirmed malware outcomes still require independent artifact or
 intelligence evidence. Production publication also requires the OS-level
 external tracer for native/direct-syscall coverage.
 
+Runtime completion is recorded per exact artifact, not only in aggregate
+metadata. Each required package must have a matching runtime instance receipt
+with `status: "completed"` and `external_syscall_trace: true`; a missing,
+failed, or trace-less receipt makes that package's provider incomplete and
+prevents publication. This protects duplicate installations and truncated
+worker bundles from being mistaken for successful coverage.
+
 Production runtime workers set `GUARDRAILS_RUNTIME_EXTERNAL_TRACE=1` and
 install `strace`. Bubblewrap is then launched under the parent-owned syscall
 observer, which independently records file opens, process execution, and
