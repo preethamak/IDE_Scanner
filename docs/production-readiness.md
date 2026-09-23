@@ -84,20 +84,17 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun from release checkout
-`f63409f4933881ddd38775fcdd224a2c8ce50f7e` and passed its behavioral checks:
-all 8 required corpus artifacts were complete, both known-safe controls were
-allowed without review, and all 4 required known-malicious artifacts were
-blocked. The current scanner logic is the parser/provider-hardened release
-line introduced at `ba2c632713de5876ce2113209a9fc4a55b30d000`; the vendored
-CLI engine is parity-verified against the current release checkout. Five
-retained exact safe controls were also replayed against this checkout and all
-remained `allow`/`clean` with zero risk and malware scores. The local replay
-intentionally had an unknown report build because it was not identity-bound;
-the production gate still must run in CI with
-`--require-identity --expected-scanner-build`.
-This does not waive the
-privileged runtime holdout or authorize registry publication.
+The latest local deterministic gate was rerun against scanner build
+`c6dc0497e4ad616183e5ca806f0eac3d2f6cad50` and passed its identity-bound
+checks. All 8 required corpus artifacts were complete, both known-safe
+controls were allowed without review, and all 4 required known-malicious
+artifacts were blocked; 5 optional backlog artifacts remained explicitly
+unscanned. The report identity was policy
+`3.1.0-calibration.7` and ruleset
+`2026.09.23-policy-v3-calibration.40-environment-exfiltration`. The vendored
+CLI engine is parity-verified against this scanner checkout. This is
+deterministic regression evidence only: it does not waive the privileged
+runtime holdout or authorize registry publication.
 
 A separate 146-artifact cohort replay from the earlier calibration pass is
 diagnostic evidence, not a public accuracy claim. It produced 135 complete
