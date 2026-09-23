@@ -85,10 +85,24 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun against scanner build
-`d6b5c3629d000043965f7a2cad25b33e947b85f` and passed: all 8 required corpus
+`0545b58a3d5794ce685459f62e433b22fb65ee73` and passed: all 8 required corpus
 artifacts were complete, both known-safe controls were allowed without review,
-and all 4 required known-malicious artifacts were blocked. This does not waive
-the privileged runtime holdout or authorize registry publication.
+and all 4 required known-malicious artifacts were blocked. The vendored CLI
+engine is pinned to this same scanner commit. This does not waive the
+privileged runtime holdout or authorize registry publication.
+
+A separate 146-artifact cohort replay on this build is diagnostic calibration
+evidence, not a public accuracy claim. It produced 135 complete allow results,
+three complete reviews, two complete suspicious results, and eight incomplete
+operational results; the incomplete results remain quarantined rather than
+being counted as clean. The cohort contains no independent labels, so it cannot
+be used to claim ecosystem precision or recall.
+
+The developer workstation cannot currently create the required Bubblewrap
+network/PID namespace (and does not have the required external syscall tracer
+available). The scanner therefore reports runtime preflight as unavailable and
+refuses to treat local runtime scans as complete. The privileged CI holdout
+worker remains mandatory before a public release or registry expansion.
 
 An AST resource skip is a required-provider failure and makes the scan
 incomplete. Raw-text and YARA coverage are not presented as equivalent to a
