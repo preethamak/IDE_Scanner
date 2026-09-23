@@ -169,6 +169,7 @@ def sandbox_preflight(timeout_seconds: int = 10) -> dict[str, Any]:
         "--tmpfs", "/tmp",
         "--clearenv",
         "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "--chdir", "/",
         "--",
         "/bin/true",
     ]

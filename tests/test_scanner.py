@@ -3333,6 +3333,8 @@ class ScannerTests(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertIn("--unshare-net", command)
         self.assertIn("--unshare-pid", command)
+        self.assertIn("--chdir", command)
+        self.assertEqual(command[command.index("--chdir") + 1], "/")
         self.assertEqual(command[-1], "/bin/true")
 
     def test_sandbox_preflight_can_delegate_namespace_creation_to_passwordless_sudo(self) -> None:
