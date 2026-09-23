@@ -4103,6 +4103,14 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
             "runtime_run_status": str(runtime_run.get("status") or "missing") if runtime_run else "missing",
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
+        # Runtime coverage is attached after the static provider pass has
+        # already been finalized. Recompute the aggregate completeness here so
+        # a failed required sandbox run cannot leave a clean executable
+        # extension in the approval path simply because static coverage was
+        # complete. This is deliberately fail-closed: required dynamic
+        # evidence is either completed with an external trace or the artifact
+        # remains incomplete and cannot be allowed.
+        _finalize_analysis_coverage(extension.analysis_coverage)
         if required:
             declared = {
                 str(capability.get("id") or "")
@@ -4975,7 +4983,7 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
         add_limitation(f"Skipped {len(oversized)} executable file(s) larger than {MAX_TEXT_BYTES} bytes")
     required = candidates - set(oversized) - set(failures)
     if required - analyzed:
-        limitations.append(f"Did not analyze {len(required - analyzed)} executable candidate(s)")
+        add_limitation(f"Did not analyze {len(required - analyzed)} executable candidate(s)")
     providers = coverage.get("providers") if isinstance(coverage.get("providers"), dict) else {}
     required_providers = {
         item.strip().lower()

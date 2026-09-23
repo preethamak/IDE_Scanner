@@ -59,6 +59,7 @@ from ide_scanner.scanner import (
     _sandbox_observation_finding,
     _runtime_required_for_report,
     _runtime_execution_failure,
+    _merge_dynamic_runtime_bundle,
     _runtime_unexpected_capability_finding,
     scan_extension,
     scan_marketplace_extension,
@@ -309,6 +310,48 @@ class ScannerTests(unittest.TestCase):
 
             self.assertFalse(failed_bundle["external_syscall_trace"])
             self.assertFalse(failed_bundle["runs"][0]["external_syscall_trace"])
+
+    def test_required_runtime_failure_cannot_be_allowed_after_static_completion(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "runtime-required",
+                    "version": "1.0.0",
+                    "main": "./extension.js",
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("exports.activate = () => {};\n", encoding="utf-8")
+            extension = scan_extension(root)
+            runtime_bundle: dict[str, object] = {
+                "schema_version": "0.1.0",
+                "mode": "executed",
+                "extensions": {},
+                "runs": [],
+                "required_extension_ids": [],
+                "external_syscall_trace": False,
+                "external_syscall_trace_available": False,
+            }
+            with patch(
+                "ide_scanner.scanner.run_sandbox",
+                side_effect=ValueError("sandbox preflight unavailable"),
+            ):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(root)}], [extension], runtime_bundle, timeout_seconds=1,
+                )
+            merged = _merge_dynamic_runtime_bundle(
+                {"extensions": {}, "metadata": {}}, runtime_bundle,
+            )
+            _apply_sandbox_provider([extension], merged)
+            _apply_security_decision(extension)
+
+        self.assertEqual(extension.analysis_status, "incomplete")
+        self.assertEqual(extension.analysis_coverage["status"], "incomplete")
+        self.assertFalse(extension.analysis_coverage["required_providers_complete"])
+        self.assertEqual(extension.decision, "incomplete")
+        self.assertIn("Required provider dynamic_sandbox did not complete", extension.analysis_coverage["limitations"])
 
     def test_local_runtime_does_not_execute_theme_capability_only_artifact(self) -> None:
         with TemporaryDirectory() as tmp:
