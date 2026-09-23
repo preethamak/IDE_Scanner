@@ -190,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             dynamic_runtime=args.runtime,
             runtime_timeout_seconds=args.runtime_timeout,
         )
+        scan_exit_code = _scan_exit_code(report, profile=args.profile)
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
         if args.stream:
@@ -206,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 output = str(receipt["output"])
             _emit_ndjson(iter_report_events(report, profile=args.profile, source=source, output=output))
-            return 0
+            return scan_exit_code
         if output_format == "report.zip":
             if not args.output:
                 parser.error("scan --format report.zip requires --output")
@@ -218,20 +219,20 @@ def main(argv: list[str] | None = None) -> int:
                 include_raw_evidence=args.include_raw_evidence,
             )
             _emit(receipt, None)
-            return 0
+            return scan_exit_code
         if output_format == "bundle.json":
             from .report_bundle import build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
-            return 0
+            return scan_exit_code
         if output_format == "terminal":
             if args.output:
                 parser.error("scan --format terminal cannot write an output file; use --format report.zip or json.")
             _emit_terminal_brief(report)
-            return 0
+            return scan_exit_code
         if output_format in {"sarif", "sqlite"}:
             parser.error(f"scan --format {output_format} is reserved but not implemented yet")
         _emit(report, args.output)
-        return 0
+        return scan_exit_code
     if args.command == "artifacts":
         store = FilesystemArtifactStore(args.store)
         _emit({"artifacts": store.search(
@@ -340,6 +341,34 @@ def _scan_output_format(output: str | None, explicit_format: str | None) -> str:
     if output and output.lower().endswith(".zip"):
         return "report.zip"
     return "terminal" if sys.stdout.isatty() and not output else "json"
+
+
+def _scan_exit_code(report: dict[str, Any], *, profile: str) -> int:
+    """Fail closed for deep scans whose report cannot support publication.
+
+    Static profiles may still be useful for local triage when a provider is
+    unavailable. A deep scan is different: callers use its zero exit status
+    as evidence that the required runtime/provider coverage completed. Keep
+    the report on disk for diagnosis, but make CI and workers reject it.
+    """
+    if profile != "deep":
+        return 0
+    incomplete = [
+        extension
+        for extension in report.get("extensions", [])
+        if isinstance(extension, dict)
+        and (
+            str(extension.get("analysis_status") or "incomplete") != "complete"
+            or str(extension.get("decision") or "incomplete") == "incomplete"
+        )
+    ]
+    if incomplete:
+        print(
+            f"Deep scan incomplete for {len(incomplete)} extension(s); result is not publication-ready.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def _emit_terminal_brief(report: dict[str, Any]) -> None:

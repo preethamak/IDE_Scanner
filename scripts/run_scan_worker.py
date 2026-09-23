@@ -21,7 +21,11 @@ TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 
 def main() -> int:
-    require_runtime_preflight()
+    try:
+        require_runtime_preflight()
+    except RuntimeError as error:
+        print(f"Deep Scan worker not started: {error}", file=sys.stderr)
+        return 2
     max_jobs = bounded_jobs(os.environ.get("SCAN_JOBS_PER_WORKER", "1"))
     empty_claim_retries = bounded_retries(os.environ.get("SCAN_EMPTY_CLAIM_RETRIES", "5"))
     artifact_root = Path(

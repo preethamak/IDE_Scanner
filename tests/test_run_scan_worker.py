@@ -128,3 +128,13 @@ def test_worker_refuses_to_claim_when_runtime_preflight_is_unavailable() -> None
             assert "namespace denied" in str(error)
         else:
             raise AssertionError("worker must refuse an unavailable runtime sandbox")
+
+
+def test_worker_exits_before_claiming_when_runtime_preflight_is_unavailable() -> None:
+    with patch.dict("os.environ", {}, clear=True), patch.object(
+        run_scan_worker,
+        "sandbox_preflight",
+        return_value={"status": "unavailable", "error": "namespace denied"},
+    ), patch.object(run_scan_worker.claim_scan, "claim_job") as claim_job:
+        assert run_scan_worker.main() == 2
+    claim_job.assert_not_called()

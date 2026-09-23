@@ -73,6 +73,18 @@ class CliHonestyTests(unittest.TestCase):
 
         self.assertIn("src/terminal.js:43", buffer.getvalue())
 
+    def test_deep_scan_returns_nonzero_when_report_is_incomplete(self) -> None:
+        report = {
+            "extensions": [{
+                "extension_id": "example.runtime",
+                "analysis_status": "incomplete",
+                "decision": "incomplete",
+            }],
+        }
+        with patch("ide_scanner.cli.scan_targets", return_value=report):
+            code = cli.main(["scan", "--fixtures", "--profile", "deep", "--runtime", "--format", "json"])
+        self.assertEqual(code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
