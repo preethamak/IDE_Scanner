@@ -492,8 +492,17 @@ def _validate_holdout_results(
                 malicious_reviewed += 1
             if _review_or_higher(actual):
                 malicious_detected += 1
-            if verdict not in {"suspicious", "malicious"}:
-                raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} lacks a risk verdict")
+            allowed_verdicts = {"suspicious", "malicious"}
+            if not require_malicious_block:
+                # The empty-advisory shadow gate measures quarantine coverage.
+                # REVIEW is a valid conservative detection here; only the
+                # intel-backed gate may require a preventive BLOCK decision.
+                allowed_verdicts.add("review")
+            if verdict not in allowed_verdicts:
+                raise ValueError(
+                    f"Known-malicious holdout artifact {key[0]}@{key[1]} lacks a permitted risk verdict: "
+                    f"{sorted(allowed_verdicts)}"
+                )
             if require_malicious_block and decision != "block":
                 raise ValueError(f"Known-malicious holdout artifact {key[0]}@{key[1]} was not blocked with a risk verdict")
         expected_sha256 = str(_object(artifact.get("artifact")).get("sha256") or "").lower()

@@ -47,6 +47,7 @@ class HoldoutBenchmarkTests(unittest.TestCase):
             root = Path(directory)
             report = self._report()
             report["extensions"][1]["decision"] = "review"
+            report["extensions"][1]["verdict"] = "review"
             report_path = self._write(root, "report.json", report)
 
             result = evaluate_holdout_corpus(

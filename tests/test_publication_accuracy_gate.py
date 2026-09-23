@@ -197,6 +197,15 @@ class PublicationAccuracyGateTests(unittest.TestCase):
             regression = gate("regression")
             behavior = holdout_gate()
             behavior["classification_mode"] = "behavior-only"
+            # A behavior-only replay may quarantine a real malicious artifact
+            # as REVIEW when no exact advisory is available. The intel-backed
+            # holdout below remains strict BLOCK/MALICIOUS.
+            behavior["artifacts"][5]["actual"]["verdict"] = "review"
+            behavior["artifacts"][5]["actual"]["decision"] = "review"
+            behavior["summary"]["malicious_blocked"] = 4
+            behavior["summary"]["malicious_block_rate"] = 0.8
+            behavior["summary"]["malicious_reviewed"] = 1
+            behavior["summary"]["malicious_review_rate"] = 0.2
             behavior["advisory_snapshot"] = {
                 "status": "completed",
                 "snapshot_version": "empty.1",

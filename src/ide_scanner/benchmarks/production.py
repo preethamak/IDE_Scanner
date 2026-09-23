@@ -266,8 +266,16 @@ def _evaluate_holdout_artifact(
             violations.append(f"known-malicious artifact was not blocked (decision={decision!r})")
         if not require_malicious_block and decision not in {"review", "block"}:
             violations.append(f"known-malicious artifact was not detected (decision={decision!r})")
-        if verdict not in {"suspicious", "malicious"}:
-            violations.append(f"known-malicious artifact verdict {verdict!r} is not suspicious or malicious")
+        allowed_verdicts = {"suspicious", "malicious"}
+        if not require_malicious_block:
+            # Behavior-only replay deliberately has no trusted advisory. A
+            # high-risk quarantine decision is still a detection even when the
+            # public verdict remains REVIEW rather than claiming MALICIOUS.
+            allowed_verdicts.add("review")
+        if verdict not in allowed_verdicts:
+            violations.append(
+                f"known-malicious artifact verdict {verdict!r} is not one of {sorted(allowed_verdicts)}"
+            )
     expected_hash = str((expected.get("artifact") or {}).get("sha256") or "").lower()
     actual_hash = str(actual.get("artifact_hash") or (actual.get("artifact_identity") or {}).get("sha256") or "").lower()
     if actual_hash != expected_hash:
