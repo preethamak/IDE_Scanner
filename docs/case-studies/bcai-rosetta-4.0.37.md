@@ -54,7 +54,7 @@ replaced by an empty snapshot. The scanner still returned:
   network access, filesystem access, process execution, shell execution, and
   environment-file references
 
-The current scanner checkout is revision
+The behavior-only replay used scanner engine revision
 `bd8193fdaa91a26e3da3a542a6712d536b814ad9`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`.
 The local replay completed with 100% required-provider coverage against the
