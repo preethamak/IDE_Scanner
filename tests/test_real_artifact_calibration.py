@@ -148,6 +148,11 @@ class RealArtifactCalibrationTests(unittest.TestCase):
         self.assertNotIn("download-and-execute", rule_ids)
         self.assertIn("dynamic-shell-execution", rule_ids)
         self.assertIn("remote-credential-broker", rule_ids)
+        broker = next(item for item in extension["findings"] if item.get("rule_id") == "remote-credential-broker")
+        broker_files = set(broker.get("file_refs") or [])
+        self.assertIn("bundled-rosetta/relay-proxy/token-passthrough.js", broker_files)
+        self.assertIn("dist/extension.js", broker_files)
+        self.assertGreaterEqual(int((broker.get("evidence") or {}).get("occurrence_count") or 1), 1)
 
     @unittest.skipUnless(
         BCAI_ARTIFACT.is_file(),
