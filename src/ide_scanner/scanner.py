@@ -1098,6 +1098,18 @@ _DYNAMIC_RUNTIME_CAPABILITIES = frozenset({
     "wasm_runtime",
 })
 
+# An activation process that exits unsuccessfully did not complete the
+# required runtime contract, even if it emitted some authenticated events
+# first. Keep the event as evidence, but do not let the receipt become
+# publication-complete. Lifecycle-script failures are intentionally excluded:
+# they are a separate contextual observation and the activation probe still
+# runs afterward.
+_RUNTIME_COVERAGE_FAILURE_KINDS = frozenset({
+    "runtime_timeout",
+    "sandbox_error",
+    "runtime_entrypoint_error",
+})
+
 
 def _runtime_required_for_report(report: ExtensionReport) -> bool:
     """Require dynamic coverage only when it can answer a security question.
@@ -1242,7 +1254,7 @@ def _apply_local_dynamic_runtime(
                 items = _runtime_observations_for_report(observed, report) if isinstance(observed, dict) else []
                 runtime_failed = any(
                     isinstance(item, dict)
-                    and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+                    and str(item.get("kind") or "") in _RUNTIME_COVERAGE_FAILURE_KINDS
                     for item in items
                 )
                 execution_error = _runtime_execution_failure(runtime, items) if required else ""
@@ -1360,7 +1372,7 @@ def scan_marketplace_extension(
                     items = _runtime_observations_for_report(observed, report) if isinstance(observed, dict) else []
                     runtime_failed = any(
                         isinstance(item, dict)
-                        and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
+                        and str(item.get("kind") or "") in _RUNTIME_COVERAGE_FAILURE_KINDS
                         for item in items
                     )
                     execution_error = _runtime_execution_failure(runtime, items) if runtime_required else ""

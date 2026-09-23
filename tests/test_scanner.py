@@ -311,6 +311,36 @@ class ScannerTests(unittest.TestCase):
             self.assertFalse(failed_bundle["external_syscall_trace"])
             self.assertFalse(failed_bundle["runs"][0]["external_syscall_trace"])
 
+    def test_failed_entrypoint_receipt_cannot_be_marked_runtime_complete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "agent.vsix"
+            artifact.write_bytes(b"exact")
+            report = MagicMock()
+            report.extension_id = "publisher.agent"
+            report.version = "1.0.0"
+            report.artifact_hash = "a" * 64
+            report.capabilities = [{"id": "agentic", "evidence": ["package.json"]}]
+            runtime = {
+                "mode": "executed",
+                "plan": {
+                    "instrumentation": {
+                        "external_syscall_trace": {"requested": True, "available": True},
+                    },
+                },
+                "extensions": {
+                    "publisher.agent": [{"kind": "runtime_entrypoint_error", "returncode": 1}],
+                },
+            }
+            runtime_bundle: dict[str, object] = {"extensions": {}, "runs": [], "required_extension_ids": []}
+            with patch("ide_scanner.scanner.run_sandbox", return_value=runtime):
+                _apply_local_dynamic_runtime(
+                    [{"path": str(artifact)}], [report], runtime_bundle, timeout_seconds=7,
+                )
+
+        self.assertEqual(runtime_bundle["runs"][0]["status"], "failed")
+        self.assertFalse(runtime_bundle["runs"][0]["external_syscall_trace"])
+        self.assertFalse(runtime_bundle["external_syscall_trace"])
+
     def test_required_runtime_failure_cannot_be_allowed_after_static_completion(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
