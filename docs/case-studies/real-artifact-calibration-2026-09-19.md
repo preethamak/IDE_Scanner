@@ -44,9 +44,9 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`3c71bc71f09897ef3c682a5212d94865b18c0568`, policy `3.1.0-calibration.6`,
-and ruleset `2026.09.23-policy-v3-calibration.39-runtime-scope-calibration`
-(116 rules). The BCAI behavior-only replay remains `REVIEW` without the
+`c34743df862a952ce74261db8b95d633d65967e0`, policy `3.1.0-calibration.7`,
+and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`
+(117 rules). The BCAI behavior-only replay remains `REVIEW` without the
 advisory and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory
 enabled. Neither run is a substitute for the required deep-runtime
 publication holdout.
@@ -54,15 +54,20 @@ publication holdout.
 ## Latest canonical diagnostic replay
 
 The current calibration test suite was rerun against six exact artifacts with
-scanner build `3c71bc71f09897ef3c682a5212d94865b18c0568`. All six scans
+scanner build `c34743df862a952ce74261db8b95d633d65967e0`. All six scans
 completed; the five safe controls remained `allow`/`clean` with risk and
 malware scores of `0`, and BCAI was `block`/`malicious` with authoritative
 scores of `100` when the verified advisory was enabled. The most frequent
 capability rules on safe controls were `filesystem-access` (5),
 `process-execution` (5), `network-access` (4), `security-policy-missing` (4),
 `dynamic-code-loading` (4), and `powerful-ide-contribution` (4). They remained
-context-only and did not create a safe block or review. BCAI additionally
-triggered the high-specificity `remote-credential-broker`,
+context-only and did not create a safe block or review. The calibration also
+added a bounded `environment-data-exfiltration` correlation after a source-backed
+replay showed that whole-process environment serialization sent to a request
+was previously clean. Selected environment telemetry and environment values
+used to configure child processes remain clean, and the retained Nx Console
+safe control was explicitly replayed after this rule was narrowed for minified
+bundle variable collisions. BCAI additionally triggered the high-specificity `remote-credential-broker`,
 `dynamic-shell-execution`, and exact-hash advisory rules. This is useful
 evidence that ordinary developer-tool capabilities remain contextual on this
 small cohort, but it is still a diagnostic replay rather than an
