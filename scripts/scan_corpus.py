@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import time
 from pathlib import Path
 from typing import Any
 
@@ -167,16 +167,9 @@ def _scan_one(
 ) -> dict[str, Any]:
     path = Path(target["path"])
     source = target.get("type", "vscode")
-    expected_id = target.get("manifest_expected_extension_id")
-    expected_version = target.get("manifest_expected_version")
-    expected_sha256 = target.get("manifest_expected_sha256")
-    if expected_sha256:
-        try:
-            digest = _canonical_artifact_sha256(path)
-        except Exception as exc:  # noqa: BLE001 - preserve per-artifact isolation
-            return _manifest_error(path, source, target, f"artifact could not be hashed: {exc}")
-        if digest != expected_sha256.lower():
-            return _manifest_error(path, source, target, f"manifest SHA-256 {expected_sha256} does not match canonical artifact bytes {digest}")
+    manifest_error = _manifest_preflight(path, source, target)
+    if manifest_error is not None:
+        return manifest_error
     with tempfile.TemporaryDirectory(prefix="guardrails-corpus-") as temp_dir:
         output = Path(temp_dir) / "report.json"
         stderr_path = Path(temp_dir) / "worker.stderr"
@@ -189,17 +182,15 @@ def _scan_one(
             extension_advisories=extension_advisories,
             offline=offline,
         )
-        environment = os.environ.copy()
-        existing_pythonpath = environment.get("PYTHONPATH", "")
-        environment["PYTHONPATH"] = os.pathsep.join(item for item in (str(ROOT / "src"), existing_pythonpath) if item)
+        environment = _worker_environment()
         with stderr_path.open("wb") as stderr_handle:
             process = subprocess.Popen(
-                command,
+                _isolated_worker_command(command),
                 cwd=str(ROOT),
                 env=environment,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_handle,
-                start_new_session=os.name != "nt",
+                start_new_session=False,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             )
             completed = _wait_for_worker(process, timeout)
@@ -214,44 +205,70 @@ def _scan_one(
         if process.returncode != 0 or not output.exists():
             detail = (stderr or "child scanner exited without a report").strip().splitlines()[-1]
             return _worker_error(path, source, target, f"Corpus worker failed: {detail[:500]}")
-        try:
-            payload = json.loads(output.read_text(encoding="utf-8"))
-            extensions = payload.get("extensions") if isinstance(payload, dict) else None
-            if not isinstance(extensions, list) or len(extensions) != 1 or not isinstance(extensions[0], dict):
-                raise ValueError("child scanner did not return exactly one extension")
-            extension = extensions[0]
-            if expected_id or expected_version or expected_sha256:
-                actual_id = str(extension.get("extension_id") or "")
-                actual_version = str(extension.get("version") or "")
-                inventory = extension.get("artifact_inventory") if isinstance(extension.get("artifact_inventory"), dict) else {}
-                actual_sha256 = str(extension.get("artifact_hash") or (extension.get("artifact_identity") or {}).get("sha256") or "").lower()
-                if actual_id.lower() != str(expected_id or "").lower():
-                    return _manifest_error(path, source, target, f"manifest extension_id {expected_id} does not match scanned identity {actual_id}")
-                if actual_version != str(expected_version or ""):
-                    return _manifest_error(path, source, target, f"manifest version {expected_version} does not match scanned version {actual_version}")
-                if actual_sha256 != str(expected_sha256 or "").lower():
-                    return _manifest_error(path, source, target, f"manifest SHA-256 {expected_sha256} does not match scanned artifact identity {actual_sha256}")
-                inventory["corpus_manifest"] = {
-                    "verified": True,
-                    "expected_extension_id": expected_id,
-                    "expected_version": expected_version,
-                    "expected_sha256": expected_sha256,
-                }
-                extension["artifact_inventory"] = inventory
-            dynamic_sandbox = (
-                payload.get("intelligence", {}).get("dynamic_sandbox")
-                if isinstance(payload.get("intelligence"), dict)
-                else None
-            )
-            if isinstance(dynamic_sandbox, dict):
-                # The child report intentionally exposes only bounded event
-                # kinds here. Raw runtime paths and commands remain in the
-                # child evidence/finding surface and are not duplicated into
-                # the aggregate corpus metadata.
-                extension["_corpus_dynamic_sandbox"] = dynamic_sandbox
-            return extension
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            return _worker_error(path, source, target, f"Corpus worker returned an invalid report: {exc}")
+        return _read_worker_report(output, path, source, target)
+
+
+def _manifest_preflight(path: Path, source: str, target: dict[str, str]) -> dict[str, Any] | None:
+    expected_sha256 = target.get("manifest_expected_sha256")
+    if not expected_sha256:
+        return None
+    try:
+        digest = _canonical_artifact_sha256(path)
+    except Exception as exc:  # noqa: BLE001 - preserve per-artifact isolation
+        return _manifest_error(path, source, target, f"artifact could not be hashed: {exc}")
+    if digest != expected_sha256.lower():
+        return _manifest_error(path, source, target, f"manifest SHA-256 {expected_sha256} does not match canonical artifact bytes {digest}")
+    return None
+
+
+def _read_worker_report(
+    output: Path,
+    path: Path,
+    source: str,
+    target: dict[str, str],
+) -> dict[str, Any]:
+    """Decode and identity-check one completed scanner subprocess report."""
+    expected_id = target.get("manifest_expected_extension_id")
+    expected_version = target.get("manifest_expected_version")
+    expected_sha256 = target.get("manifest_expected_sha256")
+    try:
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        extensions = payload.get("extensions") if isinstance(payload, dict) else None
+        if not isinstance(extensions, list) or len(extensions) != 1 or not isinstance(extensions[0], dict):
+            raise ValueError("child scanner did not return exactly one extension")
+        extension = extensions[0]
+        if expected_id or expected_version or expected_sha256:
+            actual_id = str(extension.get("extension_id") or "")
+            actual_version = str(extension.get("version") or "")
+            inventory = extension.get("artifact_inventory") if isinstance(extension.get("artifact_inventory"), dict) else {}
+            actual_sha256 = str(extension.get("artifact_hash") or (extension.get("artifact_identity") or {}).get("sha256") or "").lower()
+            if actual_id.lower() != str(expected_id or "").lower():
+                return _manifest_error(path, source, target, f"manifest extension_id {expected_id} does not match scanned identity {actual_id}")
+            if actual_version != str(expected_version or ""):
+                return _manifest_error(path, source, target, f"manifest version {expected_version} does not match scanned version {actual_version}")
+            if actual_sha256 != str(expected_sha256 or "").lower():
+                return _manifest_error(path, source, target, f"manifest SHA-256 {expected_sha256} does not match scanned artifact identity {actual_sha256}")
+            inventory["corpus_manifest"] = {
+                "verified": True,
+                "expected_extension_id": expected_id,
+                "expected_version": expected_version,
+                "expected_sha256": expected_sha256,
+            }
+            extension["artifact_inventory"] = inventory
+        dynamic_sandbox = (
+            payload.get("intelligence", {}).get("dynamic_sandbox")
+            if isinstance(payload.get("intelligence"), dict)
+            else None
+        )
+        if isinstance(dynamic_sandbox, dict):
+            # The child report intentionally exposes only bounded event kinds
+            # here. Raw runtime paths and commands remain in the child
+            # evidence/finding surface and are not duplicated into aggregate
+            # corpus metadata.
+            extension["_corpus_dynamic_sandbox"] = dynamic_sandbox
+        return extension
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return _worker_error(path, source, target, f"Corpus worker returned an invalid report: {exc}")
 
 
 def _worker_command(
@@ -288,6 +305,17 @@ def _worker_command(
     if extension_advisories:
         command.extend(["--extension-advisories", extension_advisories])
     return command
+
+
+def _worker_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH", "")
+    environment["PYTHONPATH"] = os.pathsep.join(item for item in (str(ROOT / "src"), existing_pythonpath) if item)
+    return environment
+
+
+def _isolated_worker_command(command: list[str]) -> list[str]:
+    return [sys.executable, str(ROOT / "scripts" / "exec_scan_worker.py"), "--", *command]
 
 
 def _checkpoint_path(checkpoint_dir: Path, target: dict[str, str]) -> Path:
@@ -508,59 +536,149 @@ def _scan_pending(
         return
     work = [(index, target, _artifact_work_units(target)) for index, target in pending.items()]
     capacity = max(jobs, max(weight for _, _, weight in work))
+
+    def record_result(index: int, weight: int, result: dict[str, Any]) -> None:
+        extensions_by_index[index] = result
+        _write_checkpoint(checkpoint_dir, targets[index], result, checkpoint_context)
+        print(
+            json.dumps({
+                "completed": len(extensions_by_index),
+                "total": len(targets),
+                "source": "scan",
+                "path": targets[index]["path"],
+                "analysis_status": result.get("analysis_status", "incomplete"),
+                "work_units": weight,
+            }),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    # Popen/fork from a ThreadPoolExecutor can inherit a runtime lock held by
+    # another thread. That manifests as an apparently random per-artifact
+    # timeout after several otherwise-healthy scans. Keep the serialized gate
+    # genuinely serialized and execute it on the caller's main thread.
+    if jobs == 1:
+        for index, target, weight in work:
+            result = _scan_one_safe(
+                target,
+                timeout=timeout,
+                profile=profile,
+                runtime=runtime,
+                runtime_timeout=runtime_timeout,
+                extension_advisories=extension_advisories,
+                offline=offline,
+            )
+            record_result(index, weight, result)
+        return
+
+    # Parallel scans also stay in this process. We launch the scanner children
+    # directly from the caller's main thread and poll them ourselves. A pool
+    # worker that launches another subprocess is not safe here: both forked
+    # and spawned pool implementations can retain multiprocessing locks while
+    # starting the scanner, producing the same false timeout under load.
     queue = list(work)
     running_units = 0
-    executor = ThreadPoolExecutor(max_workers=min(jobs, len(work)))
-    futures: dict[Any, tuple[int, int]] = {}
-    try:
-        while queue or futures:
-            # Fill every slot that fits.  Selecting the first fitting item
-            # prevents a large artifact at the head of the queue from
-            # needlessly blocking small independent artifacts.
-            while queue:
-                available = capacity - running_units
-                fitting = next((position for position, (_, _, weight) in enumerate(queue) if weight <= available), None)
-                if fitting is None:
-                    break
-                index, target, weight = queue.pop(fitting)
-                future = executor.submit(
-                    _scan_one_safe,
-                    target,
-                    timeout=timeout,
-                    profile=profile,
+    running: dict[subprocess.Popen[str], dict[str, Any]] = {}
+    while queue or running:
+        while queue:
+            available = capacity - running_units
+            fitting = next((position for position, (_, _, weight) in enumerate(queue) if weight <= available), None)
+            if fitting is None:
+                break
+            index, target, weight = queue.pop(fitting)
+            path = Path(target["path"])
+            source = target.get("type", "vscode")
+            manifest_error = _manifest_preflight(path, source, target)
+            if manifest_error is not None:
+                record_result(index, weight, manifest_error)
+                continue
+            temp_dir = tempfile.TemporaryDirectory(prefix="guardrails-corpus-")
+            output = Path(temp_dir.name) / "report.json"
+            stderr_path = Path(temp_dir.name) / "worker.stderr"
+            stderr_handle = stderr_path.open("wb")
+            process = subprocess.Popen(
+                _isolated_worker_command(_worker_command(
+                    path,
+                    profile,
+                    output,
                     runtime=runtime,
                     runtime_timeout=runtime_timeout,
                     extension_advisories=extension_advisories,
                     offline=offline,
-                )
-                futures[future] = (index, weight)
-                running_units += weight
-            if not futures:
-                raise RuntimeError("corpus scheduler could not place a pending artifact")
-            done, _ = wait(futures, return_when=FIRST_COMPLETED)
-            for future in done:
-                index, weight = futures.pop(future)
-                running_units -= weight
-                result = future.result()
-                extensions_by_index[index] = result
-                _write_checkpoint(checkpoint_dir, targets[index], result, checkpoint_context)
-                print(
-                    json.dumps({
-                        "completed": len(extensions_by_index),
-                        "total": len(targets),
-                        "source": "scan",
-                        "path": targets[index]["path"],
-                        "analysis_status": result.get("analysis_status", "incomplete"),
-                        "work_units": weight,
-                    }),
-                    file=sys.stderr,
-                    flush=True,
-                )
-    except BaseException:
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise
-    else:
-        executor.shutdown(wait=True)
+                )),
+                cwd=str(ROOT),
+                env=_worker_environment(),
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_handle,
+                start_new_session=False,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            )
+            running[process] = {
+                "index": index,
+                "target": target,
+                "weight": weight,
+                "path": path,
+                "source": source,
+                "output": output,
+                "stderr_path": stderr_path,
+                "stderr_handle": stderr_handle,
+                "temp_dir": temp_dir,
+                "deadline": time.monotonic() + timeout,
+            }
+            running_units += weight
+
+        if not running:
+            raise RuntimeError("corpus scheduler could not place a pending artifact")
+
+        progressed = False
+        now = time.monotonic()
+        for process, state in list(running.items()):
+            returncode = process.poll()
+            timed_out = returncode is None and now >= state["deadline"]
+            if returncode is None and not timed_out:
+                continue
+            progressed = True
+            running.pop(process)
+            running_units -= state["weight"]
+            stderr_handle = state["stderr_handle"]
+            try:
+                if timed_out:
+                    _terminate(process)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    result = _worker_error(
+                        state["path"],
+                        state["source"],
+                        state["target"],
+                        f"Corpus worker exceeded the {timeout}-second per-artifact timeout.",
+                    )
+                else:
+                    stderr_handle.flush()
+                    stderr = state["stderr_path"].read_text(encoding="utf-8", errors="replace")
+                    if returncode != 0 or not state["output"].exists():
+                        detail = (stderr or "child scanner exited without a report").strip().splitlines()[-1]
+                        result = _worker_error(
+                            state["path"],
+                            state["source"],
+                            state["target"],
+                            f"Corpus worker failed: {detail[:500]}",
+                        )
+                    else:
+                        result = _read_worker_report(
+                            state["output"],
+                            state["path"],
+                            state["source"],
+                            state["target"],
+                        )
+            finally:
+                stderr_handle.close()
+                state["temp_dir"].cleanup()
+            record_result(state["index"], state["weight"], result)
+        if not progressed:
+            time.sleep(0.05)
 
 
 def _canonical_artifact_sha256(path: Path) -> str:

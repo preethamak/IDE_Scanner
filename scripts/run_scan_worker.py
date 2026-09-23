@@ -122,9 +122,9 @@ def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int 
     environment["IDE_SCANNER_BUILD_SHA"] = os.environ.get("IDE_SCANNER_BUILD_SHA", "")
     environment["SCAN_TARGET_PLATFORM"] = target_platform
     process = subprocess.Popen(
-        command,
+        isolated_worker_command(command),
         env=environment,
-        start_new_session=(os.name == "posix"),
+        start_new_session=False,
     )
     try:
         returncode = process.wait(timeout=timeout_seconds)
@@ -136,6 +136,12 @@ def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int 
         )
         return False
     return returncode == 0 and bundle_path.exists()
+
+
+def isolated_worker_command(command: list[str]) -> list[str]:
+    """Launch the scanner through a clean session before importing analyzers."""
+    launcher = Path(__file__).with_name("exec_scan_worker.py")
+    return [sys.executable, str(launcher), "--", *command]
 
 
 def terminate_process_group(process: subprocess.Popen[object]) -> None:

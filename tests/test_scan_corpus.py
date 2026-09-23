@@ -103,6 +103,34 @@ class ScanCorpusTests(unittest.TestCase):
 
             self.assertEqual(_artifact_work_units({"path": str(root)}), 4)
 
+    def test_serial_scheduler_does_not_fork_from_a_pool(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"serial","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            args = _parser().parse_args([
+                "--path", str(root), "--jobs", "1", "--out", str(root / "report.json"),
+            ])
+            extension = {
+                "extension_id": "example.serial",
+                "version": "1.0.0",
+                "analysis_status": "complete",
+                "decision": "allow",
+                "verdict": "clean",
+                "artifact_hash": "a" * 64,
+                "analysis_coverage": {"status": "complete", "coverage_percent": 100},
+            }
+            with patch("scripts.scan_corpus._scan_one_safe", return_value=extension), patch(
+                "scripts.scan_corpus.subprocess.Popen",
+                side_effect=AssertionError("serial corpus scans must not create a subprocess scheduler"),
+            ):
+                report = run(args)
+
+        self.assertEqual(report["corpus_execution"]["incomplete_count"], 0)
+        self.assertEqual(report["extensions"][0]["extension_id"], "example.serial")
+
     def test_runtime_observation_kinds_survive_corpus_aggregation(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -115,6 +143,7 @@ class ScanCorpusTests(unittest.TestCase):
                 "--path", str(root),
                 "--profile", "deep",
                 "--runtime",
+                "--jobs", "1",
                 "--out", str(root / "report.json"),
             ])
             extension = {
@@ -152,7 +181,7 @@ class ScanCorpusTests(unittest.TestCase):
             )
             (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
             args = _parser().parse_args([
-                "--path", str(root), "--profile", "deep", "--runtime", "--out", str(root / "report.json"),
+                "--path", str(root), "--profile", "deep", "--runtime", "--jobs", "1", "--out", str(root / "report.json"),
             ])
             extension = {
                 "extension_id": "example.runtime",

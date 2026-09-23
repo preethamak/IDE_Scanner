@@ -65,7 +65,7 @@ def test_scan_timeout_kills_the_entire_process_group(tmp_path: Path) -> None:
         assert run_scan_worker.run_scan(job, tmp_path / "scan.json", timeout_seconds=60) is False
 
     popen.assert_called_once()
-    assert popen.call_args.kwargs["start_new_session"] is True
+    assert popen.call_args.kwargs["start_new_session"] is False
     killpg.assert_called_once_with(1234, run_scan_worker.signal.SIGKILL)
     assert process.wait_calls == 2
 
