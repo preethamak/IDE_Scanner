@@ -9,6 +9,7 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "types: [completed]" in workflow
     assert "workflow_run.event == 'push'" in workflow
     assert "workflow_run.head_repository.full_name == github.repository" in workflow
+    assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in workflow
     assert "workflow_run.head_sha || github.sha" in workflow
     assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert "scripts/freeze_accuracy_holdout.py" in workflow
