@@ -281,6 +281,15 @@ for exact manifest rows whose artifact hash, scanner context, and runtime
 evidence schema still match. A batch is not production-complete when required
 runtime providers are failed, skipped, or incomplete.
 
+The production accuracy workflows run this corpus scheduler with
+`--jobs 1`. Parallel diagnostic runs remain supported, but analyzer contention
+can exceed an artifact's wall-clock budget; those artifacts are quarantined as
+incomplete rather than being counted as clean. The scheduler launches each
+scanner through `scripts/exec_scan_worker.py`, which creates the process
+session before the scanner imports native analyzers. This keeps repeated scans
+from inheriting native-runtime locks while preserving process-group cleanup for
+timeouts.
+
 ## Artifact processing and isolation status
 
 Untrusted gzip unwrapping, ZIP-member extraction, and complete artifact hashing now execute

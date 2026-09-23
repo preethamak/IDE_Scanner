@@ -73,6 +73,21 @@ evidence that ordinary developer-tool capabilities remain contextual on this
 small cohort, but it is still a diagnostic replay rather than an
 independently adjudicated ecosystem accuracy claim.
 
+## Hardened launcher replay — 2026-09-23
+
+The retained exact artifacts were replayed through the production corpus
+launcher on scanner source revision
+`f27efc18d48fd07c4b81997913a63161ae79cbf`, with policy
+`3.1.0-calibration.7`, ruleset
+`2026.09.23-policy-v3-calibration.40-environment-exfiltration`, an explicit
+empty advisory snapshot, and runtime disabled. All eight retained artifacts
+completed: seven controls routed `allow`/`clean`, while BCAI Rosetta routed
+`review` with risk `57` and malware score `0`. Its high-confidence
+`remote-credential-broker` exposure remained present, and the replay did not
+emit the known false-positive `download-and-execute` rule. This verifies the
+fresh process launcher and the behavior-only boundary; it is still not a
+deep-runtime publication gate or an ecosystem precision claim.
+
 ## Latest unlabelled pilot cohort — 2026-09-23
 
 An additional 20 exact VSIX artifacts from the retained ecosystem pilot set
