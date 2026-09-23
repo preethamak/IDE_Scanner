@@ -56,7 +56,7 @@ replaced by an empty snapshot. The scanner still returned:
 
 The current release-candidate replay used verified scanner source revision
 `c6dc0497e4ad616183e5ca806f0eac3d2f6cad50`, policy `3.1.0-calibration.7`,
-and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`.
+and ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`.
 The scan completed with 100% required-provider coverage against the exact
 VSIX. The score is a diagnostic index, not a probability of compromise.
 

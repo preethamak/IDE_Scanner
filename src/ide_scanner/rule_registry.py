@@ -4,7 +4,7 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.23-policy-v3-calibration.40-environment-exfiltration"
+RULESET_VERSION = "2026.09.24-policy-v3-calibration.41-transpiled-process-alias"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
