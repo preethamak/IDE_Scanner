@@ -42,6 +42,7 @@ MAX_RUNTIME_OPEN_FILES = 4096
 MAX_RUNTIME_OUTPUT_BYTES = 4 * 1024 * 1024
 RUNTIME_OUTPUT_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_TRACE_BYTES = 8 * 1024 * 1024
+MAX_PERSISTED_RUNTIME_VALUE_BYTES = 512
 EXTERNAL_TRACE_ENV = "GUARDRAILS_RUNTIME_EXTERNAL_TRACE"
 RUNTIME_BWRAP_SUDO_ENV = "GUARDRAILS_RUNTIME_BWRAP_SUDO"
 RUNTIME_EVENT_HANDSHAKE = "GUARDRAILS_RUNTIME_HANDSHAKE_V1:"
@@ -79,6 +80,14 @@ _SANDBOX_BOOTSTRAP_EXECUTABLES = frozenset({
     "/usr/bin/sudo",
     "/usr/bin/bwrap",
 })
+_RUNTIME_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:access[_-]?token|api[_-]?key|auth(?:orization)?|code|key|password|passwd|secret|sig(?:nature)?|token)=)[^&#\s]+"
+)
+_RUNTIME_BEARER_RE = re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]+")
+_RUNTIME_ARGUMENT_SECRET_RE = re.compile(
+    r"(?i)(--?(?:access[_-]?token|api[_-]?key|auth(?:orization)?|password|passwd|secret|token)(?:=|\s+))[^\s]+"
+)
+_RUNTIME_USERINFO_RE = re.compile(r"(?i)(//)[^/@\s]+@")
 
 
 def _external_trace_requested() -> bool:
@@ -1747,6 +1756,18 @@ def _first_strace_string(line: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _redact_runtime_value(value: Any) -> str:
+    """Keep runtime evidence useful without persisting extension-supplied secrets."""
+    text = str(value or "")
+    text = _RUNTIME_USERINFO_RE.sub(r"\1[redacted]@", text)
+    text = _RUNTIME_QUERY_SECRET_RE.sub(r"\1[redacted]", text)
+    text = _RUNTIME_BEARER_RE.sub(r"\1[redacted]", text)
+    text = _RUNTIME_ARGUMENT_SECRET_RE.sub(r"\1[redacted]", text)
+    if len(text) > MAX_PERSISTED_RUNTIME_VALUE_BYTES:
+        text = text[:MAX_PERSISTED_RUNTIME_VALUE_BYTES] + "…"
+    return text
+
+
 def _observations_from_trace(trace_file: Path, canary_files: list[str]) -> list[dict[str, Any]]:
     if not trace_file.exists():
         return []
@@ -1775,33 +1796,36 @@ def _observations_from_events(events: list[dict[str, Any]], canary_files: list[s
                     "api": event.get("api"),
                 })
         elif kind in {"network", "dns"}:
+            destination = _redact_runtime_value(event.get("target") or event.get("api") or "unknown")
             observations.append({
                 "kind": "network_attempt",
-                "destination": event.get("target") or event.get("api") or "unknown",
+                "destination": destination,
                 "api": event.get("api"),
             })
         elif kind == "network_write":
             contains_canary = bool(event.get("contains_canary"))
+            destination = _redact_runtime_value(event.get("target") or "unknown")
             observations.append({
                 "kind": "runtime_network_write",
                 "contains_canary": contains_canary,
                 "bytes": event.get("bytes"),
-                "destination": event.get("target") or "unknown",
+                "destination": destination,
             })
             if contains_canary:
                 observations.append({
                     "kind": "secret_exfil",
-                    "destination": event.get("target") or "unknown",
+                    "destination": destination,
                     "evidence": "runtime trace observed the canary value in a network request body",
                 })
         elif kind == "process_exec":
-            command = str(event.get("command") or "")
+            raw_command = str(event.get("command") or "")
+            command = _redact_runtime_value(raw_command)
             observations.append({
                 "kind": "process_exec",
                 "command": command,
                 "api": event.get("api"),
             })
-            if any(token in command.lower() for token in ("curl", "wget", "powershell", "bash", "sh ")) and any(token in command.lower() for token in ("http://", "https://")):
+            if any(token in raw_command.lower() for token in ("curl", "wget", "powershell", "bash", "sh ")) and any(token in raw_command.lower() for token in ("http://", "https://")):
                 observations.append({
                     "kind": "download_execute",
                     "command": command,
@@ -1833,7 +1857,7 @@ def _observations_from_events(events: list[dict[str, Any]], canary_files: list[s
             observation = {"kind": f"runtime_{kind}"}
             for key in ("command", "error"):
                 if key in event:
-                    observation[key] = event[key]
+                    observation[key] = _redact_runtime_value(event[key])
             observations.append(observation)
     return _dedupe_observations(observations)
 
