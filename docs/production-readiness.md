@@ -85,7 +85,7 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun with scanner build
-`6a4f3655ba740fa187d3eda62a87232e9aa763db` and passed its identity-bound
+`015193746c5a16d8b48c7ba8b754ca0e21b5f1d7` and passed its identity-bound
 regression checks.
 All 8 required corpus artifacts were complete, both known-safe controls were
 allowed without review, and all 4 required known-malicious artifacts were
