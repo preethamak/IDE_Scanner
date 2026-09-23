@@ -736,7 +736,15 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
             analysis_coverage["analyzed_executable_files"].append(rel)
             if suffix in JS_AST_EXTS:
                 module_summaries.append(module_summary(rel, text, analyze_imports=not generated_blob))
-            _add_code_findings(extension_id, version, rel, text, findings, capabilities)
+            _add_code_findings(
+                extension_id,
+                version,
+                rel,
+                text,
+                findings,
+                capabilities,
+                is_entrypoint=is_entrypoint,
+            )
             _add_workspace_cli_path_findings(extension_id, version, manifest, [(rel, text)], findings)
         if suffix in EXEC_TEXT_EXTS or suffix in {".html", ".htm"}:
             _add_webview_csp_findings(
@@ -2245,6 +2253,8 @@ def _add_code_findings(
     text: str,
     findings: list[Finding],
     capabilities: dict[str, dict[str, Any]],
+    *,
+    is_entrypoint: bool = False,
 ) -> None:
     aliased_process_re, aliased_process_methods = _aliased_process_execution(text)
     process_exec_re = re.compile(
@@ -2433,6 +2443,7 @@ def _add_code_findings(
                 {
                     "evidence_class": "posture",
                     "analysis": "bounded-static-bundle-profile",
+                    "scope": "entrypoint" if is_entrypoint else "secondary-generated",
                     "obfuscation_indicators": bundle_profile["obfuscation_indicators"],
                     "metrics": bundle_profile["metrics"],
                 },
@@ -4930,6 +4941,16 @@ def _is_ignored_static_asset(rel: str) -> bool:
     normalized = rel.replace("\\", "/").lower()
     generated_prefixes = (
         "node_modules/",
+        # Documentation/demo JavaScript is shipped for the extension's
+        # project website or README examples, not loaded by the IDE runtime.
+        # Keep the bytes in artifact-wide inventory/YARA coverage, but do not
+        # let a docs service worker or example page grant an extension a
+        # runtime network/process capability. Declared entrypoints still
+        # override this filter and are always analyzed.
+        "docs/",
+        "documentation/",
+        "examples/",
+        "example/",
         "assets/pdf.js/build/",
         "bundled/libs/debugpy/_vendored/",
         "drawio/src/main/webapp/math/es5/",

@@ -431,15 +431,44 @@ def _artifact_work_units(target: dict[str, str]) -> int:
     heaviest weight so an unexpected filesystem condition cannot cause a burst
     of workers to compete for the same failing resource.
     """
-    try:
-        size = Path(target["path"]).stat().st_size
-    except OSError:
+    size = _artifact_size_bytes(Path(target["path"]))
+    if size is None:
         return 4
     if size >= _VERY_LARGE_ARTIFACT_BYTES:
         return 4
     if size >= _LARGE_ARTIFACT_BYTES:
         return 2
     return 1
+
+
+def _artifact_size_bytes(path: Path) -> int | None:
+    """Return the bounded scheduling size of a file or extension directory.
+
+    ``Path.stat().st_size`` on a directory is only the size of the directory
+    entry, not the package contents. Installed extension directories can be
+    hundreds of MiB, so using that value would defeat the memory-aware
+    scheduler and start too many expensive workers at once. Do not follow
+    symlinked files or directories: the scanner's target is the artifact tree,
+    and following links could count unrelated data or escape the target.
+    """
+    try:
+        if path.is_file():
+            return path.stat().st_size
+        if not path.is_dir():
+            return None
+        total = 0
+        for root, directories, files in os.walk(path, followlinks=False):
+            directories[:] = [name for name in directories if not os.path.islink(os.path.join(root, name))]
+            for name in files:
+                file_path = os.path.join(root, name)
+                try:
+                    if not os.path.islink(file_path):
+                        total += os.stat(file_path, follow_symlinks=False).st_size
+                except OSError:
+                    return None
+        return total
+    except OSError:
+        return None
 
 
 def _scan_pending(

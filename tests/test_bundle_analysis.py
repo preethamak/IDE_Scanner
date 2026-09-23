@@ -58,6 +58,24 @@ def test_heavy_obfuscation_without_harvesting_requires_review_not_block() -> Non
     assert report.decision == "review"
 
 
+def test_secondary_generated_obfuscation_is_a_low_posture_note() -> None:
+    source = _obfuscator_shell("var theme=['colors','request','write','stringify'];")
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "package.json").write_text(
+            '{"publisher":"example","name":"secondary-bundle","version":"1.0.0","main":"extension.js"}',
+            encoding="utf-8",
+        )
+        (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+        (root / "worker.js").write_text(source, encoding="utf-8")
+        report = scan_extension(root)
+
+    finding = next(item for item in report.findings if item.rule_id == "executable-heavy-obfuscation")
+    assert finding.evidence["scope"] == "secondary-generated"
+    assert finding.to_dict()["actionability"] == "low"
+    assert report.decision == "allow"
+
+
 def test_credentials_and_network_without_obfuscation_do_not_invent_bundle_chain() -> None:
     source = (
         "var targets=['/.ssh/id_rsa','/.aws/credentials','/.npmrc','wallet.dat'];"

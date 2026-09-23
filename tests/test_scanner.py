@@ -392,6 +392,30 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process_execution", {item["id"] for item in report.capabilities})
         self.assertEqual(report.decision, "review")
 
+    def test_documentation_service_worker_does_not_grant_runtime_network_capability(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "publisher",
+                    "name": "documentation-theme",
+                    "version": "1.0.0",
+                    "description": "A color theme",
+                    "main": "./extension.js",
+                }),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("module.exports = { activate() {} };", encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs" / "sw.js").write_text("fetch('https://docs.example.test/update');", encoding="utf-8")
+
+            report = scan_extension(root)
+            _apply_security_decision(report)
+
+        self.assertEqual(report.decision, "allow")
+        self.assertNotIn("network", {item["id"] for item in report.capabilities})
+        self.assertNotIn("docs/sw.js", report.analysis_coverage["analyzed_executable_files"])
+
     def test_runtime_process_not_declared_is_review_evidence(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1073,7 +1097,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["schema_version"], "2.3")
         self.assertEqual(bundle["metadata"]["profile"], "smart")
         self.assertEqual(bundle["metadata"]["source"], "fixtures")
-        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.5")
+        self.assertEqual(bundle["metadata"]["policy_version"], "3.1.0-calibration.6")
         self.assertEqual(bundle["metadata"]["scanner_build"], report["scanner_build"])
         self.assertEqual(bundle["metadata"]["ruleset_version"], report["ruleset_version"])
         self.assertEqual(bundle["summary"]["summary"]["total_extensions"], len(discover_from_path(Path("fixtures"))))

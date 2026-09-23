@@ -82,6 +82,17 @@ class ScanCorpusTests(unittest.TestCase):
             self.assertEqual(_artifact_work_units({"path": str(large)}), 2)
             self.assertEqual(_artifact_work_units({"path": str(very_large)}), 4)
 
+    def test_scheduler_weights_directory_by_recursive_content_size(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "installed-extension"
+            root.mkdir()
+            payload = root / "node_modules" / "bundle.js"
+            payload.parent.mkdir()
+            with payload.open("wb") as handle:
+                handle.truncate(_VERY_LARGE_ARTIFACT_BYTES)
+
+            self.assertEqual(_artifact_work_units({"path": str(root)}), 4)
+
     def test_runtime_observation_kinds_survive_corpus_aggregation(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
