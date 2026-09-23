@@ -2274,7 +2274,9 @@ def _add_code_findings(
     has_download = bool(DOWNLOAD_RE.search(text))
     has_content_download = _has_content_download(text)
     has_obfuscation = bool(re.search(r"(atob\(|buffer\.from\([^)]*,\s*['\"]base64['\"]|fromcharcode|\\x[0-9a-f]{2})", text, re.I))
-    has_dynamic_exec = bool(_DYNAMIC_EVAL_RE.search(text))
+    has_dynamic_exec = bool(_DYNAMIC_EVAL_RE.search(text)) or bool(
+        aliased_process_re and aliased_process_re.search(text)
+    )
     has_exec_file = bool(re.search(r"\b(?:execFile|execFileSync)\s*\(", text)) or bool(
         aliased_process_methods & {"execFile", "execFileSync"}
     )
@@ -2918,11 +2920,26 @@ _CHILD_PROCESS_DESTRUCTURE_RE = re.compile(
     r"|import\s*\{(?P<imports>[^}]{1,500})\}\s*from\s*['\"](?:node:)?child_process['\"]",
     re.I,
 )
+_CHILD_PROCESS_NAMESPACE_RE = re.compile(
+    r"(?:const|let|var)\s+(?P<alias>[A-Za-z_$][\w$]*)\s*=\s*"
+    r"require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\)",
+    re.I,
+)
 
 
 def _aliased_process_execution(text: str) -> tuple[re.Pattern[str] | None, set[str]]:
-    """Resolve common destructured/ESM child_process aliases that regex qualifiers miss."""
+    """Resolve emitted and source-level child_process aliases.
+
+    TypeScript/CommonJS output commonly turns an imported exec into a
+    namespace require followed by (0, child_process_1.exec)(command).
+    That call is semantically the same process sink as
+    require('child_process').exec(command); treating the generated form as
+    ordinary property access creates a real false negative. The namespace must
+    first be proven to come from child_process, and only an actual call shape
+    is accepted so property reads remain non-executable context.
+    """
     aliases: dict[str, str] = {}
+    namespace_aliases: set[str] = set()
     for match in _CHILD_PROCESS_DESTRUCTURE_RE.finditer(text):
         bindings = str(match.group("bindings") or match.group("imports") or "")
         for binding in bindings.split(","):
@@ -2931,11 +2948,37 @@ def _aliased_process_execution(text: str) -> tuple[re.Pattern[str] | None, set[s
             alias = parts[1].strip() if len(parts) == 2 else method
             if method in _CHILD_PROCESS_METHODS and re.fullmatch(r"[A-Za-z_$][\w$]*", alias):
                 aliases[alias] = method
+    namespace_aliases.update(match.group("alias") for match in _CHILD_PROCESS_NAMESPACE_RE.finditer(text))
+
+    patterns: list[str] = []
+    called_methods: set[str] = set()
     called = {alias: method for alias, method in aliases.items() if re.search(rf"\b{re.escape(alias)}\s*\(", text)}
-    if not called:
+    if called:
+        patterns.append(r"\b(?:" + "|".join(re.escape(alias) for alias in sorted(called, key=len, reverse=True)) + r")\s*\(")
+        called_methods.update(called.values())
+
+    for namespace in sorted(namespace_aliases, key=len, reverse=True):
+        methods = [
+            method
+            for method in sorted(_CHILD_PROCESS_METHODS)
+            if re.search(
+                rf"(?:\b{re.escape(namespace)}\s*\.\s*{re.escape(method)}\s*\(|"
+                rf"\(\s*0\s*,\s*{re.escape(namespace)}\s*\.\s*{re.escape(method)}\s*\)\s*\()",
+                text,
+            )
+        ]
+        if not methods:
+            continue
+        method_pattern = "|".join(re.escape(method) for method in methods)
+        patterns.append(
+            rf"(?:\b{re.escape(namespace)}\s*\.\s*(?:{method_pattern})\s*\(|"
+            rf"\(\s*0\s*,\s*{re.escape(namespace)}\s*\.\s*(?:{method_pattern})\s*\)\s*\()"
+        )
+        called_methods.update(methods)
+
+    if not patterns:
         return None, set()
-    pattern = re.compile(r"\b(?:" + "|".join(re.escape(alias) for alias in sorted(called, key=len, reverse=True)) + r")\s*\(")
-    return pattern, set(called.values())
+    return re.compile("(?:" + "|".join(patterns) + ")"), called_methods
 
 _CLIPBOARD_READ_RE = re.compile(r"(?:env\s*\.\s*)?clipboard\s*\.\s*readText\s*\(")
 

