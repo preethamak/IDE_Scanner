@@ -84,12 +84,14 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against final scanner build
-`f27efc18d48fd07c4b81997913a63161ae79c9bf` and passed: all 8 required corpus
-artifacts were complete, both known-safe controls were allowed without review,
-and all 4 required known-malicious artifacts were blocked. The vendored CLI
-engine contains the same canonical scanner sources and is parity-verified
-against this final scanner source revision.
+The latest local deterministic gate was rerun against scanner source revision
+`f27efc18d48fd07c4b81997913a63161ae79c9bf` and passed its behavioral checks:
+all 8 required corpus artifacts were complete, both known-safe controls were
+allowed without review, and all 4 required known-malicious artifacts were
+blocked. The vendored CLI engine contains the same canonical scanner sources
+and is parity-verified against this source revision. The later checkout commit
+only updates this evidence document; the identity-bound production gate still
+must run in CI with `--require-identity --expected-scanner-build`.
 This does not waive the
 privileged runtime holdout or authorize registry publication.
 
