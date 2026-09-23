@@ -78,14 +78,13 @@
       ],
       "expected": [
         "activation",
+        "credential_input",
         "filesystem",
         "ide_contributions",
         "network",
         "process_execution"
       ],
-      "forbidden": [
-        "credential_input"
-      ]
+      "forbidden": []
     },
     "cloud_developer_tool": {
       "keywords": [

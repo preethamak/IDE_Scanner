@@ -21,6 +21,14 @@ def test_classifier_exposes_signals_without_granting_identity_trust():
     assert "capability:agent_tools" in classification["signals"]
 
 
+def test_coding_agent_contract_allows_explicit_credential_input_flows():
+    policy = load_contracts()
+    contract = policy["classes"]["coding_agent"]
+
+    assert "credential_input" in contract["expected"]
+    assert "credential_input" not in contract["forbidden"]
+
+
 def test_functional_language_description_outranks_incidental_icon_theme_surface():
     extension = SimpleNamespace(
         name="A-LSP",
