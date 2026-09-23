@@ -19,3 +19,37 @@ def test_classifier_exposes_signals_without_granting_identity_trust():
     assert classification["primary"] == "coding_agent"
     assert classification["confidence"] > 0
     assert "capability:agent_tools" in classification["signals"]
+
+
+def test_functional_language_description_outranks_incidental_icon_theme_surface():
+    extension = SimpleNamespace(
+        name="A-LSP",
+        description="Official language development kit with syntax highlighting and static type checking.",
+        capabilities=[
+            {"id": "theme_surface"},
+            {"id": "native_code"},
+            {"id": "process_execution"},
+        ],
+    )
+
+    classification = classify_extension(extension)
+
+    assert classification["primary"] == "language_tool"
+    assert "text:syntax highlighting" in classification["signals"]
+
+
+def test_cloud_developer_tools_do_not_inherit_theme_forbidden_capabilities():
+    extension = SimpleNamespace(
+        name="Azure Runbooks Workbench",
+        description="Cloud automation and DevOps runbook development experience.",
+        capabilities=[
+            {"id": "theme_surface"},
+            {"id": "network"},
+            {"id": "process_execution"},
+            {"id": "credential_input"},
+        ],
+    )
+
+    classification = classify_extension(extension)
+
+    assert classification["primary"] == "cloud_developer_tool"
