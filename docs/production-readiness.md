@@ -84,17 +84,18 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against scanner build
-`85d70f8448a0497f23000d25c2f8565f78c586a6` and passed its identity-bound
-checks. All 8 required corpus artifacts were complete, both known-safe
-controls were allowed without review, and all 4 required known-malicious
-artifacts were blocked; 5 optional backlog artifacts remained explicitly
-unscanned. The report identity was policy
-`3.1.0-calibration.7` and ruleset
-`2026.09.24-policy-v3-calibration.41-transpiled-process-alias`. The vendored
-CLI engine is parity-verified against this scanner checkout. This is
-deterministic regression evidence only: it does not waive the privileged
-runtime holdout or authorize registry publication.
+The latest local deterministic gate was rerun from scanner source revision
+`10765add2143dccb470fc38278b4544c086650f1` and passed its regression checks.
+All 8 required corpus artifacts were complete, both known-safe controls were
+allowed without review, and all 4 required known-malicious artifacts were
+blocked; 5 optional backlog artifacts remained explicitly unscanned. The
+report identity was policy `3.1.0-calibration.7` and ruleset
+`2026.09.24-policy-v3-calibration.41-transpiled-process-alias`; the local
+report used `scanner_build=unknown`, so CI must rerun the identity-bound gate
+with the exact release commit. The vendored CLI engine is parity-verified
+against this scanner checkout. This is deterministic regression evidence
+only: it does not waive the privileged runtime holdout or authorize registry
+publication.
 
 On 2026-09-24, the complete scanner suite passed with 563 tests, 3 skips, and
 8 subtests. The synchronized CLI suite passed with 69 tests and 5 subtests.
