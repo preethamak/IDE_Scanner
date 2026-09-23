@@ -17,6 +17,29 @@ Cloud access, automated account handling, and proxying through attacker-
 controlled infrastructure. GuardRails retains the exact VSIX so the result is
 reproducible against bytes, not only an extension name or version.
 
+### Source evidence in the retained VSIX
+
+The exact archive also contains the source-level trust boundary that caused
+the review finding. These are observations from the pinned bytes, not an
+inference from the extension name:
+
+- `extension/bundled-rosetta/token-proxy/add-account.js` implements the Google
+  OAuth authorization-code exchange, requests offline access, handles the
+  returned access/refresh tokens, and persists the refresh token in the local
+  account record.
+- `extension/bundled-rosetta/token-proxy/index.js` defines the remote-token
+  service default at `https://bcai.site/remote-token` when remote mode is
+  selected.
+- `extension/bundled-rosetta/relay-proxy/token-passthrough.js` requests a
+  remote lease, consumes the returned `accessToken`, and forwards it as a
+  bearer credential to upstream requests; it also reports lease results back
+  to the configured token server.
+
+That combination is enough to establish a high-confidence remote credential
+broker trust boundary and justify review. It is not, by itself, proof that the
+operator misused every token or that the extension is malware; those stronger
+claims remain tied to the independently reported exact-hash advisory below.
+
 ## What GuardRails finds without the advisory
 
 The artifact was scanned with the bundled exact-artifact advisory snapshot
