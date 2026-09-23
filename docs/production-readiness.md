@@ -85,7 +85,7 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun with scanner build
-`bd8193fdaa91a26e3da3a542a6712d536b814ad9` and passed its identity-bound
+`e37389ce1e8d8c51a341465688d8efc4ade386b0` and passed its identity-bound
 regression checks.
 All 8 required corpus artifacts were complete, both known-safe controls were
 allowed without review, and all 4 required known-malicious artifacts were
@@ -96,7 +96,7 @@ CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-On 2026-09-24, the complete scanner suite passed with 563 tests, 3 skips, and
+On 2026-09-24, the complete scanner suite passed with 567 tests, 3 skips, and
 8 subtests. The synchronized CLI suite passed with 69 tests and 5 subtests.
 The real-artifact calibration suite passed with 20 tests, 1 skip, and 5
 subtests. These are regression and reproducibility checks; they do not replace
