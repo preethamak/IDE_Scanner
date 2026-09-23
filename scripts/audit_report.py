@@ -24,6 +24,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
         raise ValueError("Report must contain an extensions array.")
 
     verdict_counts: Counter[str] = Counter()
+    eligible_verdict_counts: Counter[str] = Counter()
     decision_counts: Counter[str] = Counter()
     analysis_counts: Counter[str] = Counter()
     routing_counts: Counter[str] = Counter()
@@ -48,6 +49,8 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
         analysis_status = str(explicit_analysis_status or ("incomplete" if decision == "incomplete" else "complete"))
         routing_outcome = verdict if analysis_status == "complete" and decision != "incomplete" else "incomplete"
         verdict_counts[verdict] += 1
+        if routing_outcome != "incomplete":
+            eligible_verdict_counts[verdict] += 1
         decision_counts[decision] += 1
         analysis_counts[analysis_status] += 1
         routing_counts[routing_outcome] += 1
@@ -115,6 +118,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
         "summary": {
             "total_extensions": len(extension_rows),
             "verdict_counts": dict(verdict_counts),
+            "eligible_verdict_counts": dict(eligible_verdict_counts),
             "decision_counts": dict(decision_counts),
             "analysis_status_counts": dict(analysis_counts),
             "routing_outcome_counts": dict(routing_counts),

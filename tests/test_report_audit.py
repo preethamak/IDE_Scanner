@@ -52,6 +52,32 @@ class ReportAuditTests(unittest.TestCase):
         self.assertEqual(observation["routing_outcome_counts"], {"clean": 1})
         self.assertEqual(observation["actionability_counts"], {"contextual": 2})
 
+    def test_incomplete_artifacts_are_not_counted_as_eligible_verdicts(self) -> None:
+        result = audit_report({
+            "extensions": [
+                {
+                    "extension_id": "publisher.incomplete",
+                    "version": "1.0.0",
+                    "verdict": "clean",
+                    "decision": "incomplete",
+                    "analysis_status": "incomplete",
+                    "findings": [],
+                },
+                {
+                    "extension_id": "publisher.complete",
+                    "version": "1.0.0",
+                    "verdict": "clean",
+                    "decision": "allow",
+                    "analysis_status": "complete",
+                    "findings": [],
+                },
+            ],
+        })
+
+        self.assertEqual(result["summary"]["verdict_counts"], {"clean": 2})
+        self.assertEqual(result["summary"]["eligible_verdict_counts"], {"clean": 1})
+        self.assertEqual(result["summary"]["routing_outcome_counts"], {"clean": 1, "incomplete": 1})
+
     def test_labels_report_routing_mismatches_without_claiming_malware_accuracy(self) -> None:
         result = audit_report({
             "extensions": [
