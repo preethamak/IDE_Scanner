@@ -57,7 +57,7 @@ from .public_outcomes import apply_public_assessment
 from .rule_registry import RULESET_VERSION
 from .posture import scan_posture, summarize_posture
 from .providers import run_static_providers
-from .providers.runtime import SEMGREP_MAX_TARGET_BYTES, run_bounded_process
+from .providers.runtime import SEMGREP_MAX_TARGET_BYTES, run_bounded_process, safe_child_environment
 from .sandbox_runner import external_trace_available, run_sandbox
 from .registry import (
     MarketplaceDownloadError,
@@ -4703,7 +4703,7 @@ def _safe_extract_vsix(vsix_path: Path, destination: Path) -> dict[str, Any]:
 
 
 def _worker_environment() -> dict[str, str]:
-    environment = os.environ.copy()
+    environment = safe_child_environment()
     source_root = str(Path(__file__).resolve().parent.parent)
     environment["PYTHONPATH"] = os.pathsep.join(
         item for item in (source_root, environment.get("PYTHONPATH", "")) if item

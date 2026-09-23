@@ -14,6 +14,7 @@ from ide_scanner.providers.runtime import (
     find_runtime_executable,
     provider_diagnostics,
     run_bounded_process,
+    safe_child_environment,
     semgrep_config_arguments,
     semgrep_runtime_environment,
     semgrep_timeout_seconds,
@@ -100,6 +101,48 @@ def test_semgrep_invocations_use_isolated_temporary_state() -> None:
 
     assert not first_root.exists()
     assert not second_settings.parent.exists()
+
+
+def test_untrusted_content_children_do_not_receive_worker_secrets(monkeypatch) -> None:
+    monkeypatch.setenv("SCAN_CALLBACK_SECRET", "must-not-cross-boundary")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-cross-boundary")
+    monkeypatch.setenv("SEMGREP_APP_TOKEN", "must-not-cross-boundary")
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+
+    environment = safe_child_environment()
+
+    assert "SCAN_CALLBACK_SECRET" not in environment
+    assert "AWS_SECRET_ACCESS_KEY" not in environment
+    assert "SEMGREP_APP_TOKEN" not in environment
+    assert environment["PATH"] == os.environ["PATH"]
+
+
+def test_bounded_process_scrubs_explicit_environment(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    class FakeProcess:
+        returncode = 0
+
+        def communicate(self, timeout):
+            observed["timeout"] = timeout
+            return "ok", ""
+
+    def fake_popen(command, **kwargs):
+        observed["command"] = command
+        observed["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", fake_popen)
+    run_bounded_process(
+        ["provider"],
+        timeout=3,
+        env={"PATH": "/safe/bin", "SCAN_RUNNER_SECRET": "must-not-cross-boundary"},
+    )
+
+    assert observed["env"] == {
+        "PATH": "/safe/bin",
+        "PYTHONPATH": str(Path(runtime.__file__).resolve().parents[2]),
+    }
 
 
 def test_semgrep_timeout_is_bounded(monkeypatch) -> None:

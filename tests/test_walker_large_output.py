@@ -29,6 +29,16 @@ class WalkerLargeOutputTests(unittest.TestCase):
         self.assertEqual(status, "ok")
         self.assertEqual(run.call_count, 2)
 
+    def test_node_parser_receives_scrubbed_environment(self) -> None:
+        completed = MagicMock(returncode=0, stdout=json.dumps({"findings": []}))
+        with patch.object(ast_analyzer.subprocess, "run", return_value=completed) as run, \
+             patch.object(ast_analyzer, "node_available", return_value=True), \
+             patch.object(ast_analyzer, "safe_child_environment", return_value={"PATH": "/safe/bin"}):
+            _findings, status = analyze_js_source_status("a.js", "x")
+
+        self.assertEqual(status, "ok")
+        self.assertEqual(run.call_args.kwargs["env"], {"PATH": "/safe/bin"})
+
     def test_repeated_timeout_still_fails_closed(self) -> None:
         timeout = subprocess.TimeoutExpired(["node"], ast_analyzer.JS_AST_TIMEOUT_SECONDS)
         with patch.object(ast_analyzer.subprocess, "run", side_effect=timeout) as run, \
