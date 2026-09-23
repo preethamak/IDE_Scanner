@@ -96,3 +96,32 @@ does not call it clean: the required provider failure remains visible and the
 artifact is ineligible for public publication until a bounded structural
 analysis path or an explicit reviewed exception exists. The cohort was
 static-only and offline, so it provides no dynamic-runtime evidence.
+
+## Recalibrated broad cohort — 2026-09-23
+
+The same 146 exact VSIX artifacts were rerun after the capability-contract
+calibration with scanner build
+`a636637acdb201c572d01100b6b83a898c9c8ae2`, policy `3.1.0-calibration.7`,
+and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`.
+The run was offline, static-only, and used an explicit empty advisory
+snapshot. It is still an unlabelled diagnostic cohort, not an ecosystem
+accuracy claim or a publication gate.
+
+- 140 artifacts completed; 5 were incomplete and 1 timed out and was isolated.
+- Public routing was 137 eligible `clean`, 1 eligible `review`, and 2
+  eligible `suspicious`; 6 artifacts were quarantined as `incomplete`.
+- The five review decisions were `mcpspend.mcpspend-vscode`,
+  `pdragon.azure-rbs-workbench`, `northLo.penny-vscode`,
+  `mcpbundles.mcpbundles-remote-browser`, and `devoszhang.uix`.
+- The known capability-classification false positive for
+  `artipartylartiii.a-lsp@1.0.5` changed from `review`/`clean` to
+  `allow`/`clean` without changing its contextual binary/process findings.
+- `pdragon.azure-rbs-workbench@1.5.0` remained `review`/`suspicious` with
+  both `destructive-transfer-chain` and `download-and-execute`; the
+  calibration did not weaken those correlated high-risk rules.
+
+The rerun reduced the broad-cohort review queue by one known false positive,
+but it does not establish false-negative or malicious-detection rates because
+the cohort has no independent labels and has no runtime evidence. The timeout,
+provider failures, and missing entrypoints remain visible and ineligible for
+public publication.
