@@ -14,11 +14,14 @@ except ModuleNotFoundError:  # Direct `python scripts/run_scan_worker.py` execut
     import callback_scan  # type: ignore[no-redef]
     import claim_scan  # type: ignore[no-redef]
 
+from ide_scanner.sandbox_runner import sandbox_preflight
+
 
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 
 def main() -> int:
+    require_runtime_preflight()
     max_jobs = bounded_jobs(os.environ.get("SCAN_JOBS_PER_WORKER", "1"))
     empty_claim_retries = bounded_retries(os.environ.get("SCAN_EMPTY_CLAIM_RETRIES", "5"))
     artifact_root = Path(
@@ -66,6 +69,14 @@ def main() -> int:
 
     print(json.dumps({"completed": completed, "failures": failures, "max_jobs": max_jobs}, sort_keys=True))
     return 1 if failures else 0
+
+
+def require_runtime_preflight() -> None:
+    """Refuse to claim production jobs unless runtime isolation is ready."""
+    result = sandbox_preflight()
+    if result.get("status") != "ready":
+        detail = str(result.get("error") or "runtime isolation preflight did not complete")
+        raise RuntimeError(f"Production scan worker requires a ready runtime sandbox: {detail}")
 
 
 def run_scan(job: dict[str, object], bundle_path: Path) -> bool:

@@ -49,7 +49,7 @@ def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
         run_scan_worker.claim_scan, "claim_job", side_effect=[job, None]
     ) as claim_job, patch.object(run_scan_worker, "run_scan", return_value=True) as run_scan, patch.object(
         run_scan_worker, "submit_result", return_value=True
-    ) as submit_result:
+    ) as submit_result, patch.object(run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}):
         assert run_scan_worker.main() == 0
 
     assert claim_job.call_count == 2
@@ -79,7 +79,9 @@ def test_worker_retries_transient_empty_claim(tmp_path: Path) -> None:
         run_scan_worker.claim_scan, "claim_job", side_effect=[None, job]
     ) as claim_job, patch.object(run_scan_worker, "run_scan", return_value=True), patch.object(
         run_scan_worker, "submit_result", return_value=True
-    ), patch.object(run_scan_worker.time, "sleep") as sleep:
+    ), patch.object(run_scan_worker.time, "sleep") as sleep, patch.object(
+        run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}
+    ):
         assert run_scan_worker.main() == 0
 
     assert claim_job.call_count == 2
@@ -107,8 +109,22 @@ def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> N
         run_scan_worker.claim_scan, "claim_job", return_value=job
     ), patch.object(run_scan_worker, "run_scan", return_value=False), patch.object(
         run_scan_worker, "submit_result", return_value=True
-    ) as submit_result:
+    ) as submit_result, patch.object(run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}):
         assert run_scan_worker.main() == 1
 
     submit_result.assert_called_once_with(job, None)
     urllib_module.request.install_opener.assert_called_once()
+
+
+def test_worker_refuses_to_claim_when_runtime_preflight_is_unavailable() -> None:
+    with patch.object(
+        run_scan_worker,
+        "sandbox_preflight",
+        return_value={"status": "unavailable", "error": "namespace denied"},
+    ):
+        try:
+            run_scan_worker.require_runtime_preflight()
+        except RuntimeError as error:
+            assert "namespace denied" in str(error)
+        else:
+            raise AssertionError("worker must refuse an unavailable runtime sandbox")
