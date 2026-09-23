@@ -44,19 +44,26 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`c8f3888abe1f05d7d86338b23f179914bc952dca`, policy `3.1.0-calibration.5`,
-and ruleset `2026.09.22-policy-v3-calibration.38-complete-rule-catalog` (116
-rules). The BCAI behavior-only replay remains `REVIEW` without the advisory
-and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory enabled.
-Neither run is a substitute for the required deep-runtime publication holdout.
+`3c71bc71f09897ef3c682a5212d94865b18c0568`, policy `3.1.0-calibration.6`,
+and ruleset `2026.09.23-policy-v3-calibration.39-runtime-scope-calibration`
+(116 rules). The BCAI behavior-only replay remains `REVIEW` without the
+advisory and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory
+enabled. Neither run is a substitute for the required deep-runtime
+publication holdout.
 
 ## Latest canonical diagnostic replay
 
-The current calibration test suite was rerun against six exact safe controls
-and the exact BCAI artifact with scanner build
-`c8f3888abe1f05d7d86338b23f179914bc952dca`. All retained scans completed; the safe controls
-remained `allow`/`clean`, and BCAI was `block`/`malicious` with authoritative
-malware score and risk score `100` when the verified advisory was enabled.
-This is useful evidence that capability signals remain contextual on this small
-cohort, but it is still a diagnostic replay rather than an independently
-adjudicated ecosystem accuracy claim.
+The current calibration test suite was rerun against six exact artifacts with
+scanner build `3c71bc71f09897ef3c682a5212d94865b18c0568`. All six scans
+completed; the five safe controls remained `allow`/`clean` with risk and
+malware scores of `0`, and BCAI was `block`/`malicious` with authoritative
+scores of `100` when the verified advisory was enabled. The most frequent
+capability rules on safe controls were `filesystem-access` (5),
+`process-execution` (5), `network-access` (4), `security-policy-missing` (4),
+`dynamic-code-loading` (4), and `powerful-ide-contribution` (4). They remained
+context-only and did not create a safe block or review. BCAI additionally
+triggered the high-specificity `remote-credential-broker`,
+`dynamic-shell-execution`, and exact-hash advisory rules. This is useful
+evidence that ordinary developer-tool capabilities remain contextual on this
+small cohort, but it is still a diagnostic replay rather than an
+independently adjudicated ecosystem accuracy claim.
