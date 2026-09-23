@@ -84,11 +84,13 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against scanner build
-`0545b58a3d5794ce685459f62e433b22fb65ee73` and passed: all 8 required corpus
+The latest local deterministic gate was rerun against final scanner build
+`59b35635bf6cac2676a13fe50b292fd31842866a` and passed: all 8 required corpus
 artifacts were complete, both known-safe controls were allowed without review,
 and all 4 required known-malicious artifacts were blocked. The vendored CLI
-engine is pinned to this same scanner commit. This does not waive the
+engine contains the same canonical scanner sources and is parity-verified
+against the preceding engine source revision `0545b58a3d5794ce685459f62e433b22fb65ee73`.
+This does not waive the
 privileged runtime holdout or authorize registry publication.
 
 A separate 146-artifact cohort replay on this build is diagnostic calibration
