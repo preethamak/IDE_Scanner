@@ -1189,6 +1189,9 @@ class ScannerTests(unittest.TestCase):
         self.assertGreater(row["context_score"], 0)
         self.assertEqual(row["verdict_state"], "safe_with_notes")
         self.assertEqual(row["verdict_label"], "Safe with notes")
+        self.assertEqual(row["actionable_finding_count"], 0)
+        self.assertEqual(row["low_finding_count"], 0)
+        self.assertEqual(row["contextual_finding_count"], len(detail["findings"]))
         self.assertTrue(all(finding["actionability"] == "contextual" for finding in detail["findings"]))
 
     def test_configured_cli_execution_is_contextual_not_review(self) -> None:

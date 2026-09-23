@@ -157,6 +157,7 @@ def _summary(
     severity_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
     finding_counts: dict[str, int] = {}
+    finding_actionability_counts: dict[str, int] = {}
     evidence_class_counts: dict[str, int] = {}
     decision_counts = {decision: 0 for decision in ("block", "review", "incomplete", "allow")}
     analysis_status_counts: dict[str, int] = {}
@@ -170,6 +171,8 @@ def _summary(
         for finding in extension.findings:
             finding_counts[finding.rule_id] = finding_counts.get(finding.rule_id, 0) + 1
             category_counts[finding.category] = category_counts.get(finding.category, 0) + 1
+            actionability = finding_actionability(finding)
+            finding_actionability_counts[actionability] = finding_actionability_counts.get(actionability, 0) + 1
             evidence_class = str((finding.evidence or {}).get("evidence_class") or "weak")
             evidence_class_counts[evidence_class] = evidence_class_counts.get(evidence_class, 0) + 1
     posture_summary = report.get("posture_summary") if isinstance(report.get("posture_summary"), dict) else {}
@@ -190,6 +193,7 @@ def _summary(
         },
         "top_risk_extensions": [summary.to_dict() for summary in _rank_summaries(summaries)[:10]],
         "finding_counts": _sorted_counts(finding_counts),
+        "finding_actionability_counts": _sorted_counts(finding_actionability_counts),
         "severity_counts": _sorted_counts(severity_counts),
         "category_counts": _sorted_counts(category_counts),
         "evidence_class_counts": _sorted_counts(evidence_class_counts),
@@ -199,6 +203,12 @@ def _summary(
 
 def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
     ranked_findings = _rank_findings(extension.findings)
+    actionability_counts = {
+        "block": sum(1 for finding in extension.findings if finding_actionability(finding) == "block"),
+        "review": sum(1 for finding in extension.findings if finding_actionability(finding) in {"review", "investigate"}),
+        "low": sum(1 for finding in extension.findings if finding_actionability(finding) == "low"),
+        "contextual": sum(1 for finding in extension.findings if finding_actionability(finding) == "contextual"),
+    }
     headline_findings = [
         finding for finding in ranked_findings
         if finding_actionability(finding) in {"block", "review", "low"}
@@ -222,6 +232,9 @@ def _to_summary(extension: ExtensionReport) -> ExtensionSummary:
         # security alerts when no action is required.
         top_findings=[finding.rule_id for finding in headline_findings[:5]],
         finding_count=len(extension.findings),
+        actionable_finding_count=actionability_counts["block"] + actionability_counts["review"],
+        low_finding_count=actionability_counts["low"],
+        contextual_finding_count=actionability_counts["contextual"],
         dependency_count=len(extension.dependencies),
         activation_summary=_activation_summary(extension),
         detail_ref=f"extensions/{_safe_detail_name(extension.extension_id, extension.version)}.json",

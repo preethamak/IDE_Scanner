@@ -217,6 +217,7 @@ def _finding_counts(extensions: list[dict[str, Any]]) -> dict[str, Any]:
     by_category: dict[str, int] = {}
     by_severity: dict[str, int] = {}
     by_detector_severity: dict[str, int] = {}
+    by_actionability: dict[str, int] = {}
     for extension in extensions:
         for finding in extension.get("findings") or []:
             _increment(by_rule, str(finding.get("rule_id") or "unknown"))
@@ -226,11 +227,13 @@ def _finding_counts(extensions: list[dict[str, Any]]) -> dict[str, Any]:
                 str(finding.get("effective_severity") or finding.get("severity") or "unknown"),
             )
             _increment(by_detector_severity, str(finding.get("severity") or "unknown"))
+            _increment(by_actionability, str(finding.get("actionability") or "contextual"))
     return {
         "by_rule": dict(sorted(by_rule.items(), key=lambda item: (-item[1], item[0]))),
         "by_category": dict(sorted(by_category.items(), key=lambda item: (-item[1], item[0]))),
         "by_severity": dict(sorted(by_severity.items(), key=lambda item: (-item[1], item[0]))),
         "by_detector_severity": dict(sorted(by_detector_severity.items(), key=lambda item: (-item[1], item[0]))),
+        "by_actionability": dict(sorted(by_actionability.items(), key=lambda item: (-item[1], item[0]))),
     }
 
 

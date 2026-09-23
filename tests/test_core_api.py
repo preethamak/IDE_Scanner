@@ -41,6 +41,7 @@ def test_summary_uses_policy_severity_and_preserves_detector_severity() -> None:
 
     assert result["finding_counts"]["by_severity"] == {"INFO": 1}
     assert result["finding_counts"]["by_detector_severity"] == {"HIGH": 1}
+    assert result["finding_counts"]["by_actionability"] == {"contextual": 1}
     assert result["top_risk_extensions"][0]["top_findings"][0] == {
         "finding_id": "finding-1",
         "rule_id": "encoded-dynamic-execution",
