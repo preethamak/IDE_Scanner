@@ -32,7 +32,7 @@ replaced by an empty snapshot. The scanner still returned:
   environment-file references
 
 The current release-candidate replay used scanner build
-`a636637acdb201c572d01100b6b83a898c9c8ae2`, policy `3.1.0-calibration.7`,
+`0545b58a3d5794ce685459f62e433b22fb65ee73`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`.
 The scan completed with 100% required-provider coverage against the exact
 VSIX. The score is a diagnostic index, not a probability of compromise.
