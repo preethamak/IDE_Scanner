@@ -31,8 +31,8 @@ replaced by an empty snapshot. The scanner still returned:
   network access, filesystem access, process execution, shell execution, and
   environment-file references
 
-The current release-candidate replay used final scanner build
-`59b35635bf6cac2676a13fe50b292fd31842866a`, policy `3.1.0-calibration.7`,
+The current release-candidate replay used verified scanner source revision
+`f27efc18d48fd07c4b81997913a63161ae79c9bf`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`.
 The scan completed with 100% required-provider coverage against the exact
 VSIX. The score is a diagnostic index, not a probability of compromise.
