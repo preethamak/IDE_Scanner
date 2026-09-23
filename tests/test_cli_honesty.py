@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -84,6 +84,14 @@ class CliHonestyTests(unittest.TestCase):
         with patch("ide_scanner.cli.scan_targets", return_value=report):
             code = cli.main(["scan", "--fixtures", "--profile", "deep", "--runtime", "--format", "json"])
         self.assertEqual(code, 1)
+
+    def test_cli_rejects_unimplemented_output_formats(self) -> None:
+        for output_format in ("sarif", "sqlite"):
+            error = io.StringIO()
+            with redirect_stderr(error), self.assertRaises(SystemExit) as stopped:
+                cli.main(["scan", "--fixtures", "--format", output_format])
+            self.assertEqual(stopped.exception.code, 2)
+            self.assertIn("invalid choice", error.getvalue())
 
 
 if __name__ == "__main__":

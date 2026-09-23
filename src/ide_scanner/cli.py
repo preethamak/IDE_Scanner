@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
-    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif", "sqlite"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -57,7 +57,6 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
-    scan.add_argument("--ui", action="store_true", help="Reserved for local dashboard mode.")
 
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
@@ -174,8 +173,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "scan":
-        if args.ui:
-            parser.error("scan --ui is not implemented yet. Use `scan --installed --output report.zip` and import the bundle in ide-scanner-web.")
         if args.version and len(args.extension_id) != 1:
             parser.error("scan --version requires exactly one --extension-id")
         if args.target_platform and len(args.extension_id) != 1:
@@ -249,8 +246,6 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("scan --format terminal cannot write an output file; use --format report.zip or json.")
             _emit_terminal_brief(report)
             return scan_exit_code
-        if output_format in {"sarif", "sqlite"}:
-            parser.error(f"scan --format {output_format} is reserved but not implemented yet")
         _emit(report, args.output)
         return scan_exit_code
     if args.command == "artifacts":
