@@ -44,7 +44,7 @@ The exact artifact hashes were verified before scanning, including
 `b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216` for BCAI.
 
 The current exact-artifact replay was rerun with scanner build
-`c34743df862a952ce74261db8b95d633d65967e0`, policy `3.1.0-calibration.7`,
+`d6b5c3629d000043965f7a2cad25b33e947b85f`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.23-policy-v3-calibration.40-environment-exfiltration`
 (117 rules). The BCAI behavior-only replay remains `REVIEW` without the
 advisory and the exact-hash replay is `BLOCK/MALICIOUS` with the advisory
@@ -54,7 +54,7 @@ publication holdout.
 ## Latest canonical diagnostic replay
 
 The current calibration test suite was rerun against six exact artifacts with
-scanner build `c34743df862a952ce74261db8b95d633d65967e0`. All six scans
+scanner build `d6b5c3629d000043965f7a2cad25b33e947b85f`. All six scans
 completed; the five safe controls remained `allow`/`clean` with risk and
 malware scores of `0`, and BCAI was `block`/`malicious` with authoritative
 scores of `100` when the verified advisory was enabled. The most frequent
@@ -72,3 +72,27 @@ bundle variable collisions. BCAI additionally triggered the high-specificity `re
 evidence that ordinary developer-tool capabilities remain contextual on this
 small cohort, but it is still a diagnostic replay rather than an
 independently adjudicated ecosystem accuracy claim.
+
+## Latest unlabelled pilot cohort — 2026-09-23
+
+An additional 20 exact VSIX artifacts from the retained ecosystem pilot set
+were scanned with scanner build `d6b5c3629d000043965f7a2cad25b33e947b85f`,
+policy `3.1.0-calibration.7`, ruleset
+`2026.09.23-policy-v3-calibration.40-environment-exfiltration`, an empty
+advisory snapshot, and runtime disabled. This is an unlabelled observational
+cohort, not a safe/malicious accuracy sample and not a publication gate.
+
+- 19 artifacts completed and routed `allow`/`clean`.
+- 1 artifact was quarantined as `incomplete` because the required JavaScript
+  AST provider could not analyze its 41.7 MB generated entrypoint.
+- The completed artifacts emitted 188 observations: 155 contextual and 33
+  low-actionability; no artifact had a review/block-actionable finding.
+- The repeated weak capability and encoded-execution matches stayed
+  contextual. They did not change the install decision or enter the review
+  queue.
+
+The incomplete artifact is Google Cloud Data Agent Kit `0.7.2`. The scanner
+does not call it clean: the required provider failure remains visible and the
+artifact is ineligible for public publication until a bounded structural
+analysis path or an explicit reviewed exception exists. The cohort was
+static-only and offline, so it provides no dynamic-runtime evidence.

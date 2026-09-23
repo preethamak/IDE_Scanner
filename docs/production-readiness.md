@@ -84,6 +84,12 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
+The latest local deterministic gate was rerun against scanner build
+`d6b5c3629d000043965f7a2cad25b33e947b85f` and passed: all 8 required corpus
+artifacts were complete, both known-safe controls were allowed without review,
+and all 4 required known-malicious artifacts were blocked. This does not waive
+the privileged runtime holdout or authorize registry publication.
+
 An AST resource skip is a required-provider failure and makes the scan
 incomplete. Raw-text and YARA coverage are not presented as equivalent to a
 successful structural parse. The limit is included in provider metadata for
