@@ -55,14 +55,13 @@ replaced by an empty snapshot. The scanner still returned:
   environment-file references
 
 The current scanner checkout is revision
-`10765add2143dccb470fc38278b4544c086650f1`, policy `3.1.0-calibration.7`,
+`bd8193fdaa91a26e3da3a542a6712d536b814ad9`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`.
 The local replay completed with 100% required-provider coverage against the
-exact VSIX, but was run without a CI-injected build identity
-(`scanner_build=unknown`). The privileged publication holdout must rerun the
-case with the exact release commit and runtime contract before this result is
-used as release evidence. The score is a diagnostic index, not a probability
-of compromise.
+exact VSIX under that scanner identity. The privileged publication holdout
+must still rerun the case with the complete runtime contract before this
+result is used as release evidence. The score is a diagnostic index, not a
+probability of compromise.
 
 This is the correct conservative outcome for static-only corroboration: the
 scanner identifies a remote token-broker trust boundary and requires review,
