@@ -53,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--jobs", type=int, default=4, help="Maximum concurrent artifact processes, from 1 to 32.")
     parser.add_argument("--timeout", type=int, default=45, help="Wall-clock timeout per artifact in seconds.")
     parser.add_argument("--profile", choices=["quick", "standard", "deep", "benchmark"], default="quick", help="Static/deep scan profile label recorded in the corpus execution evidence.")
+    parser.add_argument("--offline", action="store_true", help="Disable registry and dependency network checks in each isolated worker; production runs remain online by default.")
     parser.add_argument("--runtime", action="store_true", help="Run the required dynamic providers in an isolated Bubblewrap sandbox for each artifact.")
     parser.add_argument("--runtime-timeout", type=int, default=20, help="Dynamic runtime budget per artifact in seconds, from 1 to 120.")
     parser.add_argument("--extension-advisories", help="Versioned exact-extension advisory snapshot passed to each isolated scanner worker.")
@@ -162,6 +163,7 @@ def _scan_one(
     runtime: bool = False,
     runtime_timeout: int = 20,
     extension_advisories: str = "",
+    offline: bool = False,
 ) -> dict[str, Any]:
     path = Path(target["path"])
     source = target.get("type", "vscode")
@@ -185,6 +187,7 @@ def _scan_one(
             runtime=runtime,
             runtime_timeout=runtime_timeout,
             extension_advisories=extension_advisories,
+            offline=offline,
         )
         environment = os.environ.copy()
         existing_pythonpath = environment.get("PYTHONPATH", "")
@@ -259,6 +262,7 @@ def _worker_command(
     runtime: bool,
     runtime_timeout: int,
     extension_advisories: str = "",
+    offline: bool = False,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -279,6 +283,8 @@ def _worker_command(
     ]
     if runtime:
         command.extend(["--runtime", "--runtime-timeout", str(runtime_timeout)])
+    if offline:
+        command.append("--offline")
     if extension_advisories:
         command.extend(["--extension-advisories", extension_advisories])
     return command
@@ -302,6 +308,7 @@ def _checkpoint_context(
     runtime: bool = False,
     runtime_timeout: int = 20,
     extension_advisories: str = "",
+    offline: bool = False,
 ) -> dict[str, Any]:
     return {
         "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
@@ -313,6 +320,7 @@ def _checkpoint_context(
         "runtime_evidence_version": "2",
         "runtime_external_trace": bool(runtime and external_trace_available()),
         "extension_advisories": str(extension_advisories or ""),
+        "offline": bool(offline),
     }
 
 
@@ -410,6 +418,7 @@ def _scan_one_safe(
     runtime: bool,
     runtime_timeout: int,
     extension_advisories: str = "",
+    offline: bool = False,
 ) -> dict[str, Any]:
     try:
         return _scan_one(
@@ -419,6 +428,7 @@ def _scan_one_safe(
             runtime=runtime,
             runtime_timeout=runtime_timeout,
             extension_advisories=extension_advisories,
+            offline=offline,
         )
     except Exception as exc:  # noqa: BLE001 - one hostile artifact must not abort a corpus
         return _worker_error(Path(target["path"]), target.get("type", "vscode"), target, f"Corpus worker raised an isolated error: {exc}")
@@ -480,6 +490,7 @@ def _scan_pending(
     runtime: bool,
     runtime_timeout: int,
     extension_advisories: str,
+    offline: bool,
     checkpoint_dir: Path | None,
     checkpoint_context: dict[str, Any],
     targets: list[dict[str, str]],
@@ -520,6 +531,7 @@ def _scan_pending(
                     runtime=runtime,
                     runtime_timeout=runtime_timeout,
                     extension_advisories=extension_advisories,
+                    offline=offline,
                 )
                 futures[future] = (index, weight)
                 running_units += weight
@@ -644,6 +656,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.runtime,
         args.runtime_timeout,
         advisory_snapshot["sha256"] or args.extension_advisories,
+        args.offline,
     )
     extensions_by_index: dict[int, dict[str, Any]] = {}
     pending: dict[int, dict[str, str]] = {}
@@ -663,6 +676,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         runtime=args.runtime,
         runtime_timeout=args.runtime_timeout,
         extension_advisories=args.extension_advisories or "",
+        offline=args.offline,
         checkpoint_dir=checkpoint_dir,
         checkpoint_context=checkpoint_context,
         targets=targets,
@@ -743,6 +757,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": args.timeout,
                 "profile": args.profile,
                 "runtime_enabled": args.runtime,
+                "offline": args.offline,
                 "runtime_timeout_seconds": args.runtime_timeout if args.runtime else 0,
                 "external_syscall_trace": external_syscall_trace,
                 "external_syscall_trace_available": bool(args.runtime and external_trace_available()),

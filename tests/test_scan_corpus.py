@@ -35,6 +35,10 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertTrue(args.runtime)
         self.assertEqual(args.runtime_timeout, 30)
 
+    def test_parser_exposes_explicit_offline_worker_mode(self) -> None:
+        args = _parser().parse_args(["--path", ".", "--out", "report.json", "--offline"])
+        self.assertTrue(args.offline)
+
     def test_parser_accepts_an_explicit_extension_advisory_snapshot(self) -> None:
         args = _parser().parse_args([
             "--path", ".",
@@ -65,6 +69,12 @@ class ScanCorpusTests(unittest.TestCase):
         self.assertIn("--runtime", command)
         self.assertEqual(command[command.index("--runtime-timeout") + 1], "30")
         self.assertEqual(command[command.index("--extension-advisories") + 1], "/tmp/empty-advisories.json")
+
+        offline_command = _worker_command(
+            Path("artifact.vsix"), "standard", Path("report.json"), runtime=False,
+            runtime_timeout=20, offline=True,
+        )
+        self.assertIn("--offline", offline_command)
 
     def test_scheduler_weights_heavy_artifacts_without_changing_scan_limits(self) -> None:
         with TemporaryDirectory() as tmp:
