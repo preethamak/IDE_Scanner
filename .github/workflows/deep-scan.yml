@@ -165,6 +165,9 @@ jobs:
           SCAN_JOB_ID: ${{ inputs.job_id }}
           SCAN_ENQUEUED_JOB_ID: ${{ steps.enqueue.outputs.job_id }}
           SCAN_JOBS_PER_WORKER: ${{ inputs.jobs_per_worker || '1' }}
+          # A pathological artifact must become an explicit incomplete job,
+          # not hold a worker until the workflow-level timeout.
+          SCAN_JOB_TIMEOUT_SECONDS: "300"
           # A 204 can mean a concurrent worker won the conditional D1 claim,
           # not that the queue is drained. Keep the retry window bounded and
           # explicit for reproducible bulk scans.

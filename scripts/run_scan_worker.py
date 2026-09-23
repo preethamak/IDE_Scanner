@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +42,7 @@ def main() -> int:
 
     exact_job_id = os.environ.get("SCAN_JOB_ID", "").strip() or None
     enqueued_job_id = os.environ.get("SCAN_ENQUEUED_JOB_ID", "").strip() or None
+    job_timeout = bounded_job_timeout(os.environ.get("SCAN_JOB_TIMEOUT_SECONDS", "300"))
     failures = 0
     completed = 0
 
@@ -59,7 +61,7 @@ def main() -> int:
 
         try:
             bundle_path = artifact_root / f"{safe_name(str(job['id']))}.json"
-            scan_result = run_scan(job, bundle_path)
+            scan_result = run_scan(job, bundle_path, timeout_seconds=job_timeout)
             callback_result = submit_result(job, bundle_path if scan_result else None)
             if not scan_result or not callback_result:
                 failures += 1
@@ -83,7 +85,7 @@ def require_runtime_preflight() -> None:
         raise RuntimeError(f"Production scan worker requires a ready runtime sandbox: {detail}")
 
 
-def run_scan(job: dict[str, object], bundle_path: Path) -> bool:
+def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int = 300) -> bool:
     extension_id = str(job["extension_id"])
     version = str(job["version"])
     target_platform = str(job.get("target_platform") or "").strip().lower()
@@ -119,8 +121,39 @@ def run_scan(job: dict[str, object], bundle_path: Path) -> bool:
     environment = os.environ.copy()
     environment["IDE_SCANNER_BUILD_SHA"] = os.environ.get("IDE_SCANNER_BUILD_SHA", "")
     environment["SCAN_TARGET_PLATFORM"] = target_platform
-    completed = subprocess.run(command, env=environment, check=False)
-    return completed.returncode == 0 and bundle_path.exists()
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        start_new_session=(os.name == "posix"),
+    )
+    try:
+        returncode = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        print(
+            f"Scan job {job.get('id', 'unknown')} exceeded the {timeout_seconds}-second worker timeout.",
+            file=sys.stderr,
+        )
+        return False
+    return returncode == 0 and bundle_path.exists()
+
+
+def terminate_process_group(process: subprocess.Popen[object]) -> None:
+    """Stop the scanner and any provider children after a job timeout."""
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    else:  # pragma: no cover - production workers are Linux
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def submit_result(job: dict[str, object], bundle_path: Path | None) -> bool:
@@ -186,6 +219,16 @@ def bounded_retries(value: str) -> int:
     if not 0 <= retries <= 16:
         raise RuntimeError("SCAN_EMPTY_CLAIM_RETRIES must be an integer between 0 and 16")
     return retries
+
+
+def bounded_job_timeout(value: str) -> int:
+    try:
+        timeout = int(value)
+    except ValueError as error:
+        raise RuntimeError("SCAN_JOB_TIMEOUT_SECONDS must be an integer between 60 and 1800") from error
+    if not 60 <= timeout <= 1800:
+        raise RuntimeError("SCAN_JOB_TIMEOUT_SECONDS must be an integer between 60 and 1800")
+    return timeout
 
 
 def claim_with_retries(
