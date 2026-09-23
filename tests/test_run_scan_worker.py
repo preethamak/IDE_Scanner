@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -68,6 +69,51 @@ def test_scan_timeout_kills_the_entire_process_group(tmp_path: Path) -> None:
     assert popen.call_args.kwargs["start_new_session"] is False
     killpg.assert_called_once_with(1234, run_scan_worker.signal.SIGKILL)
     assert process.wait_calls == 2
+
+
+def test_bundle_identity_contract_rejects_acquisition_failure(tmp_path: Path) -> None:
+    bundle = tmp_path / "scan.json"
+    bundle.write_text(
+        json.dumps({
+            "extensions": {
+                "extensions/example.unknown.json": {
+                    "extension_id": "example.extension",
+                    "version": "unknown",
+                    "source": "marketplace-error",
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    assert run_scan_worker.bundle_has_immutable_identity(
+        bundle,
+        {"extension_id": "example.extension", "version": "1.0.0"},
+    ) is False
+
+
+def test_bundle_identity_contract_accepts_exact_artifact(tmp_path: Path) -> None:
+    bundle = tmp_path / "scan.json"
+    digest = "a" * 64
+    bundle.write_text(
+        json.dumps({
+            "extensions": {
+                "extensions/example.extension-1.0.0.json": {
+                    "extension_id": "example.extension",
+                    "version": "1.0.0",
+                    "artifact_identity": {
+                        "extension_id": "example.extension",
+                        "version": "1.0.0",
+                        "sha256": digest,
+                    },
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    assert run_scan_worker.bundle_has_immutable_identity(
+        bundle,
+        {"extension_id": "example.extension", "version": "1.0.0"},
+    ) is True
 
 
 def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:

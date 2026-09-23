@@ -19,6 +19,7 @@ from ide_scanner.sandbox_runner import sandbox_preflight
 
 
 TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
 def main() -> int:
@@ -135,7 +136,53 @@ def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int 
             file=sys.stderr,
         )
         return False
-    return returncode == 0 and bundle_path.exists()
+    if returncode != 0 or not bundle_path.exists():
+        return False
+    if not bundle_has_immutable_identity(bundle_path, job):
+        print(
+            f"Scan job {job.get('id', 'unknown')} produced no immutable artifact identity.",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def bundle_has_immutable_identity(bundle_path: Path, job: dict[str, object]) -> bool:
+    """Validate the minimum identity contract before calling the web boundary.
+
+    The website remains the authoritative canonical validator. This worker
+    check only prevents a stale or regressed scanner binary from turning an
+    acquisition failure into an avoidable callback 422.
+    """
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(bundle, dict):
+        return False
+    raw_extensions = bundle.get("extensions")
+    if isinstance(raw_extensions, dict):
+        details = [item for item in raw_extensions.values() if isinstance(item, dict)]
+    elif isinstance(raw_extensions, list):
+        details = [item for item in raw_extensions if isinstance(item, dict)]
+    else:
+        return False
+    if len(details) != 1:
+        return False
+    detail = details[0]
+    identity = detail.get("artifact_identity")
+    identity = identity if isinstance(identity, dict) else {}
+    artifact_sha256 = str(identity.get("sha256") or detail.get("artifact_sha256") or "").strip()
+    extension_id = str(detail.get("extension_id") or identity.get("extension_id") or "").strip()
+    version = str(detail.get("version") or identity.get("version") or "").strip()
+    expected_extension_id = str(job.get("extension_id") or "").strip()
+    expected_version = str(job.get("version") or "").strip()
+    return (
+        bool(SHA256_RE.fullmatch(artifact_sha256))
+        and bool(extension_id)
+        and extension_id.lower() == expected_extension_id.lower()
+        and version == expected_version
+    )
 
 
 def isolated_worker_command(command: list[str]) -> list[str]:
