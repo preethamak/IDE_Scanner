@@ -189,8 +189,10 @@ This authenticates the scanner hook's transport against writable-channel
 spoofing; it is not a claim that JavaScript running in the same Node process is
 tamper-proof. Runtime observations therefore remain corroborating evidence,
 while confirmed malware outcomes still require independent artifact or
-intelligence evidence. Production publication also requires the OS-level
-external tracer for native/direct-syscall coverage.
+intelligence evidence. Raw extension stdout/stderr is not persisted in the
+report; only bounded byte counts and diagnostic digests are retained.
+Production publication also requires the OS-level external tracer for
+native/direct-syscall coverage.
 
 Runtime completion is recorded per exact artifact, not only in aggregate
 metadata. Each required package must have a matching runtime instance receipt

@@ -963,7 +963,12 @@ class ScannerTests(unittest.TestCase):
             )
         self.assertEqual(observations[0]["kind"], "sandbox_error")
         self.assertEqual(observations[0]["phase"], "activation")
-        self.assertEqual(observations[0]["stderr_excerpt"], "activation failed")
+        self.assertEqual(
+            observations[0]["stderr_sha256"],
+            hashlib.sha256(b"activation failed").hexdigest(),
+        )
+        self.assertEqual(observations[0]["stderr_bytes"], len(b"activation failed"))
+        self.assertNotIn("stderr_excerpt", observations[0])
 
     def test_nonzero_entrypoint_with_authenticated_runtime_evidence_remains_covered(self) -> None:
         failed = subprocess.CompletedProcess(

@@ -595,7 +595,12 @@ def _execute_entrypoint(
         }]
         observations[0] = {key: value for key, value in observations[0].items() if value is not None}
         if result.returncode != 0 and result.stderr:
-            observations[0]["stderr_excerpt"] = result.stderr[-2000:]
+            # Extension stderr is attacker-controlled and may contain secrets
+            # or synthetic canary values. Keep a reproducible fingerprint and
+            # size for diagnostics, never the raw text in a persisted report.
+            stderr_bytes = result.stderr.encode("utf-8", errors="replace")
+            observations[0]["stderr_sha256"] = hashlib.sha256(stderr_bytes).hexdigest()
+            observations[0]["stderr_bytes"] = len(stderr_bytes)
         observations.extend(_observations_from_events(events, canary_files or []))
         observations.extend(external_observations)
         if not transport_ok:
