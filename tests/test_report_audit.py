@@ -24,6 +24,10 @@ class ReportAuditTests(unittest.TestCase):
         self.assertEqual(result["rule_observations"][0]["finding_count"], 2)
         self.assertEqual(result["rule_observations"][0]["extension_count"], 2)
         self.assertEqual(result["rule_observations"][0]["actionability_counts"], {"contextual": 1, "review": 1})
+        self.assertEqual(result["summary"]["finding_actionability_counts"], {"contextual": 1, "review": 1})
+        self.assertEqual(result["summary"]["actionable_finding_count"], 1)
+        self.assertEqual(result["summary"]["extensions_with_actionable_findings"], 1)
+        self.assertEqual(result["extensions"][0]["actionability_counts"], {"contextual": 1})
 
     def test_rule_outcomes_are_deduplicated_per_extension(self) -> None:
         result = audit_report({

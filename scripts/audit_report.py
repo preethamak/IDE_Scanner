@@ -27,6 +27,8 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
     decision_counts: Counter[str] = Counter()
     analysis_counts: Counter[str] = Counter()
     routing_counts: Counter[str] = Counter()
+    finding_actionability_counts: Counter[str] = Counter()
+    extensions_with_actionable_findings = 0
     rule_counts: Counter[str] = Counter()
     rule_extensions: dict[str, set[str]] = defaultdict(set)
     rule_extension_outcomes: dict[str, dict[str, str]] = defaultdict(dict)
@@ -52,6 +54,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
         findings = raw_extension.get("findings")
         findings = findings if isinstance(findings, list) else []
         finding_rule_ids: Counter[str] = Counter()
+        extension_actionability: Counter[str] = Counter()
         for raw_finding in findings:
             if not isinstance(raw_finding, dict):
                 continue
@@ -68,7 +71,11 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             rule_extension_outcomes[rule_id][extension_id] = routing_outcome
             rule_evidence[rule_id][evidence_class] += 1
             rule_actionability[rule_id][actionability] += 1
+            finding_actionability_counts[actionability] += 1
+            extension_actionability[actionability] += 1
             finding_rule_ids[rule_id] += 1
+        if extension_actionability.get("review", 0) or extension_actionability.get("block", 0):
+            extensions_with_actionable_findings += 1
         extension_rows.append({
             "extension_id": extension_id,
             "version": str(raw_extension.get("version") or "unknown"),
@@ -77,6 +84,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             "analysis_status": analysis_status,
             "routing_outcome": routing_outcome,
             "finding_count": sum(finding_rule_ids.values()),
+            "actionability_counts": dict(extension_actionability),
             "top_rules": [rule_id for rule_id, _ in finding_rule_ids.most_common(8)],
             "label": _lookup_label(labels, extension_id, str(raw_extension.get("version") or "unknown")) if labels else None,
         })
@@ -112,6 +120,11 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             "routing_outcome_counts": dict(routing_counts),
             "incomplete_extension_count": routing_counts.get("incomplete", 0),
             "mixed_outcome_rule_count": sum(1 for rule in rules if rule["mixed_outcome"]),
+            "finding_actionability_counts": dict(finding_actionability_counts),
+            "actionable_finding_count": finding_actionability_counts.get("review", 0) + finding_actionability_counts.get("block", 0),
+            "low_finding_count": finding_actionability_counts.get("low", 0),
+            "contextual_finding_count": finding_actionability_counts.get("contextual", 0),
+            "extensions_with_actionable_findings": extensions_with_actionable_findings,
         },
         "rule_observations": rules,
         "extensions": sorted(extension_rows, key=lambda row: (row["verdict"], row["extension_id"].lower())),
