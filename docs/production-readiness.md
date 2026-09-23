@@ -59,21 +59,28 @@ Before changing an optional real-world artifact to `gate_required=true`:
 Source snapshots and rebuilt packages must never be represented as original
 Marketplace artifacts. A missing artifact remains visible as `not_scanned`.
 
-## Next gates
+## Remaining promotion gates
 
-This first gate establishes deterministic decision invariants. Production work
-continues in this order:
+The scanner architecture and fail-closed runtime path are implemented. Public
+promotion is still a separate evidence decision and must complete all of these
+steps for one immutable scanner identity:
 
-1. finish artifact-processing worker isolation; executable source is now
-   processed sequentially, AST input is capped at 32 MiB per file, the Node
-   heap is capped at 1 GiB, and Semgrep/YARA execute with process, timeout,
-   memory, and bounded stdout/stderr boundaries;
-2. uploaded, installed, archived, and pinned-source acquisition;
-3. versioned extension classification and capability contracts;
-4. cross-file and interprocedural data flow;
-5. signature and source-to-VSIX provenance verification;
-6. OS-isolated dynamic analysis with credential canaries;
-7. expansion to held-out safe, gray, and malicious corpora.
+1. Run the privileged production workflow and prove Bubblewrap plus external
+   syscall tracing on the exact holdout artifacts.
+2. Pass the deterministic regression corpus and a fresh labelled holdout with
+   at least five known-safe and five known-malicious exact artifacts, zero
+   safe blocks, safe review rate at or below 20%, and zero malicious allows.
+3. Pass the empty-advisory behavior-only shadow replay. `REVIEW` is a valid
+   conservative quarantine result in this shadow pass; `ALLOW` is not.
+4. Verify the retained rule matrix, artifact hashes, advisory snapshot, policy,
+   ruleset, score schema, and scanner build all match exactly.
+5. Activate the immutable website release, then scan a staged registry cohort
+   and inspect its noise rate before expanding the cohort size.
+
+The scanner already includes bounded artifact-input acquisition, versioned
+capability contracts, cross-file and value-linked flows, provenance checks, and
+OS-isolated dynamic analysis. Those controls are prerequisites for the gates
+above, not evidence that the gates have passed.
 
 An AST resource skip is a required-provider failure and makes the scan
 incomplete. Raw-text and YARA coverage are not presented as equivalent to a
@@ -248,7 +255,7 @@ for exact manifest rows whose artifact hash, scanner context, and runtime
 evidence schema still match. A batch is not production-complete when required
 runtime providers are failed, skipped, or incomplete.
 
-# Current hardening increment: archive isolation
+## Artifact processing and isolation status
 
 Untrusted gzip unwrapping, ZIP-member extraction, and complete artifact hashing now execute
 outside the scanner process under explicit memory and time bounds. Inventory
@@ -257,9 +264,10 @@ symlinks are hashed as link metadata rather than followed. Archive anomalies rem
 as incomplete coverage, while worker crashes and invalid protocol responses
 abort the artifact scan. Gzip expansion additionally enforces expanded-byte and
 compression-ratio limits and replaces the downloaded input only after the
-worker returns a valid, complete response. The next reliability increment is a
-first-class artifact-input abstraction for uploaded, installed, archived, and
-pinned-source inputs with explicit provenance labels.
+worker returns a valid, complete response. The first-class artifact-input
+abstraction covers uploaded, installed, archived, and pinned-source inputs with
+explicit provenance labels; those labels remain part of the publication
+identity and are not a substitute for exact-hash verification.
 
 ## Artifact input provenance
 
