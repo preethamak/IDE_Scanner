@@ -73,7 +73,9 @@ steps for one immutable scanner identity:
 3. Pass the empty-advisory behavior-only shadow replay. `REVIEW` is a valid
    conservative quarantine result in this shadow pass; `ALLOW` is not.
 4. Verify the retained rule matrix, artifact hashes, advisory snapshot, policy,
-   ruleset, score schema, and scanner build all match exactly.
+   ruleset, score schema, and scanner build all match exactly. The production
+   and holdout evaluators support `--require-identity --expected-scanner-build`
+   so a passing gate cannot carry an unknown or stale build identity.
 5. Activate the immutable website release, then scan a staged registry cohort
    and inspect its noise rate before expanding the cohort size.
 
