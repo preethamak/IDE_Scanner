@@ -78,6 +78,45 @@ def test_production_gate_rejects_artifact_hash_mismatch(tmp_path: Path) -> None:
     assert any("artifact SHA-256 does not match" in item for item in row["violations"])
 
 
+def test_production_gate_can_require_an_exact_report_identity(tmp_path: Path) -> None:
+    corpus = load_production_corpus(CORPUS_PATH)
+    extensions = [_actual_for(item) for item in corpus["artifacts"] if item["gate_required"]]
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({
+        "scanner_build": "a" * 40,
+        "policy_version": "test-policy",
+        "ruleset_version": "test-ruleset",
+        "extensions": extensions,
+    }), encoding="utf-8")
+
+    result = evaluate_production_corpus(
+        CORPUS_PATH,
+        report,
+        require_identity=True,
+        expected_scanner_build="a" * 40,
+    )
+
+    assert result["gate"]["passed"] is True
+    assert result["gate"]["checks"]["report_identity"] is True
+
+
+def test_production_gate_rejects_placeholder_or_unexpected_report_identity(tmp_path: Path) -> None:
+    corpus = load_production_corpus(CORPUS_PATH)
+    extensions = [_actual_for(item) for item in corpus["artifacts"] if item["gate_required"]]
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"extensions": extensions}), encoding="utf-8")
+
+    result = evaluate_production_corpus(
+        CORPUS_PATH,
+        report,
+        require_identity=True,
+        expected_scanner_build="a" * 40,
+    )
+
+    assert result["gate"]["passed"] is False
+    assert result["gate"]["checks"]["report_identity"] is False
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

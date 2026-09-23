@@ -50,9 +50,16 @@ def validate_production_corpus(data: Any) -> None:
         raise ValueError("Production corpus threshold max_incomplete_required must be a non-negative integer")
 
 
-def evaluate_production_corpus(corpus_path: Path | str, report_path: Path | str) -> dict[str, Any]:
+def evaluate_production_corpus(
+    corpus_path: Path | str,
+    report_path: Path | str,
+    *,
+    require_identity: bool = False,
+    expected_scanner_build: str | None = None,
+) -> dict[str, Any]:
     corpus = load_production_corpus(corpus_path)
     report = load_report(Path(report_path))
+    report_identity = _report_identity(report)
     actual_by_identity = {
         _actual_key(item): item
         for item in report.get("extensions") or []
@@ -71,15 +78,20 @@ def evaluate_production_corpus(corpus_path: Path | str, report_path: Path | str)
         "malicious_allow_rate": summary["malicious_allow_rate"] <= thresholds["max_malicious_allow_rate"],
         "incomplete_required": summary["incomplete_required"] <= thresholds["max_incomplete_required"],
     }
+    if require_identity:
+        identity_is_complete = all(
+            report_identity[key] not in {"", "unknown", "legacy"}
+            for key in ("scanner_build", "policy_version", "ruleset_version")
+        )
+        if expected_scanner_build is not None:
+            identity_is_complete = identity_is_complete and report_identity["scanner_build"] == expected_scanner_build
+        gate_checks["report_identity"] = identity_is_complete
     gate_passed = all(gate_checks.values())
     return {
         "schema_version": PRODUCTION_CORPUS_SCHEMA_VERSION,
         "corpus_id": corpus["corpus_id"],
         "corpus_version": corpus.get("corpus_version", "unknown"),
-        "report_identity": {
-            key: report.get(key) or (report.get("metadata") or {}).get(key)
-            for key in ("scanner_build", "policy_version", "ruleset_version")
-        },
+        "report_identity": report_identity,
         "gate": {
             "passed": gate_passed,
             "checks": gate_checks,

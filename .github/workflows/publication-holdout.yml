@@ -91,6 +91,8 @@ jobs:
             --corpus benchmarks/production-corpus.json \
             --report regression-fixtures.json \
             --fail-on-regression \
+            --require-identity \
+            --expected-scanner-build "$IDE_SCANNER_BUILD_SHA" \
             --out regression-gate.json
       - name: Scan exact holdout with required runtime coverage
         env:

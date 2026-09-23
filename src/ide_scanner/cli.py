@@ -112,6 +112,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Exit non-zero when any required production gate fails.",
     )
+    benchmark_production.add_argument(
+        "--require-identity",
+        action="store_true",
+        help="Require a non-placeholder scanner build, policy, and ruleset identity in the report.",
+    )
+    benchmark_production.add_argument(
+        "--expected-scanner-build",
+        default=None,
+        help="Require the report scanner build to equal this immutable revision.",
+    )
 
     benchmark_holdout = benchmark_subparsers.add_parser(
         "holdout",
@@ -260,7 +270,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.get("status") == "ready" else 2
     if args.command == "benchmark":
         if args.benchmark_command == "production":
-            result = evaluate_production_corpus(args.corpus, args.report)
+            result = evaluate_production_corpus(
+                args.corpus,
+                args.report,
+                require_identity=args.require_identity,
+                expected_scanner_build=args.expected_scanner_build,
+            )
             _emit(result, args.output)
             return 1 if args.fail_on_regression and not result["gate"]["passed"] else 0
         if args.benchmark_command == "holdout":

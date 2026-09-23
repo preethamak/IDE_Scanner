@@ -204,11 +204,15 @@ jobs:
           print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"]}))
           PY
       - name: Enforce production corpus invariants
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
         run: |
           python -m ide_scanner benchmark production \
             --corpus benchmarks/production-corpus.json \
             --report production-fixtures.json \
             --fail-on-regression \
+            --require-identity \
+            --expected-scanner-build "$IDE_SCANNER_BUILD_SHA" \
             --out production-gate.json
       - name: Scan exact vulnerability calibration input
         env:
