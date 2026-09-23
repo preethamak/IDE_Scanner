@@ -125,3 +125,18 @@ but it does not establish false-negative or malicious-detection rates because
 the cohort has no independent labels and has no runtime evidence. The timeout,
 provider failures, and missing entrypoints remain visible and ineligible for
 public publication.
+
+The same cohort was rerun again under scanner build
+`0545b58a3d5794ce685459f62e433b22fb65ee73` after making credential input an
+expected capability for coding-agent extensions. That run produced 135
+`allow`, 3 `review`, and 8 `incomplete` decisions. The review decisions were
+`mcpspend.mcpspend-vscode`, `pdragon.azure-rbs-workbench`, and `devoszhang.uix`.
+Both agentic contract-only reviews from the prior run—`northLo.penny-vscode`
+and `mcpbundles.mcpbundles-remote-browser`—became `allow`/`clean`; their
+credential surfaces remain visible as contextual or low-actionability findings.
+The two suspicious correlated chains were unchanged.
+
+Four of the eight incomplete results were isolated 180-second worker
+timeouts, demonstrating why the corpus runner quarantines resource-heavy
+artifacts instead of publishing a partial clean result. This run is therefore
+useful for routing calibration, not a claim that all 146 artifacts completed.
