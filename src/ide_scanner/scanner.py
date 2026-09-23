@@ -4745,8 +4745,6 @@ def _enforce_extension_resource_budget(path: Path) -> None:
                     "Artifact exceeds scan resource budget: "
                     f"{total_bytes} bytes > {MAX_EXTENSION_BYTES}"
                 )
-
-
 def _declared_entrypoints(manifest: dict[str, Any], path: Path) -> tuple[set[str], list[str]]:
     entrypoints: set[str] = set()
     optional_missing: list[str] = []

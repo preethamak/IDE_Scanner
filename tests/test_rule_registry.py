@@ -28,7 +28,6 @@ class RuleRegistryTests(unittest.TestCase):
             "EXPOSURE_RULES",
         ):
             self.assertFalse(set(getattr(scanner, name)) - registered, name)
-
     def test_runtime_rules_are_published_as_dynamic_sandbox_rules(self) -> None:
         rules = {rule.rule_id: rule for rule in rule_registry()}
         self.assertEqual(rules["runtime-network-attempt"].engine, "dynamic-sandbox")
