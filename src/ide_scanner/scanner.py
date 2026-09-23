@@ -3253,7 +3253,17 @@ def _has_environment_data_network_flow(text: str) -> dict[str, Any] | None:
         if not sink:
             continue
         sink_tail = tail[sink.start():min(len(tail), sink.start() + 1800)]
-        if not re.search(rf"\b{re.escape(variable)}\b", sink_tail):
+        variable_ref = rf"\b{re.escape(variable)}\b"
+        if not re.search(
+            rf"(?:"
+            rf"(?:body|data|payload|params|query|searchParams)\s*:\s*(?:JSON\.stringify\s*\(\s*|encodeURIComponent\s*\(\s*)?{variable_ref}"
+            rf"|(?:end|write|send|post)\s*\(\s*(?:JSON\.stringify\s*\(\s*)?{variable_ref}"
+            rf"|(?:JSON\.stringify|encodeURIComponent)\s*\(\s*{variable_ref}"
+            rf"|(?:[?&][^;\n]{{0,120}}\+\s*|\+\s*){variable_ref}"
+            rf")",
+            sink_tail,
+            re.I,
+        ):
             continue
         return {
             "correlation": "same-variable-local-flow",
@@ -3273,11 +3283,12 @@ def _has_environment_data_network_flow(text: str) -> dict[str, Any] | None:
         if not collection:
             continue
         if not re.search(
-            r"(?:JSON\.stringify|Object\.(?:keys|entries|assign)|\.\.\.)[^;\n]{0,500}\bprocess\.env\b(?!\s*\.)",
-            context,
-            re.I,
-        ) and not re.search(
-            r"(?:body|data|payload|params|query|searchParams)\s*:[^;\n]{0,500}\bprocess\.env\b(?!\s*\.)",
+            r"(?:"
+            r"(?:body|data|payload|params|query|searchParams)\s*:\s*(?:JSON\.stringify\s*\(\s*|encodeURIComponent\s*\(\s*)?\bprocess\.env\b(?!\s*\.)"
+            r"|(?:end|write|send|post)\s*\(\s*(?:JSON\.stringify\s*\(\s*)?\bprocess\.env\b(?!\s*\.)"
+            r"|(?:JSON\.stringify|encodeURIComponent)\s*\(\s*\bprocess\.env\b(?!\s*\.)"
+            r"|(?:[?&][^;\n]{0,120}\+\s*|\+\s*)\bprocess\.env\b(?!\s*\.)"
+            r")",
             context,
             re.I,
         ):

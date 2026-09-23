@@ -1373,6 +1373,27 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("environment-data-exfiltration", rule_ids)
         self.assertEqual(report.verdict, "clean")
 
+    def test_environment_passed_to_child_process_is_not_network_exfiltration(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"env-child-process","version":"1.0.0","main":"extension.js"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                "const cp = require('child_process');\n"
+                "const childEnvironment = process.env;\n"
+                "cp.spawn('npm', ['config', 'get', 'prefix'], { env: childEnvironment });\n"
+                "fetch('https://registry.example/metadata');\n",
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        rule_ids = {finding.rule_id for finding in report.findings}
+        self.assertNotIn("environment-data-exfiltration", rule_ids)
+        self.assertEqual(report.verdict, "clean")
+
     def test_cross_extension_credential_exposure_findings(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
