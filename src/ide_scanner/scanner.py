@@ -3915,6 +3915,10 @@ def _observation_kinds(
 def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str, Any]) -> None:
     metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
     observations = bundle.get("extensions") if isinstance(bundle.get("extensions"), dict) else {}
+    runtime_runs = [
+        item for item in (metadata.get("runtime_runs") or [])
+        if isinstance(item, dict)
+    ]
     status = str(metadata.get("status") or "not-requested")
     required_ids = {str(item).lower() for item in metadata.get("runtime_required_ids", []) if str(item)}
     required_instances = {str(item) for item in metadata.get("runtime_required_instances", []) if str(item)}
@@ -3928,20 +3932,45 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
         provider_status = status
         execution = str(metadata.get("execution") or "not-run")
         executed = bool(metadata.get("executed"))
-        if metadata.get("runtime_policy") == "capability-gated-v1" and not required:
-            provider_status = "not-applicable"
-            execution = "policy-gated"
-            executed = False
-        elif required and provider_status == "executed":
-            # Runtime execution is a completed provider outcome. Keep the
-            # execution mode in the evidence, but use the canonical provider
-            # status vocabulary so coverage finalization does not downgrade a
-            # successfully executed capability-gated run to incomplete.
-            provider_status = "completed"
+        runtime_run = next(
+            (
+                item for item in runtime_runs
+                if str(item.get("instance_id") or "") == instance_key
+            ),
+            None,
+        )
+        if runtime_run is None and not required_instances:
+            matching_runs = [
+                item for item in runtime_runs
+                if str(item.get("extension_id") or "").lower() == extension.extension_id.lower()
+            ]
+            if len(matching_runs) == 1:
+                runtime_run = matching_runs[0]
         error_count = sum(
             1 for item in items
             if isinstance(item, dict) and str(item.get("kind") or "") in {"runtime_timeout", "sandbox_error"}
         ) if isinstance(items, list) else 0
+        if metadata.get("runtime_policy") == "capability-gated-v1" and not required:
+            provider_status = "not-applicable"
+            execution = "policy-gated"
+            executed = False
+        elif required:
+            # Aggregate metadata and observations are not enough to establish
+            # coverage. Require the exact per-artifact run receipt as well, so
+            # a truncated/malformed runtime bundle cannot turn into a green
+            # provider merely because it contains no explicit sandbox_error.
+            run_status = str(runtime_run.get("status") or "") if runtime_run else "missing"
+            run_trace = bool(runtime_run and runtime_run.get("external_syscall_trace") is True)
+            if provider_status in {"executed", "completed"} and run_status == "completed" and run_trace:
+                provider_status = "completed"
+            else:
+                provider_status = "failed"
+                if not error_count:
+                    error_count = 1
+        if required and runtime_run is not None and str(runtime_run.get("status") or "") != "completed":
+            error_count = max(error_count, 1)
+        if required and runtime_run is None:
+            error_count = max(error_count, 1)
         if required and error_count:
             provider_status = "failed"
         provider = {
@@ -3962,11 +3991,15 @@ def _apply_sandbox_provider(extensions: list[ExtensionReport], bundle: dict[str,
             "external_syscall_trace": bool(
                 required
                 and metadata.get("external_syscall_trace") is True
+                and runtime_run is not None
+                and runtime_run.get("status") == "completed"
+                and runtime_run.get("external_syscall_trace") is True
                 and error_count == 0
             ),
             "external_syscall_trace_available": bool(
                 metadata.get("external_syscall_trace_available") is True
             ),
+            "runtime_run_status": str(runtime_run.get("status") or "missing") if runtime_run else "missing",
         }
         extension.analysis_coverage.setdefault("providers", {})["dynamic_sandbox"] = provider
         if required:

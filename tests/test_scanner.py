@@ -702,6 +702,7 @@ class ScannerTests(unittest.TestCase):
     def test_executed_runtime_provider_counts_as_completed_coverage(self) -> None:
         extension = MagicMock()
         extension.extension_id = "publisher.extension"
+        extension.instance_id = "publisher.extension@1.0.0"
         extension.analysis_coverage = {"providers": {}}
         _apply_sandbox_provider(
             [extension],
@@ -713,7 +714,13 @@ class ScannerTests(unittest.TestCase):
                     "executed": True,
                     "external_syscall_trace": True,
                     "runtime_policy": "capability-gated-v1",
-                    "runtime_required_ids": ["publisher.extension"],
+                    "runtime_required_instances": ["publisher.extension@1.0.0"],
+                    "runtime_runs": [{
+                        "instance_id": "publisher.extension@1.0.0",
+                        "extension_id": "publisher.extension",
+                        "status": "completed",
+                        "external_syscall_trace": True,
+                    }],
                 },
                 "extensions": {"publisher.extension": []},
             },
@@ -722,6 +729,65 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(provider["status"], "completed")
         self.assertTrue(provider["executed"])
         self.assertTrue(provider["external_syscall_trace"])
+        self.assertEqual(provider["runtime_run_status"], "completed")
+
+    def test_required_runtime_provider_fails_when_exact_run_receipt_is_missing(self) -> None:
+        extension = MagicMock()
+        extension.extension_id = "publisher.extension"
+        extension.instance_id = "publisher.extension@1.0.0"
+        extension.analysis_coverage = {"providers": {}}
+        _apply_sandbox_provider(
+            [extension],
+            {
+                "metadata": {
+                    "status": "executed",
+                    "mode": "executed",
+                    "execution": "controlled-bubblewrap",
+                    "executed": True,
+                    "external_syscall_trace": True,
+                    "external_syscall_trace_available": True,
+                    "runtime_policy": "capability-gated-v1",
+                    "runtime_required_instances": ["publisher.extension@1.0.0"],
+                    "runtime_runs": [],
+                },
+                "extensions": {"publisher.extension@1.0.0": []},
+            },
+        )
+        provider = extension.analysis_coverage["providers"]["dynamic_sandbox"]
+        self.assertEqual(provider["status"], "failed")
+        self.assertEqual(provider["runtime_run_status"], "missing")
+        self.assertFalse(provider["external_syscall_trace"])
+
+    def test_required_runtime_provider_fails_when_run_receipt_is_not_complete(self) -> None:
+        extension = MagicMock()
+        extension.extension_id = "publisher.extension"
+        extension.instance_id = "publisher.extension@1.0.0"
+        extension.analysis_coverage = {"providers": {}}
+        _apply_sandbox_provider(
+            [extension],
+            {
+                "metadata": {
+                    "status": "executed",
+                    "mode": "executed",
+                    "execution": "controlled-bubblewrap",
+                    "executed": True,
+                    "external_syscall_trace": True,
+                    "external_syscall_trace_available": True,
+                    "runtime_policy": "capability-gated-v1",
+                    "runtime_required_instances": ["publisher.extension@1.0.0"],
+                    "runtime_runs": [{
+                        "instance_id": "publisher.extension@1.0.0",
+                        "extension_id": "publisher.extension",
+                        "status": "failed",
+                        "external_syscall_trace": True,
+                    }],
+                },
+                "extensions": {"publisher.extension@1.0.0": []},
+            },
+        )
+        provider = extension.analysis_coverage["providers"]["dynamic_sandbox"]
+        self.assertEqual(provider["status"], "failed")
+        self.assertEqual(provider["runtime_run_status"], "failed")
 
     def test_runtime_evidence_does_not_collide_for_duplicate_installations(self) -> None:
         first = MagicMock()
