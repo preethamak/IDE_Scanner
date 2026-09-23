@@ -55,7 +55,7 @@ replaced by an empty snapshot. The scanner still returned:
   environment-file references
 
 The behavior-only replay used scanner engine revision
-`bd8193fdaa91a26e3da3a542a6712d536b814ad9`, policy `3.1.0-calibration.7`,
+`e37389ce1e8d8c51a341465688d8efc4ade386b0`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`.
 The local replay completed with 100% required-provider coverage against the
 exact VSIX under that scanner identity. The privileged publication holdout
