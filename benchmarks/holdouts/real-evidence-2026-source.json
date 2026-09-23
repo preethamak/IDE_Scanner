@@ -1,11 +1,11 @@
 {
   "schema_version": "guardrails.holdout-source.v1",
   "corpus_id": "guardrails-real-evidence-2026",
-  "corpus_version": "2026.09.22.2",
+  "corpus_version": "2026.09.24.1",
   "holdout": {
     "status": "fresh-labeled",
     "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisories, MalwareBazaar sample records, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
-    "frozen_at": "2026-09-22T23:08:11Z"
+    "frozen_at": "2026-09-24T00:00:00Z"
   },
   "advisory_snapshot": {
     "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
@@ -101,6 +101,24 @@
         "version": "4.0.37",
         "artifact_sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
         "advisory_id": "KNOSTIC-BCAI-2026-4.0.37"
+      }
+    },
+    {
+      "extension_id": "NoahBit.api-reactor",
+      "version": "0.0.1",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/NoahBit/vsextensions/api-reactor/0.0.1/vspackage",
+      "sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/the-source-looked-clean-the-binary-wasnt?hs_amp=true",
+        "source_secondary_url": "https://agentmesh.knostic.ai/extensions/130339",
+        "retrieved_at": "2026-09-24T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "NoahBit.api-reactor",
+        "version": "0.0.1",
+        "artifact_sha256": "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c",
+        "advisory_id": "KNOSTIC-API-REACTOR-2026-0.0.1"
       }
     },
     {
