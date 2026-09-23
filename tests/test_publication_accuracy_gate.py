@@ -174,6 +174,7 @@ def holdout_gate() -> dict:
                     "required_providers_complete": True,
                     "required": True,
                     "provider_status": "completed",
+                    "runtime_run_status": "completed",
                     "execution": "controlled-bubblewrap",
                     "runtime_policy": "capability-gated-v1",
                     "executed": True,

@@ -585,6 +585,7 @@ def _runtime_contract_errors(contract: dict[str, Any]) -> list[str]:
     if contract["required"]:
         expected = {
             "provider_status": "completed",
+            "runtime_run_status": "completed",
             "execution": "controlled-bubblewrap",
             "runtime_policy": "capability-gated-v1",
             "executed": True,

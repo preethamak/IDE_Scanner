@@ -146,6 +146,19 @@ class HoldoutBenchmarkTests(unittest.TestCase):
         self.assertFalse(result["gate"]["passed"])
         self.assertTrue(any("external_syscall_trace" in item for item in result["artifacts"][1]["violations"]))
 
+    def test_holdout_fails_when_required_runtime_receipt_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._report()
+            del report["extensions"][1]["analysis_coverage"]["providers"]["dynamic_sandbox"]["runtime_run_status"]
+            result = evaluate_holdout_corpus(
+                self._write(root, "corpus.json", self._corpus()),
+                self._write(root, "report.json", report),
+            )
+
+        self.assertFalse(result["gate"]["passed"])
+        self.assertTrue(any("runtime_run_status" in item for item in result["artifacts"][1]["violations"]))
+
     def test_holdout_fails_when_runtime_required_flag_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -235,6 +248,7 @@ class HoldoutBenchmarkTests(unittest.TestCase):
                     "providers": {"dynamic_sandbox": {
                         "required": True,
                         "status": "completed",
+                        "runtime_run_status": "completed",
                         "execution": "controlled-bubblewrap",
                         "policy": "capability-gated-v1",
                         "executed": True,

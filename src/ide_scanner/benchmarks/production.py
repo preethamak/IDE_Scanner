@@ -321,6 +321,7 @@ def _runtime_contract(actual: dict[str, Any]) -> dict[str, Any]:
         # not-applicable coverage.
         "required": provider.get("required") if isinstance(provider.get("required"), bool) else None,
         "provider_status": str(provider.get("status") or ""),
+        "runtime_run_status": str(provider.get("runtime_run_status") or ""),
         "execution": str(provider.get("execution") or ""),
         "runtime_policy": str(provider.get("policy") or ""),
         "executed": provider.get("executed") is True,
@@ -334,6 +335,7 @@ def _runtime_contract_violations(contract: dict[str, Any]) -> list[str]:
     if contract.get("required") is True:
         expected = {
             "provider_status": "completed",
+            "runtime_run_status": "completed",
             "execution": "controlled-bubblewrap",
             "runtime_policy": "capability-gated-v1",
             "executed": True,
