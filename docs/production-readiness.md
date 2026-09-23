@@ -96,7 +96,7 @@ CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-On 2026-09-24, the complete scanner suite passed with 567 tests, 3 skips, and
+On 2026-09-24, the complete scanner suite passed with 568 tests, 3 skips, and
 8 subtests. The synchronized CLI suite passed with 69 tests and 5 subtests.
 The real-artifact calibration suite passed with 20 tests, 1 skip, and 5
 subtests. These are regression and reproducibility checks; they do not replace
