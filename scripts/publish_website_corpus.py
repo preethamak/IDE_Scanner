@@ -39,7 +39,7 @@ def main() -> int:
     published = {} if args.include_published else published_artifacts(args.publication_url, required_build)
     pending = rows_to_dispatch(rows, published)
     for row in pending:
-        command = workflow_command(row)
+        command = workflow_command(row, scanner_build=current_build)
         if args.dry_run:
             print(f"Would dispatch {row['extension_id']}@{row['version']}")
         else:
@@ -72,12 +72,15 @@ def artifact_key(extension_id: object, version: object) -> str:
     return f"{str(extension_id).lower()}@{version}"
 
 
-def workflow_command(row: dict[str, Any]) -> list[str]:
+def workflow_command(row: dict[str, Any], *, scanner_build: str) -> list[str]:
+    if len(scanner_build) != 40 or any(character not in "0123456789abcdef" for character in scanner_build.lower()):
+        raise ValueError("scanner_build must be a full 40-character Git commit SHA")
     command = [
         "gh", "workflow", "run", "deep-scan.yml", "--ref", "main",
         "-f", f"extension_id={row['extension_id']}",
         "-f", f"version={row['version']}",
         "-f", "scan_purpose=public_intelligence",
+        "-f", f"scanner_build={scanner_build}",
     ]
     target_platform = str(row.get("target_platform") or "").strip()
     if target_platform:

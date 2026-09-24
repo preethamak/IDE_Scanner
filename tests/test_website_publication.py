@@ -52,9 +52,14 @@ class WebsitePublicationTests(unittest.TestCase):
             "extension_id": "ms-python.python",
             "version": "1.2.3",
             "target_platform": "darwin-x64",
-        })
+        }, scanner_build="a" * 40)
 
         self.assertIn("target_platform=darwin-x64", command)
+        self.assertIn(f"scanner_build={'a' * 40}", command)
+
+    def test_dispatch_rejects_non_immutable_scanner_build(self) -> None:
+        with self.assertRaises(ValueError):
+            workflow_command({"extension_id": "publisher.one", "version": "1.0.0"}, scanner_build="main")
 
     def test_validator_compares_exact_hash_decision_coverage_and_schema(self) -> None:
         expected = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "review"}]
