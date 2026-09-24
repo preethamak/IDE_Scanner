@@ -79,6 +79,7 @@ _SANDBOX_SETUP_DEVICE_PATHS = frozenset({
 _SANDBOX_BOOTSTRAP_EXECUTABLES = frozenset({
     "/usr/bin/sudo",
     "/usr/bin/bwrap",
+    "/usr/bin/strace",
 })
 _RUNTIME_QUERY_SECRET_RE = re.compile(
     r"(?i)([?&](?:access[_-]?token|api[_-]?key|auth(?:orization)?|code|key|password|passwd|secret|sig(?:nature)?|token)=)[^&#\s]+"
@@ -1717,7 +1718,7 @@ def _external_trace_observations(
                 "api": f"strace.{syscall}",
             })
         elif syscall in {"execve", "execveat"}:
-            if path in _SANDBOX_BOOTSTRAP_EXECUTABLES:
+            if _is_sandbox_bootstrap_exec(line, path):
                 continue
             observations.append({
                 "kind": "process_exec",
@@ -1735,6 +1736,23 @@ def _external_trace_observations(
                 "api": f"strace.{syscall}",
             })
     return _dedupe_observations(observations), True
+
+
+def _is_sandbox_bootstrap_exec(line: str, path: str) -> bool:
+    """Exclude scanner-owned launches while retaining extension children.
+
+    The external tracer observes the complete parent-owned command, including
+    Bubblewrap, the tracer/privilege wrapper, and the instrumented activation
+    runner's Node process. Those launches are required to run the scan and are
+    not extension behavior. Do not blanket-ignore shells or Node: an
+    extension-spawned child must remain observable. The argument marker below
+    identifies only the scanner-owned activation runner.
+    """
+    if path in _SANDBOX_BOOTSTRAP_EXECUTABLES:
+        return True
+    if Path(path).name != "node":
+        return False
+    return "/runner/activate-entrypoint.js" in line
 
 
 def _is_sandbox_setup_path(path: str) -> bool:

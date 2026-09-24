@@ -4025,6 +4025,27 @@ class ScannerTests(unittest.TestCase):
             "api": "strace.openat",
         }])
 
+    def test_external_syscall_trace_filters_harness_execs_but_keeps_extension_children(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 execve("/usr/bin/strace", ["strace"], 0x0) = 0\n'
+                '123 execve("/usr/bin/bwrap", ["bwrap"], 0x0) = 0\n'
+                '123 execve("/usr/local/bin/node", ["node", "/runner/activate-entrypoint.js"], 0x0) = 0\n'
+                '124 execve("/usr/local/bin/node", ["node", "/target/language-server.js"], 0x0) = 0\n'
+                '125 execve("/usr/bin/curl", ["curl", "https://example.invalid"], 0x0) = 0\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(result, [])
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            [item["command"] for item in observations if item["kind"] == "process_exec"],
+            ["/usr/local/bin/node", "/usr/bin/curl"],
+        )
+
     def test_external_syscall_trace_wraps_bubblewrap_when_requested(self) -> None:
         completed = subprocess.CompletedProcess(["strace"], 0, "", "")
         which = lambda name: "/usr/bin/bwrap" if name == "bwrap" else "/usr/bin/strace"
