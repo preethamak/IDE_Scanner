@@ -3945,7 +3945,7 @@ class ScannerTests(unittest.TestCase):
             trace = Path(tmp) / "runtime.strace"
             trace.write_text(
                 '123 openat(AT_FDCWD, "/home/guardrails/.aws/credentials", O_RDONLY) = 3\n'
-                '123 connect(3, {sa_family=AF_INET}, 16) = -1 EPERM\n'
+                '123 connect(3, {sa_family=AF_INET, sin_addr=inet_addr("203.0.113.7")}, 16) = -1 EPERM\n'
                 '123 execve("/bin/sh", ["sh"], 0x0) = 0\n'
                 '123 unlink("/home/guardrails/.probe") = 0\n',
                 encoding="utf-8",
@@ -3963,6 +3963,26 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("network_attempt", kinds)
         self.assertIn("process_exec", kinds)
         self.assertIn("filesystem_write", kinds)
+
+    def test_external_syscall_trace_ignores_unnamed_kernel_network_control(self) -> None:
+        with TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "runtime.strace"
+            trace.write_text(
+                '123 connect(3, {sa_family=AF_NETLINK}, 12) = 0\n'
+                '123 sendto(3, "setup", 5, 0, {sa_family=AF_UNSPEC}, 16) = 5\n'
+                '123 connect(4, {sa_family=AF_UNIX, sun_path="/run/extension.sock"}, 24) = -1 ECONNREFUSED\n',
+                encoding="utf-8",
+            )
+            result = subprocess.CompletedProcess(["strace"], 0, "", "")
+            setattr(result, "_guardrails_external_trace_prefix", str(trace))
+            observations, valid = _external_trace_observations(result, [])
+
+        self.assertTrue(valid)
+        self.assertEqual(observations, [{
+            "kind": "network_attempt",
+            "destination": "/run/extension.sock",
+            "api": "strace.connect",
+        }])
 
     def test_external_syscall_trace_ignores_bubblewrap_setup_paths(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -1704,9 +1704,16 @@ def _external_trace_observations(
                     "api": f"strace.{syscall}",
                 })
         elif syscall in {"connect", "sendto", "sendmsg", "sendmmsg", "bind"}:
+            destination = _strace_network_destination(line)
+            # Bubblewrap and the host runtime use netlink/unspecified sockets
+            # while constructing the isolated namespace. Without an explicit
+            # address, those syscalls are infrastructure evidence rather than
+            # proof that the extension attempted a network operation.
+            if not destination:
+                continue
             observations.append({
                 "kind": "network_attempt",
-                "destination": "external-syscall",
+                "destination": destination,
                 "api": f"strace.{syscall}",
             })
         elif syscall in {"execve", "execveat"}:
@@ -1743,6 +1750,29 @@ def _is_sandbox_setup_path(path: str) -> bool:
         any(normalized.startswith(prefix) for prefix in _SANDBOX_SETUP_PATH_PREFIXES)
         or normalized in _SANDBOX_SETUP_DEVICE_PATHS
     )
+
+
+def _strace_network_destination(line: str) -> str | None:
+    """Extract a real socket destination from an external syscall line.
+
+    Strace emits kernel-control traffic with ``AF_NETLINK`` or ``AF_UNSPEC``
+    and no application destination. Returning ``None`` for those records keeps
+    namespace setup out of the extension's behavioral evidence. For real
+    sockets, retain the bounded address/path so reports explain what was
+    attempted rather than emitting the opaque ``external-syscall`` token.
+    """
+    if re.search(r"\b(?:AF_NETLINK|AF_UNSPEC)\b", line):
+        return None
+    match = re.search(r'inet_addr\("([^"\\]*(?:\\.[^"\\]*)*)"\)', line)
+    if match:
+        return match.group(1)
+    match = re.search(r'inet_pton\([^,]+,\s*"([^"\\]*(?:\\.[^"\\]*)*)"\)', line)
+    if match:
+        return match.group(1)
+    match = re.search(r'sun_path="([^"\\]*(?:\\.[^"\\]*)*)"', line)
+    if match:
+        return match.group(1)
+    return None
 
 
 def _first_strace_string(line: str) -> str:
