@@ -1,8 +1,7 @@
 # Exact-byte retention note
 
-`dracula-theme.theme-dracula@2.25.1` is excluded from the publishable accuracy
-holdout because the current Marketplace response no longer matches the pinned
-digest used by the independent exact-artifact review. The original bytes are not
-retained in this repository. It can return to the holdout after the reviewed
-VSIX is stored in the private artifact vault; until then, the current response is
-not represented as the reviewed artifact.
+`dracula-theme.theme-dracula@2.25.1` is retained from the Open VSX exact artifact
+at SHA-256
+`f4d8c28fc64874b1b959cc90dbd39c84d5d35c9cf203e32b7a758dc9abf5b1cb`. The older
+Marketplace URL was excluded because its response did not match the previous
+digest; it is not used as the source for this frozen holdout row.
