@@ -109,6 +109,12 @@ class WebsitePublicationTests(unittest.TestCase):
         self.assertEqual(result["awaiting"], ["publisher.two@2.0.0"])
         self.assertEqual({item["field"] for item in result["mismatches"]}, {"decision", "coverage", "score_schema", "policy_version", "ruleset_version", "scanner_build", "analysis_status", "coverage_status", "required_providers_complete", "executable_file_coverage"})
 
+    def test_validator_can_bind_rows_to_exact_scanner_build(self) -> None:
+        expected = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "allow"}]
+        actual = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "scan": {"decision": "allow", "coverage_percent": 100, "score_schema_version": "2", "analysis_status": "complete", "analysis_coverage_status": "complete", "required_providers_complete": True, "executable_file_coverage_percent": 100, "scanner_build": "old-build", "policy_version": "policy", "ruleset_version": "rules"}}]
+        result = validate_rows(expected, actual, required_scanner_build="current-build")
+        self.assertEqual(result["mismatches"], [{"artifact": "publisher.one@1.0.0", "field": "scanner_build", "expected": "current-build", "actual": "old-build"}])
+
     def test_full_coverage_does_not_hide_incomplete_analysis(self) -> None:
         scan = {
             "score_schema_version": "2",
