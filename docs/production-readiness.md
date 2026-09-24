@@ -85,9 +85,8 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun against the current scanner
-release tree with build
-`c1dd9bfe26e42a1f7b243cd56fdc22fa668dea40` and passed its identity-bound
-regression checks. All 8 required corpus artifacts were complete, both
+release tree with the exact build identity supplied to the command and passed
+its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required
 known-malicious artifacts were blocked; 5 optional backlog artifacts remained
 explicitly unscanned. The report identity was policy `3.1.0-calibration.7` and
