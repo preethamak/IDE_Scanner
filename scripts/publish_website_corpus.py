@@ -10,7 +10,7 @@ from typing import Any
 
 
 DEFAULT_RESULTS = Path("benchmarks/website-corpus/v1/results.json")
-DEFAULT_PUBLICATION_URL = "https://ide-scanner.vercel.app/api/benchmark"
+DEFAULT_PUBLICATION_URL = "https://abscissa.dev/api/benchmark"
 
 
 def main() -> int:

@@ -11,7 +11,7 @@ from typing import Any
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate frozen website-corpus expectations against published canonical scans.")
     parser.add_argument("--results", type=Path, default=Path("benchmarks/website-corpus/v1/results.json"))
-    parser.add_argument("--publication-url", default="https://ide-scanner.vercel.app/api/benchmark")
+    parser.add_argument("--publication-url", default="https://abscissa.dev/api/benchmark")
     parser.add_argument("--scanner-build", help="Exact scanner commit expected in every published row; defaults to local HEAD.")
     args = parser.parse_args()
     expected = json.loads(args.results.read_text(encoding="utf-8")).get("rows") or []

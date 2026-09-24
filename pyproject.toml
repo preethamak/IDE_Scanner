@@ -27,7 +27,7 @@ yara = ["yara-python==4.5.4"]
 analysis = ["semgrep==1.164.0", "yara-python==4.5.4"]
 
 [project.urls]
-Website = "https://ide-scanner.vercel.app"
+Website = "https://abscissa.dev"
 
 [tool.setuptools.packages.find]
 where = ["src"]

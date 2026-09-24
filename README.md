@@ -32,7 +32,7 @@ guardrails scan --file extension.vsix --runtime --format json --output report.js
 guardrails scan --file extension.vsix --profile deep --runtime --format zip --output report.zip
 ```
 
-Website: [ide-scanner.vercel.app](https://ide-scanner.vercel.app)
+Website: [abscissa.dev](https://abscissa.dev)
 
 ## License
 

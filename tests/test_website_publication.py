@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.publish_website_corpus import (
+    DEFAULT_PUBLICATION_URL,
     github_repository_full_name,
     publication_scan_is_complete,
     published_artifacts,
@@ -17,6 +18,9 @@ from scripts.validate_website_publication import validate_rows
 
 
 class WebsitePublicationTests(unittest.TestCase):
+    def test_publication_defaults_to_cloudflare_production_surface(self) -> None:
+        self.assertEqual(DEFAULT_PUBLICATION_URL, "https://abscissa.dev/api/benchmark")
+
     def test_dispatch_skips_only_same_hash_publication(self) -> None:
         rows = [
             {"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64},
