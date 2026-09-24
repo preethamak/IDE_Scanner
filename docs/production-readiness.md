@@ -85,23 +85,25 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The recorded local deterministic gate was run against scanner build
-`98afbaf6a30712d1757c74dc3e9e0b25ad765763` with the exact build identity
-supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
-known-safe controls were allowed without review, and all 4 required
-known-malicious artifacts were blocked; 5 optional backlog artifacts remained
-explicitly unscanned. The report identity was policy `3.1.0-calibration.7` and
+`c0d396cb351b50de6e38c6deb7fc3250f5587707` with the exact build identity
+supplied to the command and passed its identity-bound regression checks. All 8
+required corpus artifacts were complete, both known-safe controls were allowed
+without review, and all 4 required known-malicious artifacts were blocked; 5
+optional backlog artifacts remained explicitly unscanned. The report identity
+was policy `3.1.0-calibration.7` and
 ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`. The
 vendored CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-The current local release also passes the scanner's exercised unit, integration,
-publication, runtime-contract, corpus, and scanner suites; the synchronized CLI
-parity suite passes with 69 tests and 5 subtests. A six-artifact retained
-real-world calibration against this build found 5 known-safe and 1
-independently reported malicious artifact, with zero safe reviews/blocks, zero
-malicious misses, and zero known-safe actionable rule observations. The local
-checkout does not contain the remaining frozen holdout bytes, so this is useful
+The current local release passes the changed-path runtime and publication
+checks, and the synchronized CLI parity suite passes with 69 tests and 5
+subtests. The current exact-artifact calibration also passes the five retained
+known-safe controls and the independently reported BCAI Rosetta artifact; the
+Code Runner CVE control remains skipped because its exact VSIX is not provisioned
+in this checkout. The full scanner suite has not been completed in the current
+workstation run, so it must not be described as fully green. The local checkout
+does not contain the remaining frozen holdout bytes, so this is useful
 calibration evidence but not the required privileged deep holdout or an
 ecosystem-wide precision/recall claim.
 
@@ -112,8 +114,8 @@ counts without suppressing extension-spawned process evidence; the behavior is
 covered by a dedicated regression test and is vendored into the CLI at the same
 immutable scanner revision.
 
-Earlier targeted production-trust/workflow checks passed 79 tests, and the
-exact real-artifact calibration passed 6 tests with 1 artifact-dependent skip
+Earlier targeted production-trust/workflow checks passed 79 tests. The current
+exact real-artifact calibration passed 3 tests with 1 artifact-dependent skip
 and 5 safe-control subtests. These are regression and reproducibility checks;
 they do not replace the fresh labelled holdout or prove ecosystem-wide precision
 and recall.
