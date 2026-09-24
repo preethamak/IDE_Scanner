@@ -109,8 +109,6 @@ exact real-artifact calibration passed 6 tests with 1 artifact-dependent skip
 and 5 safe-control subtests. These are regression and reproducibility checks;
 they do not replace the fresh labelled holdout or prove ecosystem-wide precision
 and recall.
-These are regression and reproducibility checks; they do not replace the fresh
-labelled holdout or prove ecosystem-wide precision and recall.
 
 A separate 146-artifact cohort replay from the earlier calibration pass is
 diagnostic evidence, not a public accuracy claim. It produced 135 complete
