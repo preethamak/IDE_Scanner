@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -49,6 +50,7 @@ from ide_scanner.scanner import (
     _aggregate_sandbox_observations,
     _dedupe_findings,
     _find_sensitive_api_text,
+    _aliased_process_execution,
     _is_generated_code_blob,
     _load_known_bad_hashes,
     _load_threat_feed,
@@ -3407,6 +3409,25 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("process-execution", rule_ids)
         self.assertIn("dynamic-shell-execution", rule_ids)
         self.assertIn("download-and-execute", rule_ids)
+
+    def test_namespace_process_alias_detection_is_bounded_for_generated_bundles(self) -> None:
+        # Large transpiled bundles can contain many namespace aliases. The
+        # alias resolver must not rescan the entire bundle once per alias and
+        # once per method, or a normal extension becomes a multi-minute scan.
+        source = "".join(
+            f'const child_process_{index} = require("child_process");'
+            for index in range(96)
+        )
+        source += "const filler = " + repr("x" * 1_000_000) + ";"
+        source += "(0, child_process_95.execFile)(command);"
+
+        started = time.monotonic()
+        process_pattern, methods = _aliased_process_execution(source)
+        elapsed = time.monotonic() - started
+
+        self.assertIsNotNone(process_pattern)
+        self.assertEqual(methods, {"execFile"})
+        self.assertLess(elapsed, 5.0)
 
     def test_transpiled_base64_startup_command_chain_is_detected(self) -> None:
         """Keep the reported remote-text-fetcher behavior pattern covered."""

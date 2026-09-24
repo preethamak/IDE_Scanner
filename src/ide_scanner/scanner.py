@@ -2964,21 +2964,39 @@ def _aliased_process_execution(text: str) -> tuple[re.Pattern[str] | None, set[s
 
     patterns: list[str] = []
     called_methods: set[str] = set()
-    called = {alias: method for alias, method in aliases.items() if re.search(rf"\b{re.escape(alias)}\s*\(", text)}
+    # A generated bundle can contain dozens of transpiler aliases. Searching the
+    # whole source once per alias and once per method made this helper quadratic
+    # in practice (and could turn a normal multi-megabyte extension into a
+    # multi-minute scan). One combined pass preserves the same call-only
+    # semantics without repeatedly rescanning the bundle.
+    called: dict[str, str] = {}
+    if aliases:
+        alias_pattern = "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True))
+        for match in re.finditer(rf"\b(?P<alias>{alias_pattern})\s*\(", text):
+            alias = match.group("alias")
+            called[alias] = aliases[alias]
     if called:
         patterns.append(r"\b(?:" + "|".join(re.escape(alias) for alias in sorted(called, key=len, reverse=True)) + r")\s*\(")
         called_methods.update(called.values())
 
+    if namespace_aliases:
+        namespace_pattern = "|".join(
+            re.escape(namespace) for namespace in sorted(namespace_aliases, key=len, reverse=True)
+        )
+        method_pattern = "|".join(re.escape(method) for method in sorted(_CHILD_PROCESS_METHODS))
+        namespace_calls = re.compile(
+            rf"(?:\b(?P<direct_namespace>{namespace_pattern})\s*\.\s*(?P<direct_method>{method_pattern})\s*\(|"
+            rf"\(\s*0\s*,\s*(?P<wrapped_namespace>{namespace_pattern})\s*\.\s*(?P<wrapped_method>{method_pattern})\s*\)\s*\()"
+        )
+        namespace_methods: dict[str, set[str]] = {namespace: set() for namespace in namespace_aliases}
+        for match in namespace_calls.finditer(text):
+            namespace = match.group("direct_namespace") or match.group("wrapped_namespace")
+            method = match.group("direct_method") or match.group("wrapped_method")
+            if namespace and method:
+                namespace_methods[namespace].add(method)
+
     for namespace in sorted(namespace_aliases, key=len, reverse=True):
-        methods = [
-            method
-            for method in sorted(_CHILD_PROCESS_METHODS)
-            if re.search(
-                rf"(?:\b{re.escape(namespace)}\s*\.\s*{re.escape(method)}\s*\(|"
-                rf"\(\s*0\s*,\s*{re.escape(namespace)}\s*\.\s*{re.escape(method)}\s*\)\s*\()",
-                text,
-            )
-        ]
+        methods = sorted(namespace_methods.get(namespace, set()))
         if not methods:
             continue
         method_pattern = "|".join(re.escape(method) for method in methods)
