@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from scripts.publish_website_corpus import (
     github_repository_full_name,
+    publication_scan_is_complete,
     published_artifacts,
     rows_to_dispatch,
     workflow_command,
@@ -32,8 +33,14 @@ class WebsitePublicationTests(unittest.TestCase):
                     "sha256": "a" * 64,
                     "scan": {
                         "scanner_build": "old-build",
+                        "policy_version": "current-policy",
+                        "ruleset_version": "current-ruleset",
                         "score_schema_version": "2",
                         "coverage_percent": 100,
+                        "analysis_status": "complete",
+                        "analysis_coverage_status": "complete",
+                        "required_providers_complete": True,
+                        "executable_file_coverage_percent": 100,
                     },
                 },
                 {
@@ -42,8 +49,14 @@ class WebsitePublicationTests(unittest.TestCase):
                     "sha256": "b" * 64,
                     "scan": {
                         "scanner_build": "current-build",
+                        "policy_version": "current-policy",
+                        "ruleset_version": "current-ruleset",
                         "score_schema_version": "2",
                         "coverage_percent": 100,
+                        "analysis_status": "complete",
+                        "analysis_coverage_status": "complete",
+                        "required_providers_complete": True,
+                        "executable_file_coverage_percent": 100,
                     },
                 },
             ]
@@ -82,7 +95,7 @@ class WebsitePublicationTests(unittest.TestCase):
 
     def test_validator_compares_exact_hash_decision_coverage_and_schema(self) -> None:
         expected = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "review"}]
-        actual = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "scan": {"decision": "review", "coverage_percent": 100, "score_schema_version": "2"}}]
+        actual = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "scan": {"decision": "review", "coverage_percent": 100, "score_schema_version": "2", "analysis_status": "complete", "analysis_coverage_status": "complete", "required_providers_complete": True, "executable_file_coverage_percent": 100, "scanner_build": "build", "policy_version": "policy", "ruleset_version": "rules"}}]
         self.assertEqual(validate_rows(expected, actual), {"total": 1, "published": 1, "awaiting": [], "mismatches": []})
 
     def test_validator_reports_missing_and_divergent_rows(self) -> None:
@@ -90,10 +103,24 @@ class WebsitePublicationTests(unittest.TestCase):
             {"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "allow"},
             {"extension_id": "publisher.two", "version": "2.0.0", "sha256": "b" * 64, "frozen_expected_decision": "review"},
         ]
-        actual = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "scan": {"decision": "review", "coverage_percent": 99, "score_schema_version": "1"}}]
+        actual = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "scan": {"decision": "review", "coverage_percent": 99, "score_schema_version": "1", "analysis_status": "incomplete", "analysis_coverage_status": "incomplete", "required_providers_complete": False, "executable_file_coverage_percent": 99}}]
         result = validate_rows(expected, actual)
         self.assertEqual(result["awaiting"], ["publisher.two@2.0.0"])
-        self.assertEqual({item["field"] for item in result["mismatches"]}, {"decision", "coverage", "score_schema"})
+        self.assertEqual({item["field"] for item in result["mismatches"]}, {"decision", "coverage", "score_schema", "policy_version", "ruleset_version", "scanner_build", "analysis_status", "coverage_status", "required_providers_complete", "executable_file_coverage"})
+
+    def test_full_coverage_does_not_hide_incomplete_analysis(self) -> None:
+        scan = {
+            "score_schema_version": "2",
+            "coverage_percent": 100,
+            "analysis_status": "incomplete",
+            "analysis_coverage_status": "incomplete",
+            "required_providers_complete": False,
+            "executable_file_coverage_percent": 100,
+            "scanner_build": "build",
+            "policy_version": "policy",
+            "ruleset_version": "rules",
+        }
+        self.assertFalse(publication_scan_is_complete(scan))
 
 
 if __name__ == "__main__":

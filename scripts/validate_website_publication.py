@@ -36,6 +36,13 @@ def validate_rows(expected: list[dict[str, Any]], actual: list[dict[str, Any]]) 
             "decision": (str(row.get("artifact_aware_expected_decision") or row.get("frozen_expected_decision") or ""), str(scan.get("decision") or "")),
             "coverage": ("100", str(scan.get("coverage_percent") or 0)),
             "score_schema": ("2", str(scan.get("score_schema_version") or "")),
+            "policy_version": ("present", "present" if scan.get("policy_version") and scan.get("policy_version") != "legacy" else "missing"),
+            "ruleset_version": ("present", "present" if scan.get("ruleset_version") else "missing"),
+            "scanner_build": ("present", "present" if scan.get("scanner_build") else "missing"),
+            "analysis_status": ("complete", str(scan.get("analysis_status") or "")),
+            "coverage_status": ("complete", str(scan.get("analysis_coverage_status") or "")),
+            "required_providers_complete": ("true", str(scan.get("required_providers_complete")).lower()),
+            "executable_file_coverage": ("100", str(scan.get("executable_file_coverage_percent") or 0)),
         }
         for field, (wanted, observed) in checks.items():
             if wanted != observed:

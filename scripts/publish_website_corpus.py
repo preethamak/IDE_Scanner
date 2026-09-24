@@ -58,10 +58,33 @@ def published_artifacts(url: str, required_build: str | None = None) -> dict[str
     published: dict[str, str] = {}
     for row in body.get("rows") or []:
         scan = row.get("scan") or {}
-        if (required_build and scan.get("scanner_build") != required_build) or scan.get("score_schema_version") != "2" or scan.get("coverage_percent") != 100:
+        if not publication_scan_is_complete(scan, required_build=required_build):
             continue
         published[artifact_key(row.get("extension_id"), row.get("version"))] = str(row.get("sha256") or "").lower()
     return published
+
+
+def publication_scan_is_complete(scan: dict[str, Any], *, required_build: str | None = None) -> bool:
+    """Return whether the public API row represents a canonical completed scan.
+
+    ``coverage_percent`` alone is not sufficient: pre-analysis failures used
+    to report full coverage when their denominator was empty. The website API
+    now exposes the canonical status/provider fields so this operator path
+    cannot mistake that legacy shape for a publishable result.
+    """
+    return (
+        (not required_build or scan.get("scanner_build") == required_build)
+        and bool(scan.get("scanner_build"))
+        and bool(scan.get("policy_version"))
+        and scan.get("policy_version") != "legacy"
+        and bool(scan.get("ruleset_version"))
+        and scan.get("score_schema_version") == "2"
+        and scan.get("coverage_percent") == 100
+        and scan.get("analysis_status") == "complete"
+        and scan.get("analysis_coverage_status") == "complete"
+        and scan.get("required_providers_complete") is True
+        and scan.get("executable_file_coverage_percent") == 100
+    )
 
 
 def rows_to_dispatch(rows: list[dict[str, Any]], published: dict[str, str]) -> list[dict[str, Any]]:
