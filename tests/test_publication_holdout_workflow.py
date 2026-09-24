@@ -12,6 +12,8 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in workflow
     assert "workflow_run.head_sha || github.sha" in workflow
     assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
+    assert "group: guardrails-publication-accuracy-holdout" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "scripts/freeze_accuracy_holdout.py" in workflow
     assert "scripts/verify_holdout_provenance.py" in workflow
     assert "--advisories src/ide_scanner/intelligence/extension-advisories.json" in workflow
