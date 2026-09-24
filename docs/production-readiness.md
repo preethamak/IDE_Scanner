@@ -84,13 +84,13 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The recorded local deterministic gate was run against scanner build
-`ddd1ecde95b508f00b89cca957682d7a6ae3d4b6` with the exact build identity
-supplied to the command and passed its identity-bound regression checks. All 8
-required corpus artifacts were complete, both known-safe controls were allowed
-without review, and all 4 required known-malicious artifacts were blocked; 5
-optional backlog artifacts remained explicitly unscanned. The report identity
-was policy `3.1.0-calibration.7` and
+The deterministic gate is identity-bound: every release run supplies the full
+scanner build SHA and rejects an unknown or stale identity. The latest local
+run passed its identity-bound regression checks. All 8 required corpus
+artifacts were complete, both known-safe controls were allowed without review,
+and all 4 required known-malicious artifacts were blocked; 5 optional backlog
+artifacts remained explicitly unscanned. The report identity was policy
+`3.1.0-calibration.7` and
 ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`. The
 vendored CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
