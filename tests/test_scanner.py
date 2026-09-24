@@ -313,7 +313,7 @@ class ScannerTests(unittest.TestCase):
             self.assertFalse(failed_bundle["external_syscall_trace"])
             self.assertFalse(failed_bundle["runs"][0]["external_syscall_trace"])
 
-    def test_failed_entrypoint_receipt_cannot_be_marked_runtime_complete(self) -> None:
+    def test_authenticated_entrypoint_error_keeps_dynamic_coverage_complete(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "agent.vsix"
             artifact.write_bytes(b"exact")
@@ -322,6 +322,8 @@ class ScannerTests(unittest.TestCase):
             report.version = "1.0.0"
             report.artifact_hash = "a" * 64
             report.capabilities = [{"id": "agentic", "evidence": ["package.json"]}]
+            report.instance_id = "publisher.agent@1.0.0"
+            report.analysis_coverage = {"providers": {}}
             runtime = {
                 "mode": "executed",
                 "plan": {
@@ -340,8 +342,17 @@ class ScannerTests(unittest.TestCase):
                 )
 
         self.assertEqual(runtime_bundle["runs"][0]["status"], "failed")
-        self.assertFalse(runtime_bundle["runs"][0]["external_syscall_trace"])
-        self.assertFalse(runtime_bundle["external_syscall_trace"])
+        self.assertTrue(runtime_bundle["runs"][0]["external_syscall_trace"])
+        self.assertTrue(runtime_bundle["external_syscall_trace"])
+
+        _apply_sandbox_provider(
+            [report],
+            _merge_dynamic_runtime_bundle({"extensions": {}, "metadata": {}}, runtime_bundle),
+        )
+        provider = report.analysis_coverage["providers"]["dynamic_sandbox"]
+        self.assertEqual(provider["status"], "completed")
+        self.assertTrue(provider["external_syscall_trace"])
+        self.assertEqual(provider["runtime_run_status"], "failed")
 
     def test_required_runtime_failure_cannot_be_allowed_after_static_completion(self) -> None:
         with TemporaryDirectory() as tmp:
