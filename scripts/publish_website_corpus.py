@@ -40,6 +40,7 @@ def main() -> int:
     published = {} if args.include_published else published_artifacts(args.publication_url, required_build)
     pending = rows_to_dispatch(rows, published)
     if pending and not args.dry_run:
+        verify_clean_worktree()
         verify_remote_build(current_build)
     for row in pending:
         command = workflow_command(row, scanner_build=current_build)
@@ -137,6 +138,16 @@ def verify_remote_build(scanner_build: str) -> None:
         raise RuntimeError(
             f"scanner build {scanner_build} is not available in GitHub repository {repository}: {detail}"
         )
+
+
+def verify_clean_worktree() -> None:
+    """Refuse dispatch when tracked local edits are absent from the pinned SHA."""
+    for arguments in (("diff", "--quiet"), ("diff", "--cached", "--quiet")):
+        result = subprocess.run(["git", *arguments], check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "scanner worktree has tracked changes; commit the exact release before dispatching public scans"
+            )
 
 
 def github_repository_full_name(origin_url: str) -> str:

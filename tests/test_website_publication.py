@@ -10,6 +10,7 @@ from scripts.publish_website_corpus import (
     publication_scan_is_complete,
     published_artifacts,
     rows_to_dispatch,
+    verify_clean_worktree,
     workflow_command,
 )
 from scripts.validate_website_publication import validate_rows
@@ -121,6 +122,19 @@ class WebsitePublicationTests(unittest.TestCase):
             "ruleset_version": "rules",
         }
         self.assertFalse(publication_scan_is_complete(scan))
+
+    def test_dispatch_worktree_guard_rejects_tracked_changes(self) -> None:
+        with patch("scripts.publish_website_corpus.subprocess.run") as run:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(RuntimeError, "tracked changes"):
+                verify_clean_worktree()
+
+    def test_dispatch_worktree_guard_checks_index_after_worktree(self) -> None:
+        with patch("scripts.publish_website_corpus.subprocess.run") as run:
+            run.side_effect = [type("Result", (), {"returncode": 0})(), type("Result", (), {"returncode": 1})()]
+            with self.assertRaisesRegex(RuntimeError, "tracked changes"):
+                verify_clean_worktree()
+            self.assertEqual(run.call_args_list[1].args[0], ["git", "diff", "--cached", "--quiet"])
 
 
 if __name__ == "__main__":
