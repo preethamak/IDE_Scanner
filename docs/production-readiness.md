@@ -85,7 +85,7 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The recorded local deterministic gate was run against scanner build
-`c2f5d6247dd5d5326f1e7bcf995bd54811006dec` with the exact build identity
+`1dfb218c0845545639f57f4efd7698f08c5240c3` with the exact build identity
 supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required
 known-malicious artifacts were blocked; 5 optional backlog artifacts remained
