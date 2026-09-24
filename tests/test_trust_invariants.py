@@ -365,6 +365,25 @@ class CoverageHonestyTests(unittest.TestCase):
         self.assertTrue(coverage["required_providers_complete"])
         self.assertEqual(coverage["status"], "complete")
 
+    def test_empty_denominator_with_a_scan_failure_is_not_full_coverage(self) -> None:
+        coverage = {
+            "status": "incomplete",
+            "coverage_percent": 0,
+            "executable_candidates": [],
+            "analyzed_executable_files": [],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "limitations": ["Scan worker exceeded its bounded budget."],
+            "providers": {},
+            "manifest_validation": {"valid": False, "status": "scan-aborted"},
+        }
+        _finalize_analysis_coverage(coverage)
+        self.assertEqual(coverage["coverage_percent"], 0)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 0)
+        self.assertEqual(coverage["status"], "incomplete")
+
     def test_file_coverage_does_not_claim_required_provider_completion(self) -> None:
         coverage = {
             "executable_candidates": ["extension.js"],

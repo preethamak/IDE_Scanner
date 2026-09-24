@@ -5080,6 +5080,11 @@ def _finalize_analysis_coverage(coverage: dict[str, Any]) -> None:
             f"No analyzable entrypoint was reachable; {len(excluded_generated)} generated/minified "
             "runtime file(s) were present but not analyzed"
         )
+    elif limitations:
+        # A worker- or request-level failure can arrive before the scanner has
+        # discovered any executable candidates. An empty denominator must not
+        # turn that failed analysis into a misleading 100% coverage claim.
+        executable_file_coverage = 0
     else:
         executable_file_coverage = 100
     coverage["executable_file_coverage_percent"] = executable_file_coverage
