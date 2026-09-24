@@ -86,22 +86,22 @@ above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun against the current scanner
 release tree with build
-`87ad0427469a122dfd1ee3627bbec49f599dddf1` and passed its identity-bound
-regression checks.
-All 8 required corpus artifacts were complete, both known-safe controls were
-allowed without review, and all 4 required known-malicious artifacts were
-blocked; 5 optional backlog artifacts remained explicitly unscanned. The
-report identity was policy `3.1.0-calibration.7` and ruleset
-`2026.09.24-policy-v3-calibration.41-transpiled-process-alias`. The vendored
-CLI engine is parity-verified against this scanner checkout. This is
+`36db32faeeb9562f18655ab3051c3235702d6ece` and passed its identity-bound
+regression checks. All 8 required corpus artifacts were complete, both
+known-safe controls were allowed without review, and all 4 required
+known-malicious artifacts were blocked; 5 optional backlog artifacts remained
+explicitly unscanned. The report identity was policy `3.1.0-calibration.7` and
+ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`. The
+vendored CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-On 2026-09-24, the complete scanner suite passed with 568 tests, 3 skips, and
-8 subtests. The synchronized CLI suite passed with 69 tests and 5 subtests.
-The real-artifact calibration suite passed with 20 tests, 1 skip, and 5
-subtests. These are regression and reproducibility checks; they do not replace
-the fresh labelled holdout or prove ecosystem-wide precision and recall.
+After that release change, the targeted production-trust/workflow checks passed
+79 tests, synchronized CLI parity/policy checks passed 18 tests, the exact
+real-artifact calibration passed 6 tests with 1 artifact-dependent skip and 5
+safe-control subtests, and the website trust/deep-scan suites passed 29 tests.
+These are regression and reproducibility checks; they do not replace the fresh
+labelled holdout or prove ecosystem-wide precision and recall.
 
 A separate 146-artifact cohort replay from the earlier calibration pass is
 diagnostic evidence, not a public accuracy claim. It produced 135 complete
