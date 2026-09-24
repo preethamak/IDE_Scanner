@@ -185,6 +185,31 @@ def holdout_gate() -> dict:
     return result
 
 
+def rule_audit() -> dict:
+    return {
+        "schema_version": "guardrails.report-audit.v1",
+        "source_scan_id": "scan-holdout",
+        "scanner_build": BUILD,
+        "label_metrics": {
+            "labeled_extensions": 10,
+            "label_counts": {"known_safe": 5, "known_malicious": 5},
+            "false_positive_review_count": 0,
+            "false_positive_block_count": 0,
+            "false_negative_malware_count": 0,
+        },
+        "labelled_rule_observations": [{
+            "rule_id": "download-and-execute",
+            "known_safe_extensions": 0,
+            "known_safe_actionable_extensions": 0,
+            "known_safe_block_extensions": 0,
+            "known_malicious_extensions": 5,
+            "known_malicious_actionable_extensions": 5,
+            "known_malicious_block_extensions": 5,
+            "gray_extensions": 0,
+        }],
+    }
+
+
 class PublicationAccuracyGateTests(unittest.TestCase):
     def write(self, root: Path, name: str, value: dict) -> Path:
         path = root / name
@@ -217,6 +242,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                 self.write(root, "holdout.json", holdout_gate()),
                 self.write(root, "corpus.json", holdout_corpus()),
                 self.write(root, "behavior.json", behavior),
+                self.write(root, "rule-audit.json", rule_audit()),
             )
         self.assertEqual(result["holdout"]["status"], "fresh-labeled")
         self.assertTrue(result["holdout"]["complete"])
@@ -226,6 +252,7 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         self.assertEqual(result["holdout"]["dynamic_required"], 5)
         self.assertEqual(result["holdout"]["dynamic_not_applicable"], 5)
         self.assertEqual(result["holdout"]["rule_matrix"]["download-and-execute"]["fired_on_known_malicious"], 5)
+        self.assertEqual(result["holdout"]["rule_noise"]["false_negative_malware_count"], 0)
         self.assertEqual(result["holdout"]["behavior_only"]["status"], "behavior-only")
         self.assertEqual(result["holdout"]["behavior_only"]["malicious_detection_rate"], 1.0)
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
@@ -445,6 +472,33 @@ class PublicationAccuracyGateTests(unittest.TestCase):
                     self.write(root, "regression.json", gate("regression")),
                     self.write(root, "holdout.json", invalid),
                     self.write(root, "corpus.json", holdout_corpus()),
+                )
+
+    def test_rejects_labelled_safe_rule_noise(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = rule_audit()
+            invalid["labelled_rule_observations"][0]["known_safe_extensions"] = 1
+            invalid["labelled_rule_observations"][0]["known_safe_actionable_extensions"] = 1
+            with self.assertRaisesRegex(ValueError, "known-safe actionable rules"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                    rule_audit_path=self.write(root, "rule-audit.json", invalid),
+                )
+
+    def test_rejects_labelled_malware_false_negative(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = rule_audit()
+            invalid["label_metrics"]["false_negative_malware_count"] = 1
+            with self.assertRaisesRegex(ValueError, "known-malicious false negative"):
+                build_publication_accuracy_gate(
+                    self.write(root, "regression.json", gate("regression")),
+                    self.write(root, "holdout.json", holdout_gate()),
+                    self.write(root, "corpus.json", holdout_corpus()),
+                    rule_audit_path=self.write(root, "rule-audit.json", invalid),
                 )
 
     def test_rejects_gate_with_missing_required_check(self) -> None:

@@ -71,6 +71,7 @@ def build_publication_accuracy_gate(
     holdout_gate_path: Path | str,
     holdout_corpus_path: Path | str,
     behavior_gate_path: Path | str | None = None,
+    rule_audit_path: Path | str | None = None,
 ) -> dict[str, Any]:
     regression_bytes, regression = _read_json(regression_gate_path)
     holdout_bytes, holdout_gate = _read_json(holdout_gate_path)
@@ -79,6 +80,10 @@ def build_publication_accuracy_gate(
     behavior_gate: dict[str, Any] | None = None
     if behavior_gate_path is not None:
         behavior_bytes, behavior_gate = _read_json(behavior_gate_path)
+    rule_audit_bytes: bytes | None = None
+    rule_audit: dict[str, Any] | None = None
+    if rule_audit_path is not None:
+        rule_audit_bytes, rule_audit = _read_json(rule_audit_path)
 
     _validate_gate(regression, "regression")
     _validate_gate(holdout_gate, "holdout")
@@ -142,6 +147,15 @@ def build_publication_accuracy_gate(
             raise ValueError(f"The publication holdout summary field {key!r} does not match its result rows")
     holdout_rule_matrix = _holdout_rule_matrix(holdout_gate, artifacts)
     _validate_rule_matrix(holdout_rule_matrix, label_counts)
+    rule_noise = None
+    if rule_audit is not None:
+        rule_noise = _validate_rule_audit(
+            rule_audit,
+            scanner_build=scanner_build,
+            label_counts=label_counts,
+            artifact_count=len(artifacts),
+            audit_sha256=_sha256(rule_audit_bytes or b""),
+        )
 
     behavior_result: dict[str, Any] | None = None
     if behavior_gate is not None:
@@ -235,6 +249,7 @@ def build_publication_accuracy_gate(
             "dynamic_required": _number(summary.get("dynamic_required")),
             "dynamic_not_applicable": _number(summary.get("dynamic_not_applicable")),
             "rule_matrix": holdout_rule_matrix,
+            **({"rule_noise": rule_noise} if rule_noise is not None else {}),
             "runtime_evidence": dict(runtime_evidence),
             "gate": dict(_object(holdout_gate.get("gate"))),
             "provenance": corpus_provenance,
@@ -579,6 +594,99 @@ def _validate_rule_matrix(matrix: dict[str, dict[str, int]], label_counts: dict[
             raise ValueError("The publication holdout rule matrix contains unexpected fields")
 
 
+def _validate_rule_audit(
+    audit: dict[str, Any],
+    *,
+    scanner_build: str,
+    label_counts: dict[str, int],
+    artifact_count: int,
+    audit_sha256: str,
+) -> dict[str, Any]:
+    """Bind labelled rule-level noise evidence to the exact holdout release."""
+    if audit.get("schema_version") != "guardrails.report-audit.v1":
+        raise ValueError("The publication rule audit has an unsupported schema")
+    if str(audit.get("scanner_build") or "") != scanner_build:
+        raise ValueError("The publication rule audit scanner build does not match the holdout gate")
+    metrics = _object(audit.get("label_metrics"))
+    if _number(metrics.get("labeled_extensions")) != artifact_count:
+        raise ValueError("The publication rule audit does not cover every frozen holdout artifact")
+    observed_label_counts = metrics.get("label_counts")
+    if not isinstance(observed_label_counts, dict) or {
+        "known_safe": observed_label_counts.get("known_safe"),
+        "known_malicious": observed_label_counts.get("known_malicious"),
+    } != label_counts:
+        raise ValueError("The publication rule audit label counts do not match the frozen holdout")
+    for field in ("false_positive_review_count", "false_positive_block_count", "false_negative_malware_count"):
+        value = metrics.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"The publication rule audit {field} must be a non-negative integer")
+    safe_count = label_counts["known_safe"]
+    safe_review_rate = metrics["false_positive_review_count"] / safe_count if safe_count else 0.0
+    if metrics["false_positive_block_count"] != 0:
+        raise ValueError("The publication rule audit contains a known-safe block")
+    if safe_review_rate > MAX_SAFE_REVIEW_RATE:
+        raise ValueError("The publication rule audit safe review rate exceeds the 20% noise ceiling")
+    if metrics["false_negative_malware_count"] != 0:
+        raise ValueError("The publication rule audit contains a known-malicious false negative")
+
+    observations = audit.get("labelled_rule_observations")
+    if not isinstance(observations, list) or not observations:
+        raise ValueError("The publication rule audit must retain labelled rule observations")
+    safe_actionable_rules: list[str] = []
+    safe_block_rules: list[str] = []
+    for row in observations:
+        if not isinstance(row, dict) or not str(row.get("rule_id") or "").strip():
+            raise ValueError("The publication rule audit contains an invalid rule observation")
+        for field in (
+            "known_safe_extensions",
+            "known_safe_actionable_extensions",
+            "known_safe_block_extensions",
+            "known_malicious_extensions",
+            "known_malicious_actionable_extensions",
+            "known_malicious_block_extensions",
+            "gray_extensions",
+        ):
+            value = row.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"The publication rule audit rule {row['rule_id']!r} has an invalid {field}")
+        if row["known_safe_extensions"] > label_counts["known_safe"]:
+            raise ValueError("The publication rule audit overcounts known-safe artifacts")
+        if row["known_malicious_extensions"] > label_counts["known_malicious"]:
+            raise ValueError("The publication rule audit overcounts known-malicious artifacts")
+        if row["known_safe_actionable_extensions"] > row["known_safe_extensions"]:
+            raise ValueError("The publication rule audit overcounts known-safe actionable artifacts")
+        if row["known_safe_block_extensions"] > row["known_safe_extensions"]:
+            raise ValueError("The publication rule audit overcounts known-safe blocks")
+        if row["known_safe_actionable_extensions"]:
+            safe_actionable_rules.append(str(row["rule_id"]))
+        if row["known_safe_block_extensions"]:
+            safe_block_rules.append(str(row["rule_id"]))
+    if safe_actionable_rules:
+        raise ValueError(
+            "The publication rule audit contains known-safe actionable rules: "
+            + ", ".join(sorted(safe_actionable_rules))
+        )
+    if safe_block_rules:
+        raise ValueError(
+            "The publication rule audit contains known-safe blocking rules: "
+            + ", ".join(sorted(safe_block_rules))
+        )
+    return {
+        "schema_version": str(audit["schema_version"]),
+        "source_scan_id": str(audit.get("source_scan_id") or ""),
+        "scanner_build": scanner_build,
+        "audit_sha256": audit_sha256,
+        "labeled_extensions": artifact_count,
+        "label_counts": dict(label_counts),
+        "false_positive_review_count": metrics["false_positive_review_count"],
+        "false_positive_block_count": metrics["false_positive_block_count"],
+        "false_negative_malware_count": metrics["false_negative_malware_count"],
+        "safe_review_rate": round(safe_review_rate, 4),
+        "rules_with_known_safe_actionable": [],
+        "rules_with_known_safe_blocks": [],
+    }
+
+
 def _review_or_higher(actual: dict[str, Any]) -> bool:
     return (
         str(actual.get("decision") or "") in {"review", "block"}
@@ -650,6 +758,7 @@ def main() -> int:
     parser.add_argument("--holdout-gate", required=True, type=Path)
     parser.add_argument("--behavior-gate", required=True, type=Path)
     parser.add_argument("--holdout-corpus", required=True, type=Path)
+    parser.add_argument("--rule-audit", required=True, type=Path)
     parser.add_argument("--out", "--output", required=True, type=Path)
     args = parser.parse_args()
     result = build_publication_accuracy_gate(
@@ -657,6 +766,7 @@ def main() -> int:
         args.holdout_gate,
         args.holdout_corpus,
         args.behavior_gate,
+        args.rule_audit,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

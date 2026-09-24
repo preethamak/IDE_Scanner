@@ -163,6 +163,7 @@ jobs:
             --holdout-gate holdout-gate.json \
             --behavior-gate behavior-holdout-gate.json \
             --holdout-corpus holdout-corpus.json \
+            --rule-audit holdout-rule-audit.json \
             --out publication-accuracy-gate.json
       - uses: actions/upload-artifact@v4
         if: always()
