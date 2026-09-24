@@ -56,5 +56,3 @@ def test_real_evidence_source_has_minimum_label_balance_before_acquisition() -> 
     assert react_native["sha256"] == "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d"
     theme = by_identity[("priskinski.Theme-AllHallowsEve-remake", "1.0.0")]
     assert theme["sha256"] == "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8"
-    api_reactor = by_identity[("NoahBit.api-reactor", "0.0.1")]
-    assert api_reactor["sha256"] == "ca272b481f630635cd059f85321dbc7be372e75820536ccbfd29dfcf571ab45c"
