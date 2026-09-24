@@ -154,6 +154,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             labelled_rule_extensions,
             labelled_rule_actionable_extensions,
             labelled_rule_block_extensions,
+            rule_evidence,
         )
     return result
 
@@ -216,6 +217,7 @@ def _labelled_rule_observations(
     rule_extensions: dict[str, dict[str, set[str]]],
     actionable_extensions: dict[str, dict[str, set[str]]],
     block_extensions: dict[str, dict[str, set[str]]],
+    rule_evidence: dict[str, Counter[str]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for rule_id in sorted(rule_extensions):
@@ -229,6 +231,7 @@ def _labelled_rule_observations(
             "known_malicious_actionable_extensions": len(actionable_extensions[rule_id].get("known_malicious", set())),
             "known_malicious_block_extensions": len(block_extensions[rule_id].get("known_malicious", set())),
             "gray_extensions": len(labels.get("gray", set())),
+            "evidence_class_counts": dict(rule_evidence[rule_id]),
         })
     return sorted(rows, key=lambda row: (
         -row["known_safe_actionable_extensions"],

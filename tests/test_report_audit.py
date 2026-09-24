@@ -163,6 +163,7 @@ class ReportAuditTests(unittest.TestCase):
         self.assertEqual(observation["known_safe_extensions"], 1)
         self.assertEqual(observation["known_safe_actionable_extensions"], 0)
         self.assertEqual(observation["known_malicious_block_extensions"], 1)
+        self.assertEqual(observation["evidence_class_counts"], {"unknown": 2})
 
     def test_load_labels_accepts_holdout_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
