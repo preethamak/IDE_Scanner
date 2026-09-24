@@ -85,7 +85,7 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The recorded local deterministic gate was run against scanner build
-`071284c9639f46fe6ce65abe1cc3a4563630dd6c` with the exact build identity
+`c2f5d6247dd5d5326f1e7bcf995bd54811006dec` with the exact build identity
 supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required
 known-malicious artifacts were blocked; 5 optional backlog artifacts remained
@@ -95,14 +95,15 @@ vendored CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-The current local release also passes the scanner publication/audit tests (33
-tests), synchronized CLI parity tests (9 tests), all website tests (697 tests),
-and the website TypeScript check. A six-artifact retained real-world calibration
-against this build found 5 known-safe and 1 independently reported malicious
-artifact, with zero safe reviews/blocks, zero malicious misses, and zero
-known-safe actionable rule observations. This is useful calibration evidence,
-but it is not the required privileged deep holdout or an ecosystem-wide
-precision/recall claim.
+The current local release also passes the scanner's exercised unit, integration,
+publication, runtime-contract, corpus, and scanner suites; the synchronized CLI
+parity suite passes with 69 tests and 5 subtests. A six-artifact retained
+real-world calibration against this build found 5 known-safe and 1
+independently reported malicious artifact, with zero safe reviews/blocks, zero
+malicious misses, and zero known-safe actionable rule observations. The local
+checkout does not contain the remaining frozen holdout bytes, so this is useful
+calibration evidence but not the required privileged deep holdout or an
+ecosystem-wide precision/recall claim.
 
 Earlier targeted production-trust/workflow checks passed 79 tests, and the
 exact real-artifact calibration passed 6 tests with 1 artifact-dependent skip
