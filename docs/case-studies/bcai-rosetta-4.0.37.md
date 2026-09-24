@@ -54,8 +54,8 @@ replaced by an empty snapshot. The scanner still returned:
   network access, filesystem access, process execution, shell execution, and
   environment-file references
 
-The behavior-only replay used scanner engine revision
-`6a4f3655ba740fa187d3eda62a87232e9aa763db`, policy `3.1.0-calibration.7`,
+The current behavior-only replay used scanner engine revision
+`071284c9639f46fe6ce65abe1cc3a4563630dd6c`, policy `3.1.0-calibration.7`,
 and ruleset `2026.09.24-policy-v3-calibration.41-transpiled-process-alias`.
 The local replay completed with 100% required-provider coverage against the
 exact VSIX under that scanner identity. The privileged publication holdout

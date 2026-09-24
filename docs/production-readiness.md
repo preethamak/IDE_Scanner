@@ -84,9 +84,9 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against the current scanner
-release tree with the exact build identity supplied to the command and passed
-its identity-bound regression checks. All 8 required corpus artifacts were complete, both
+The latest local deterministic gate was rerun against scanner build
+`071284c9639f46fe6ce65abe1cc3a4563630dd6c` with the exact build identity
+supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required
 known-malicious artifacts were blocked; 5 optional backlog artifacts remained
 explicitly unscanned. The report identity was policy `3.1.0-calibration.7` and
@@ -95,10 +95,20 @@ vendored CLI engine is parity-verified against this scanner checkout. This is
 deterministic regression evidence only: it does not waive the privileged
 runtime holdout or authorize registry publication.
 
-After that release change, the targeted production-trust/workflow checks passed
-79 tests, synchronized CLI parity/policy checks passed 18 tests, the exact
-real-artifact calibration passed 6 tests with 1 artifact-dependent skip and 5
-safe-control subtests, and the website trust/deep-scan suites passed 29 tests.
+The current local release also passes the scanner publication/audit tests (33
+tests), synchronized CLI parity tests (9 tests), all website tests (697 tests),
+and the website TypeScript check. A six-artifact retained real-world calibration
+against this build found 5 known-safe and 1 independently reported malicious
+artifact, with zero safe reviews/blocks, zero malicious misses, and zero
+known-safe actionable rule observations. This is useful calibration evidence,
+but it is not the required privileged deep holdout or an ecosystem-wide
+precision/recall claim.
+
+Earlier targeted production-trust/workflow checks passed 79 tests, and the
+exact real-artifact calibration passed 6 tests with 1 artifact-dependent skip
+and 5 safe-control subtests. These are regression and reproducibility checks;
+they do not replace the fresh labelled holdout or prove ecosystem-wide precision
+and recall.
 These are regression and reproducibility checks; they do not replace the fresh
 labelled holdout or prove ecosystem-wide precision and recall.
 
