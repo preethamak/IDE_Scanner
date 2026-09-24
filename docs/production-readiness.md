@@ -101,9 +101,10 @@ checks, and the synchronized CLI parity suite passes with 69 tests and 5
 subtests. The current exact-artifact calibration also passes the five retained
 known-safe controls and the independently reported BCAI Rosetta artifact; the
 Code Runner CVE control remains skipped because its exact VSIX is not provisioned
-in this checkout. The full scanner suite has not been completed in the current
-workstation run, so it must not be described as fully green. The local checkout
-does not contain the remaining frozen holdout bytes, so this is useful
+in this checkout. The full scanner suite completed with 588 passed tests, 3
+environment-dependent skips, and 8 subtests; the skipped cases require local
+Bubblewrap namespace permissions or an unprovisioned exact artifact. The local
+checkout does not contain the remaining frozen holdout bytes, so this is useful
 calibration evidence but not the required privileged deep holdout or an
 ecosystem-wide precision/recall claim.
 
