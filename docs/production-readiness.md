@@ -85,7 +85,7 @@ OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
 The recorded local deterministic gate was run against scanner build
-`1dfb218c0845545639f57f4efd7698f08c5240c3` with the exact build identity
+`98afbaf6a30712d1757c74dc3e9e0b25ad765763` with the exact build identity
 supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required
 known-malicious artifacts were blocked; 5 optional backlog artifacts remained
@@ -104,6 +104,13 @@ malicious misses, and zero known-safe actionable rule observations. The local
 checkout does not contain the remaining frozen holdout bytes, so this is useful
 calibration evidence but not the required privileged deep holdout or an
 ecosystem-wide precision/recall claim.
+
+The external syscall normalizer also filters scanner-owned `strace`, Bubblewrap,
+and instrumented activation-runner launches while retaining child processes
+started by the extension. This keeps harness setup out of runtime capability
+counts without suppressing extension-spawned process evidence; the behavior is
+covered by a dedicated regression test and is vendored into the CLI at the same
+immutable scanner revision.
 
 Earlier targeted production-trust/workflow checks passed 79 tests, and the
 exact real-artifact calibration passed 6 tests with 1 artifact-dependent skip
