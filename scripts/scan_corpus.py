@@ -37,6 +37,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 _LARGE_ARTIFACT_BYTES = 8 * 1024 * 1024
 _VERY_LARGE_ARTIFACT_BYTES = 32 * 1024 * 1024
 
+from ide_scanner.build_identity import scanner_build  # noqa: E402
 from ide_scanner.discovery import discover_from_path, discover_local_installations  # noqa: E402
 from ide_scanner.report_bundle import _extension_from_dict  # noqa: E402
 from ide_scanner.classification_policy import POLICY_VERSION  # noqa: E402
@@ -339,7 +340,7 @@ def _checkpoint_context(
     offline: bool = False,
 ) -> dict[str, Any]:
     return {
-        "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
+        "scanner_build": scanner_build(),
         "policy_version": POLICY_VERSION,
         "ruleset_version": RULESET_VERSION,
         "profile": profile,

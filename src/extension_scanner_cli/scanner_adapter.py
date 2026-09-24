@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from extension_scanner_cli import __version__
 
+from ide_scanner.build_identity import scanner_build
 from ide_scanner.discovery import discover_from_path, discover_local_installations
 from ide_scanner.registry import search_marketplace_extensions
 from ide_scanner.report_bundle import write_report_bundle
@@ -81,7 +81,7 @@ def display_report(report: dict[str, Any], *, source: str = "cli", profile: str 
             "scan_id": report.get("scan_id", "unknown"),
             "created_at": report.get("created_at", ""),
             "scanner_version": __version__,
-            "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown-local-build",
+            "scanner_build": scanner_build(),
             "ruleset_version": rules_json().get("ruleset_version", "unknown"),
             "profile": profile,
             "source": source,

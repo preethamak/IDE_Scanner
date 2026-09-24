@@ -3,13 +3,13 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-import os
 import re
 import zipfile
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from .build_identity import scanner_build
 from .classification_policy import effective_finding_severity, finding_actionability, finding_evidence_class
 from .evidence import location_from_finding
 from .jsonc import loads_jsonc
@@ -701,12 +701,8 @@ def _scanner_version() -> str:
 
 
 def _scanner_build() -> str:
-    """Return the immutable CI revision when one is available.
-
-    Local reports deliberately say ``unknown`` rather than pretending to be a
-    production build. The website treats an unknown build as non-reusable.
-    """
-    return os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown"
+    """Return the immutable CI or source-checkout revision when available."""
+    return scanner_build()
 
 
 def _write_json(archive: zipfile.ZipFile, name: str, data: Any) -> None:

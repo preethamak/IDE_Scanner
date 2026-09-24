@@ -17,6 +17,7 @@ from typing import Any
 
 from .artifact_store import ArtifactStore, ArtifactStoreError, StoredArtifact, artifact_store_from_environment
 from .artifact_input import ArtifactInputError, acquire_https_vsix
+from .build_identity import scanner_build
 
 from .ast_analyzer import (
     JS_AST_EXTS,
@@ -4270,7 +4271,7 @@ def _build_report(
         "schema_version": "0.1.0",
         "scan_id": f"scan_{now.strftime('%Y%m%d%H%M%S')}",
         "created_at": now.isoformat().replace("+00:00", "Z"),
-        "scanner_build": os.environ.get("IDE_SCANNER_BUILD_SHA", "").strip() or "unknown",
+        "scanner_build": scanner_build(),
         "ruleset_version": RULESET_VERSION,
         "policy_version": POLICY_VERSION,
         "privacy_mode": (
