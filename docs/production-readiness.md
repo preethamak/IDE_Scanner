@@ -86,7 +86,7 @@ above, not evidence that the gates have passed.
 
 The latest local deterministic gate was rerun against the current scanner
 release tree with build
-`2e38ae0b9fcdb1e8578294f6cdbfe59604338c1f` and passed its identity-bound
+`87ad0427469a122dfd1ee3627bbec49f599dddf1` and passed its identity-bound
 regression checks.
 All 8 required corpus artifacts were complete, both known-safe controls were
 allowed without review, and all 4 required known-malicious artifacts were
