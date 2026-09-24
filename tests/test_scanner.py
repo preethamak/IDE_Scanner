@@ -510,6 +510,24 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(finding.evidence_type, "dynamic")
         self.assertEqual(finding.to_dict()["actionability"], "review")
 
+    def test_local_ipc_network_observation_is_not_external_capability_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"publisher","name":"language-server","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        self.assertIsNone(_runtime_unexpected_capability_finding(report, {
+            "kind": "network_attempt",
+            "destination_samples": ["/var/run/nscd/socket", "/dev/log", "unix:/run/systemd/userdb/io.systemd.DynamicUser"],
+        }))
+        self.assertIsNotNone(_runtime_unexpected_capability_finding(report, {
+            "kind": "network_attempt",
+            "destination_samples": ["https://example.invalid"],
+        }))
+
     def test_local_runtime_requires_native_code_coverage(self) -> None:
         with TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "native.vsix"

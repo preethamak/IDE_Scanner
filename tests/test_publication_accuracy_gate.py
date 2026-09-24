@@ -257,6 +257,33 @@ class PublicationAccuracyGateTests(unittest.TestCase):
         self.assertEqual(result["holdout"]["behavior_only"]["malicious_detection_rate"], 1.0)
         self.assertEqual(result["report_identity"]["scanner_build"], BUILD)
 
+    def test_allows_known_safe_exact_dependency_vulnerability_as_risk(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit = rule_audit()
+            audit["labelled_rule_observations"] = [{
+                "rule_id": "vulnerable-npm-dependency",
+                "known_safe_extensions": 1,
+                "known_safe_actionable_extensions": 1,
+                "known_safe_block_extensions": 0,
+                "known_malicious_extensions": 1,
+                "known_malicious_actionable_extensions": 1,
+                "known_malicious_block_extensions": 1,
+                "gray_extensions": 0,
+                "evidence_class_counts": {"dependency": 2},
+            }]
+            result = build_publication_accuracy_gate(
+                self.write(root, "regression.json", gate("regression")),
+                self.write(root, "holdout.json", holdout_gate()),
+                self.write(root, "corpus.json", holdout_corpus()),
+                rule_audit_path=self.write(root, "rule-audit.json", audit),
+            )
+
+        self.assertEqual(
+            result["holdout"]["rule_noise"]["rules_with_known_safe_actionable"],
+            ["vulnerable-npm-dependency"],
+        )
+
     def test_rejects_fixture_only_holdout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

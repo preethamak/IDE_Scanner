@@ -64,6 +64,11 @@ MIN_FRESH_HOLDOUT_MALICIOUS = 5
 MIN_DYNAMIC_REQUIRED = 1
 MIN_DYNAMIC_NOT_APPLICABLE = 1
 MAX_SAFE_REVIEW_RATE = 0.2
+# A known-safe artifact can still carry a real, independently reported
+# dependency vulnerability. That is operational risk, not scanner noise or
+# malware evidence; keep it visible while allowing the labelled holdout to
+# distinguish vulnerability review from a false-positive malware route.
+KNOWN_SAFE_ACTIONABLE_RISK_RULES = {"vulnerable-npm-dependency"}
 
 
 def build_publication_accuracy_gate(
@@ -633,6 +638,7 @@ def _validate_rule_audit(
     if not isinstance(observations, list) or not observations:
         raise ValueError("The publication rule audit must retain labelled rule observations")
     safe_actionable_rules: list[str] = []
+    permitted_safe_risk_rules: list[str] = []
     safe_block_rules: list[str] = []
     for row in observations:
         if not isinstance(row, dict) or not str(row.get("rule_id") or "").strip():
@@ -658,7 +664,16 @@ def _validate_rule_audit(
         if row["known_safe_block_extensions"] > row["known_safe_extensions"]:
             raise ValueError("The publication rule audit overcounts known-safe blocks")
         if row["known_safe_actionable_extensions"]:
-            safe_actionable_rules.append(str(row["rule_id"]))
+            rule_id = str(row["rule_id"])
+            evidence_classes = row.get("evidence_class_counts")
+            if (
+                rule_id in KNOWN_SAFE_ACTIONABLE_RISK_RULES
+                and isinstance(evidence_classes, dict)
+                and set(evidence_classes) == {"dependency"}
+            ):
+                permitted_safe_risk_rules.append(rule_id)
+            else:
+                safe_actionable_rules.append(rule_id)
         if row["known_safe_block_extensions"]:
             safe_block_rules.append(str(row["rule_id"]))
     if safe_actionable_rules:
@@ -682,7 +697,7 @@ def _validate_rule_audit(
         "false_positive_block_count": metrics["false_positive_block_count"],
         "false_negative_malware_count": metrics["false_negative_malware_count"],
         "safe_review_rate": round(safe_review_rate, 4),
-        "rules_with_known_safe_actionable": [],
+        "rules_with_known_safe_actionable": sorted(set(permitted_safe_risk_rules)),
         "rules_with_known_safe_blocks": [],
     }
 
