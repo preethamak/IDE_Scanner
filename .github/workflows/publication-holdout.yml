@@ -154,6 +154,7 @@ jobs:
         run: |
           python scripts/audit_report.py \
             --report holdout-scan.json \
+            --labels holdout-corpus.json \
             --out holdout-rule-audit.json
       - name: Build publication accuracy gate
         run: |

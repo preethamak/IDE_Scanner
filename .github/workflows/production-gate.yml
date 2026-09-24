@@ -152,6 +152,56 @@ jobs:
               )
               temporary.replace(python_target)
           PY
+      - name: Measure labelled real-artifact noise
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python scripts/build_corpus_manifest.py \
+            --path benchmarks/external/artifacts/bcai-rosetta-4.0.37 \
+            --path benchmarks/external/artifacts/nx-console-18.95.0 \
+            --path benchmarks/external/artifacts/public-holdout-2026-09-18 \
+            --path benchmarks/external/artifacts/code-spell-checker-4.5.6 \
+            --path benchmarks/external/artifacts/vscode-yaml-1.24.0 \
+            --path benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13 \
+            --out real-artifact-label-manifest.json
+          python scripts/scan_corpus.py \
+            --manifest real-artifact-label-manifest.json \
+            --profile standard \
+            --offline \
+            --jobs 1 \
+            --timeout 180 \
+            --out real-artifact-label-scan.json
+          python scripts/audit_report.py \
+            --report real-artifact-label-scan.json \
+            --labels benchmarks/holdouts/real-evidence-2026-source.json \
+            --out real-artifact-label-audit.json
+          python - <<'PY'
+          import json
+
+          audit = json.load(open("real-artifact-label-audit.json", encoding="utf-8"))
+          metrics = audit.get("label_metrics") or {}
+          expected = {
+              "labeled_extensions": 7,
+              "false_positive_review_count": 0,
+              "false_positive_block_count": 0,
+              "false_negative_malware_count": 0,
+          }
+          for field, value in expected.items():
+              if metrics.get(field) != value:
+                  raise SystemExit(f"labelled real-artifact metric {field} drifted: {metrics.get(field)!r} != {value!r}")
+          noisy_rules = [
+              row for row in audit.get("labelled_rule_observations", [])
+              if row.get("known_safe_actionable_extensions", 0) or row.get("known_safe_block_extensions", 0)
+          ]
+          if noisy_rules:
+              raise SystemExit(f"known-safe real artifacts produced actionable rule noise: {noisy_rules}")
+          print(json.dumps({
+              "labeled_extensions": metrics["labeled_extensions"],
+              "false_positive_review_count": metrics["false_positive_review_count"],
+              "false_positive_block_count": metrics["false_positive_block_count"],
+              "false_negative_malware_count": metrics["false_negative_malware_count"],
+          }, sort_keys=True))
+          PY
       - name: Unit and integration tests
         run: python -m pytest -q
       - name: Scan deterministic production fixtures
@@ -261,6 +311,9 @@ jobs:
           path: |
             production-fixtures.json
             production-rule-audit.json
+            real-artifact-label-manifest.json
+            real-artifact-label-scan.json
+            real-artifact-label-audit.json
             production-gate.json
             bcai-calibration.json
             nx-console-calibration.json

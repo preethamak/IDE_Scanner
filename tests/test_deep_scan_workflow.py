@@ -54,6 +54,10 @@ def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     assert "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144" in workflow
     assert 'item.get("rule_id") == "known-vulnerable-extension"' in workflow
     assert "Acquire exact safe-control inputs" in workflow
+    assert "Measure labelled real-artifact noise" in workflow
+    assert "real-artifact-label-audit.json" in workflow
+    assert '"labeled_extensions": 7' in workflow
+    assert '"false_positive_review_count": 0' in workflow
     assert "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3" in workflow
     assert "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44" in workflow
     assert "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168" in workflow
@@ -77,6 +81,7 @@ def test_publication_holdout_uploads_rule_level_audit() -> None:
 
     assert "Audit holdout rule-level evidence" in workflow
     assert "scripts/audit_report.py" in workflow
+    assert "--labels holdout-corpus.json" in workflow
     assert "holdout-rule-audit.json" in workflow
 
 

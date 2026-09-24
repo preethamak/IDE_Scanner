@@ -134,6 +134,46 @@ class ReportAuditTests(unittest.TestCase):
         self.assertEqual(result["label_metrics"]["labeled_extensions"], 1)
         self.assertEqual(result["label_metrics"]["mismatches"], [])
 
+    def test_holdout_labels_produce_rule_level_noise_metrics(self) -> None:
+        result = audit_report({
+            "extensions": [
+                {
+                    "extension_id": "publisher.safe",
+                    "version": "1.0.0",
+                    "verdict": "clean",
+                    "decision": "allow",
+                    "findings": [{"rule_id": "network-access", "actionability": "contextual", "evidence": {}}],
+                },
+                {
+                    "extension_id": "publisher.malicious",
+                    "version": "2.0.0",
+                    "verdict": "suspicious",
+                    "decision": "block",
+                    "findings": [{"rule_id": "network-access", "actionability": "review", "evidence": {}}],
+                },
+            ],
+        }, {
+            "publisher.safe@1.0.0": "known_safe",
+            "publisher.malicious@2.0.0": "known_malicious",
+        })
+
+        self.assertEqual(result["label_metrics"]["label_counts"], {"known_safe": 1, "known_malicious": 1})
+        observation = result["labelled_rule_observations"][0]
+        self.assertEqual(observation["rule_id"], "network-access")
+        self.assertEqual(observation["known_safe_extensions"], 1)
+        self.assertEqual(observation["known_safe_actionable_extensions"], 0)
+        self.assertEqual(observation["known_malicious_block_extensions"], 1)
+
+    def test_load_labels_accepts_holdout_artifacts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "holdout.json"
+            path.write_text(json.dumps({"artifacts": [{
+                "extension_id": "publisher.safe",
+                "version": "1.0.0",
+                "label": "known_safe",
+            }]}), encoding="utf-8")
+            self.assertEqual(_load_labels(path), {"publisher.safe@1.0.0": "known_safe"})
+
 
 if __name__ == "__main__":
     unittest.main()

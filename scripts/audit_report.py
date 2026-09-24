@@ -35,6 +35,9 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
     rule_extension_outcomes: dict[str, dict[str, str]] = defaultdict(dict)
     rule_evidence: dict[str, Counter[str]] = defaultdict(Counter)
     rule_actionability: dict[str, Counter[str]] = defaultdict(Counter)
+    labelled_rule_extensions: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    labelled_rule_actionable_extensions: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    labelled_rule_block_extensions: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     extension_rows: list[dict[str, Any]] = []
 
     for raw_extension in extensions:
@@ -58,6 +61,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
         findings = findings if isinstance(findings, list) else []
         finding_rule_ids: Counter[str] = Counter()
         extension_actionability: Counter[str] = Counter()
+        rule_actionability_by_extension: dict[str, set[str]] = defaultdict(set)
         for raw_finding in findings:
             if not isinstance(raw_finding, dict):
                 continue
@@ -74,6 +78,7 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             rule_extension_outcomes[rule_id][extension_id] = routing_outcome
             rule_evidence[rule_id][evidence_class] += 1
             rule_actionability[rule_id][actionability] += 1
+            rule_actionability_by_extension[rule_id].add(actionability)
             finding_actionability_counts[actionability] += 1
             extension_actionability[actionability] += 1
             finding_rule_ids[rule_id] += 1
@@ -91,6 +96,16 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
             "top_rules": [rule_id for rule_id, _ in finding_rule_ids.most_common(8)],
             "label": _lookup_label(labels, extension_id, str(raw_extension.get("version") or "unknown")) if labels else None,
         })
+        if labels is not None:
+            label = _normalize_label(_lookup_label(labels, extension_id, str(raw_extension.get("version") or "unknown")))
+            if label:
+                artifact_key = _artifact_key(extension_id, raw_extension.get("version") or "unknown")
+                for rule_id, actionabilities in rule_actionability_by_extension.items():
+                    labelled_rule_extensions[rule_id][label].add(artifact_key)
+                    if actionabilities.intersection({"review", "block"}):
+                        labelled_rule_actionable_extensions[rule_id][label].add(artifact_key)
+                    if decision == "block":
+                        labelled_rule_block_extensions[rule_id][label].add(artifact_key)
 
     rules = []
     for rule_id, finding_count in rule_counts.most_common():
@@ -135,6 +150,11 @@ def audit_report(report: dict[str, Any], labels: dict[str, str] | None = None) -
     }
     if labels is not None:
         result["label_metrics"] = _label_metrics(extension_rows, labels)
+        result["labelled_rule_observations"] = _labelled_rule_observations(
+            labelled_rule_extensions,
+            labelled_rule_actionable_extensions,
+            labelled_rule_block_extensions,
+        )
     return result
 
 
@@ -159,13 +179,15 @@ def _label_metrics(rows: list[dict[str, Any]], labels: dict[str, str]) -> dict[s
         if expected is None:
             continue
         observed = row["routing_outcome"]
+        normalized_expected = _normalize_label(expected)
         observed_malware = observed in {"suspicious", "malicious"}
-        expected_malware = expected in {"suspicious", "malicious"}
-        if expected == "allow" and observed != "clean":
+        expected_malware = normalized_expected == "known_malicious"
+        expected_safe = normalized_expected == "known_safe"
+        if expected_safe and observed != "clean":
             false_positive_reviews += 1
         if expected_malware and not observed_malware:
             false_negative_malware += 1
-        if (expected == "allow" and observed != "clean") or (expected != "allow" and observed == "clean"):
+        if (expected_safe and observed != "clean") or (expected_malware and observed == "clean"):
             mismatches.append({
                 "extension_id": row["extension_id"],
                 "expected": expected,
@@ -175,13 +197,44 @@ def _label_metrics(rows: list[dict[str, Any]], labels: dict[str, str]) -> dict[s
         "labeled_extensions": len(eligible),
         "routing_accuracy": sum(
             1 for row in eligible
-            if (_lookup_label(labels, row["extension_id"], row["version"]) == "allow" and row["verdict"] == "clean")
-            or (_lookup_label(labels, row["extension_id"], row["version"]) != "allow" and row["verdict"] != "clean")
+            if (_normalize_label(_lookup_label(labels, row["extension_id"], row["version"])) == "known_safe" and row["verdict"] == "clean")
+            or (_normalize_label(_lookup_label(labels, row["extension_id"], row["version"])) != "known_safe" and row["verdict"] != "clean")
         ) / len(eligible) if eligible else None,
         "false_positive_review_count": false_positive_reviews,
+        "false_positive_block_count": sum(
+            1 for row in eligible
+            if _normalize_label(_lookup_label(labels, row["extension_id"], row["version"])) == "known_safe"
+            and row["decision"] == "block"
+        ),
         "false_negative_malware_count": false_negative_malware,
+        "label_counts": dict(Counter(_normalize_label(_lookup_label(labels, row["extension_id"], row["version"])) for row in eligible)),
         "mismatches": mismatches,
     }
+
+
+def _labelled_rule_observations(
+    rule_extensions: dict[str, dict[str, set[str]]],
+    actionable_extensions: dict[str, dict[str, set[str]]],
+    block_extensions: dict[str, dict[str, set[str]]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for rule_id in sorted(rule_extensions):
+        labels = rule_extensions[rule_id]
+        rows.append({
+            "rule_id": rule_id,
+            "known_safe_extensions": len(labels.get("known_safe", set())),
+            "known_safe_actionable_extensions": len(actionable_extensions[rule_id].get("known_safe", set())),
+            "known_safe_block_extensions": len(block_extensions[rule_id].get("known_safe", set())),
+            "known_malicious_extensions": len(labels.get("known_malicious", set())),
+            "known_malicious_actionable_extensions": len(actionable_extensions[rule_id].get("known_malicious", set())),
+            "known_malicious_block_extensions": len(block_extensions[rule_id].get("known_malicious", set())),
+            "gray_extensions": len(labels.get("gray", set())),
+        })
+    return sorted(rows, key=lambda row: (
+        -row["known_safe_actionable_extensions"],
+        -row["known_safe_extensions"],
+        row["rule_id"],
+    ))
 
 
 def _artifact_key(extension_id: object, version: object) -> str:
@@ -194,12 +247,25 @@ def _lookup_label(labels: dict[str, str] | None, extension_id: str, version: str
     return labels.get(_artifact_key(extension_id, version)) or labels.get(extension_id.lower())
 
 
+def _normalize_label(label: str | None) -> str | None:
+    value = str(label or "").strip().lower()
+    if value in {"allow", "clean", "known_safe", "safe"}:
+        return "known_safe"
+    if value in {"review", "gray", "grey", "suspicious"}:
+        return "gray"
+    if value in {"block", "malicious", "known_malicious", "known-bad"}:
+        return "known_malicious"
+    return None
+
+
 def _load_labels(path: Path) -> dict[str, str]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(payload, dict) and isinstance(payload.get("samples"), list):
         rows = payload["samples"]
     elif isinstance(payload, dict) and isinstance(payload.get("rows"), list):
         rows = payload["rows"]
+    elif isinstance(payload, dict) and isinstance(payload.get("artifacts"), list):
+        rows = payload["artifacts"]
     elif isinstance(payload, list):
         rows = payload
     else:
@@ -208,7 +274,7 @@ def _load_labels(path: Path) -> dict[str, str]:
     for row in rows:
         if not isinstance(row, dict) or not row.get("extension_id"):
             continue
-        label = row.get("artifact_aware_expected_decision") or row.get("expected_decision") or row.get("expected_verdict")
+        label = row.get("artifact_aware_expected_decision") or row.get("expected_decision") or row.get("expected_verdict") or row.get("label")
         if label:
             extension_id = str(row["extension_id"])
             version = row.get("version")
