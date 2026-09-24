@@ -409,6 +409,30 @@ class CoverageHonestyTests(unittest.TestCase):
         self.assertEqual(coverage["status"], "incomplete")
         self.assertIn("Required provider semgrep did not complete", coverage["limitations"])
 
+    def test_late_provider_success_clears_provisional_failure(self) -> None:
+        coverage = {
+            "executable_candidates": ["extension.js"],
+            "analyzed_executable_files": ["extension.js"],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "limitations": ["Required provider dependency_intelligence did not complete"],
+            "providers": {
+                "dependency_intelligence": {
+                    "provider": "dependency_intelligence",
+                    "required": True,
+                    "status": "completed",
+                },
+            },
+            "manifest_validation": {"valid": True, "status": "valid"},
+        }
+        with patch.dict("os.environ", {"IDE_SCANNER_REQUIRE_PROVIDERS": "dependency_intelligence"}, clear=False):
+            _finalize_analysis_coverage(coverage)
+        self.assertTrue(coverage["required_providers_complete"])
+        self.assertEqual(coverage["limitations"], [])
+        self.assertEqual(coverage["status"], "complete")
+
 
 class BoundedReadTests(unittest.TestCase):
     def test_read_text_caps_prefix(self) -> None:
