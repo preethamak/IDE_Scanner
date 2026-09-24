@@ -5,7 +5,12 @@ import json
 import unittest
 from unittest.mock import patch
 
-from scripts.publish_website_corpus import published_artifacts, rows_to_dispatch, workflow_command
+from scripts.publish_website_corpus import (
+    github_repository_full_name,
+    published_artifacts,
+    rows_to_dispatch,
+    workflow_command,
+)
 from scripts.validate_website_publication import validate_rows
 
 
@@ -60,6 +65,20 @@ class WebsitePublicationTests(unittest.TestCase):
     def test_dispatch_rejects_non_immutable_scanner_build(self) -> None:
         with self.assertRaises(ValueError):
             workflow_command({"extension_id": "publisher.one", "version": "1.0.0"}, scanner_build="main")
+
+    def test_publication_accepts_https_and_scp_github_origins(self) -> None:
+        self.assertEqual(
+            github_repository_full_name("https://github.com/preethamak/IDE_Scanner.git"),
+            "preethamak/IDE_Scanner",
+        )
+        self.assertEqual(
+            github_repository_full_name("git@github.com:preethamak/IDE_Scanner.git"),
+            "preethamak/IDE_Scanner",
+        )
+
+    def test_publication_rejects_non_github_origins(self) -> None:
+        with self.assertRaises(RuntimeError):
+            github_repository_full_name("https://example.test/preethamak/IDE_Scanner.git")
 
     def test_validator_compares_exact_hash_decision_coverage_and_schema(self) -> None:
         expected = [{"extension_id": "publisher.one", "version": "1.0.0", "sha256": "a" * 64, "frozen_expected_decision": "review"}]
