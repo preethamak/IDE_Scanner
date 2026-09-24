@@ -32,6 +32,7 @@ def test_worker_verifies_real_bubblewrap_namespace_isolation() -> None:
 def test_production_gate_runs_a_deep_runtime_smoke_corpus() -> None:
     workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "production-gate.yml").read_text(encoding="utf-8")
 
+    assert "timeout-minutes: 45" in workflow
     assert "Acquire exact real-artifact calibration input" in workflow
     assert "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216" in workflow
     assert "Scan exact Nx Console supply-chain calibration input" in workflow

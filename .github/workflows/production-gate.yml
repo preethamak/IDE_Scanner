@@ -11,7 +11,11 @@ permissions:
 jobs:
   deterministic-corpus:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The gate runs the complete scanner suite plus exact real-artifact
+    # calibration scans. Keep the job bounded, but above the observed local
+    # suite duration so a healthy release is not rejected as an operational
+    # timeout before the accuracy checks run.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
