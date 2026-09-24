@@ -84,7 +84,7 @@ capability contracts, cross-file and value-linked flows, provenance checks, and
 OS-isolated dynamic analysis. Those controls are prerequisites for the gates
 above, not evidence that the gates have passed.
 
-The latest local deterministic gate was rerun against scanner build
+The recorded local deterministic gate was run against scanner build
 `071284c9639f46fe6ce65abe1cc3a4563630dd6c` with the exact build identity
 supplied to the command and passed its identity-bound regression checks. All 8 required corpus artifacts were complete, both
 known-safe controls were allowed without review, and all 4 required

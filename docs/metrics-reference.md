@@ -409,7 +409,9 @@ a separate, frozen, exact-artifact holdout:
 PYTHONPATH=src python scripts/build_publication_accuracy_gate.py \
   --regression-gate production-gate.json \
   --holdout-gate holdout-gate.json \
+  --behavior-gate behavior-holdout-gate.json \
   --holdout-corpus holdout-corpus.json \
+  --rule-audit holdout-rule-audit.json \
   --out publication-accuracy-gate.json
 ```
 
