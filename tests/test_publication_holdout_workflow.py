@@ -25,6 +25,7 @@ def test_publication_holdout_workflow_requires_exact_deep_runtime_evidence() -> 
     assert "sandbox-preflight" in workflow
     assert "--jobs 1" in workflow
     assert "--timeout 180" in workflow
+    assert "timeout-minutes: 120" in workflow
     assert "strace" in workflow
     assert "GUARDRAILS_RUNTIME_EXTERNAL_TRACE" in workflow
     assert "benchmark holdout" in workflow

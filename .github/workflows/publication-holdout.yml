@@ -17,7 +17,10 @@ jobs:
   holdout:
     if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The holdout is scanned twice, serialized, with a 180-second wall-clock
+    # budget per artifact. Thirteen artifacts therefore have a 78-minute
+    # worst-case scan envelope before setup and acquisition overhead.
+    timeout-minutes: 120
     env:
       GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
       GUARDRAILS_RUNTIME_BWRAP_SUDO: "1"
