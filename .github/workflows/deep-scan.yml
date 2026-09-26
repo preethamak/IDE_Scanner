@@ -58,6 +58,13 @@ on:
 permissions:
   contents: read
 
+# A scheduled runner can otherwise overlap a manually dispatched bulk run.
+# Serialize worker runs so exact-job dispatches cannot race bulk claims and
+# turn a valid queued job into an avoidable HTTP 400 claim failure.
+concurrency:
+  group: guardrails-deep-scan-workers
+  cancel-in-progress: false
+
 jobs:
   scan:
     name: Deep Scan worker ${{ matrix.worker }}
