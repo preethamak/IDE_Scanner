@@ -161,7 +161,10 @@ jobs:
           IDE_SCANNER_BUILD_SHA: ${{ inputs.scanner_build || github.sha }}
           # Large packages are handled only on the isolated cloud worker. The
           # local CLI retains its conservative 50 MiB default.
-          IDE_SCANNER_MAX_VSIX_BYTES: 268435456
+          # Agentic extensions can ship large platform runtimes. Keep the
+          # isolated worker within the scanner's 512 MiB configured maximum;
+          # local CLI scans retain the conservative 50 MiB default.
+          IDE_SCANNER_MAX_VSIX_BYTES: 536870912
           IDE_SCANNER_VSIX_DOWNLOAD_TIMEOUT: 180
           IDE_SCANNER_ARTIFACT_STORE: ${{ runner.temp }}/ide-scanner-artifacts
           IDE_SCANNER_RUNTIME_TIMEOUT: "20"
