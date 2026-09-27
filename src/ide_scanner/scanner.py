@@ -722,12 +722,15 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                 })
             else:
                 analysis_coverage["provider_scopes"]["semgrep"]["eligible_files"].append(rel)
-            ast_budget_allows_entrypoint = (
-                not is_entrypoint
-                or not generated_blob
-                or text_size <= GENERATED_ENTRYPOINT_AST_MAX_BYTES
-            )
-            if ast_budget_allows_entrypoint:
+            # Generated bundles are still covered by bounded raw-text, YARA,
+            # and capability analysis, but their AST trees can amplify memory
+            # by tens of times. Keep the AST resource bound for every generated
+            # blob, not only declared entrypoints; otherwise a large helper
+            # bundle can make an otherwise valid scan incomplete. Declared
+            # entrypoints that are skipped receive an explicit posture finding
+            # below so this remains disclosed rather than silently trusted.
+            ast_budget_allows = not generated_blob or text_size <= GENERATED_ENTRYPOINT_AST_MAX_BYTES
+            if ast_budget_allows:
                 status = _add_ast_findings(extension_id, version, rel, text, findings, generated=generated_blob)
                 js_ast_statuses.append(status)
                 if status not in ("ok", "unparsed"):
@@ -736,6 +739,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
                     ast_unparsed_entrypoints.append(rel)
             else:
                 js_ast_statuses.append("generated-resource-skipped")
+                if is_entrypoint:
+                    ast_unparsed_entrypoints.append(rel)
                 js_ast_failed_paths.append(rel)
         if suffix in EXEC_TEXT_EXTS:
             analysis_coverage["analyzed_executable_files"].append(rel)
@@ -835,12 +840,13 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
 
     if ast_unparsed_entrypoints:
         # A declared activation entrypoint whose source the AST layer cannot
-        # parse (TypeScript/JSX shipped un-transpiled, or genuinely malformed
-        # JS) loses structural evasion detection for that file. The raw-text
-        # rule layer still covers it, so the provider stays "completed" -- but
-        # a silent pass here would let the primary code path skate on
-        # regex-only coverage. Surface it as a posture-class review nudge so
-        # the extension cannot reach "allow" without a human confirming the
+        # parse (TypeScript/JSX shipped un-transpiled, genuinely malformed JS,
+        # or a generated bundle beyond the bounded AST budget) loses
+        # structural evasion detection for that file. The raw-text rule layer
+        # still covers it, so the provider stays "completed" -- but a silent
+        # pass here would let the primary code path skate on regex-only
+        # coverage. Surface it as a posture-class review nudge so the
+        # extension cannot reach "allow" without a human confirming the
         # entrypoint is benign.
         listed = ", ".join(sorted(ast_unparsed_entrypoints)[:5])
         findings.append(_finding(
@@ -850,10 +856,10 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
             "code",
             "LOW",
             _SEVERITY_TO_CONFIDENCE["LOW"],
-            f"Declared entrypoint(s) could not be parsed by the AST layer (plain-JS only): {listed}. "
-            "Structural obfuscation detection did not run on this file; only raw-text rules applied.",
+            f"Declared entrypoint(s) were not fully covered by the AST layer (plain-JS parser or resource budget): {listed}. "
+            "Structural obfuscation detection did not run on this file; bounded raw-text rules still applied.",
             sorted(ast_unparsed_entrypoints)[:5],
-            "Confirm the entrypoint is benign; AST-level evasion checks did not cover it because acorn parses plain JavaScript only.",
+            "Confirm the entrypoint is benign; AST-level evasion checks did not fully cover it because the source was not parseable or exceeded the generated-code budget.",
             evidence={"unparsed_entrypoints": sorted(ast_unparsed_entrypoints)},
         ))
 
@@ -5417,11 +5423,13 @@ def _read_manifest(path: Path) -> dict[str, Any]:
 def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str] | None = None) -> dict[str, Any]:
     """Summarize per-file JS/TS AST walker statuses into a provider record.
 
-    ``completed`` only when every analyzed file's walker ran successfully. A
-    missing Node runtime, timeout, spawn error, or malformed walker output on
-    any file marks the provider ``failed`` (required), so coverage finalization
-    records a limitation and the scan cannot report ``complete``/``allow`` on
-    the strength of AST analysis that never actually ran.
+    ``completed`` when every eligible source file's walker ran successfully,
+    or when a generated bundle was explicitly skipped by the bounded AST
+    budget. A missing Node runtime, timeout, spawn error, malformed walker
+    output, or oversized non-generated source marks the provider ``failed``
+    (required), so coverage finalization records a limitation and the scan
+    cannot report ``complete``/``allow`` on the strength of AST analysis that
+    never actually ran.
 
     ``unparsed`` files (TypeScript/JSX or syntactically invalid source that the
     plain-JS vendored parser cannot read) are a disclosed tool limitation, not
@@ -5452,12 +5460,17 @@ def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str]
         record["status"] = "completed"
         record["analyzed_files"] = 0
         return record
-    hard_failures = [s for s in statuses if s not in ("ok", "unparsed")]
+    hard_failures = [s for s in statuses if s not in ("ok", "unparsed", "generated-resource-skipped")]
     unparsed = [s for s in statuses if s == "unparsed"]
+    generated_skipped = [s for s in statuses if s == "generated-resource-skipped"]
     record["analyzed_files"] = len(statuses)
     record["failed_files"] = len(hard_failures)
     if unparsed:
         record["unparsed_files"] = len(unparsed)
+    if generated_skipped:
+        record["skipped_files"] = len(generated_skipped)
+        if failed_paths:
+            record["skipped_paths"] = sorted(set(failed_paths))
     if hard_failures:
         reasons = sorted(set(hard_failures))
         record["status"] = "failed"
@@ -5466,24 +5479,25 @@ def _javascript_ast_provider_status(statuses: list[str], failed_paths: list[str]
             record["failed_paths"] = sorted(set(failed_paths))
         if "node-missing" in reasons:
             record["error"] = "Node runtime unavailable; JavaScript AST analysis did not run."
-        elif "generated-resource-skipped" in reasons:
-            record["error"] = (
-                "AST analysis skipped generated entrypoints beyond the "
-                f"{GENERATED_ENTRYPOINT_AST_MAX_BYTES:,}-byte generated-code budget; "
-                "bounded raw-text and YARA analysis still ran."
-            )
         elif "resource-skipped" in reasons:
             record["error"] = (
                 f"AST analysis skipped files beyond the {JS_AST_MAX_INPUT_BYTES:,}-byte "
                 "per-file memory-safety limit; bounded raw-text and YARA analysis still ran."
             )
-    elif unparsed:
+    elif unparsed or generated_skipped:
         record["status"] = "completed"
-        record["note"] = (
-            f"AST analysis skipped {len(unparsed)} file(s) the plain-JS parser "
-            "could not read (TypeScript/JSX or invalid syntax); raw-text rules "
-            "still applied."
-        )
+        notes: list[str] = []
+        if unparsed:
+            notes.append(
+                f"AST analysis skipped {len(unparsed)} file(s) the plain-JS parser "
+                "could not read (TypeScript/JSX or invalid syntax)"
+            )
+        if generated_skipped:
+            notes.append(
+                f"AST analysis skipped {len(generated_skipped)} generated file(s) "
+                f"beyond the {GENERATED_ENTRYPOINT_AST_MAX_BYTES:,}-byte budget"
+            )
+        record["note"] = "; ".join(notes) + "; bounded raw-text and YARA rules still applied."
     else:
         record["status"] = "completed"
     return record
