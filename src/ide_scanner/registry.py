@@ -195,7 +195,14 @@ def download_marketplace_vsix(
     if not target_version:
         raise MarketplaceDownloadError(f"Could not resolve a version to download for {resolved_id}.")
 
-    download_url = str(metadata.get("download_url") or "") or (
+    # The gallery query can return several platform variants with the same
+    # semantic version.  For an unqualified scan, use the exact VSIXPackage
+    # asset selected by the gallery response instead of the generic vspackage
+    # endpoint, which may resolve to a different variant than the digest in
+    # the response.  Target-platform scans intentionally keep the generic
+    # endpoint so the targetPlatform selector remains authoritative.
+    metadata_download_url = str(metadata.get("download_url") or "")
+    download_url = (metadata_download_url if metadata_download_url and not target_platform else "") or (
         f"https://marketplace.visualstudio.com/_apis/public/gallery/publishers/{publisher}/"
         f"vsextensions/{name}/{target_version}/vspackage"
     )
@@ -832,6 +839,7 @@ def _normalize_marketplace_extension(extension_id: str, raw: dict[str, Any]) -> 
         "rating_count": int(stats.get("ratingcount") or stats.get("ratingCount") or 0),
         "registry": "vs-marketplace",
         "vsix_sha256": version_properties.get(VSIX_SHA256_PROPERTY, "").lower(),
+        "download_url": assets.get(VSIX_ASSET_TYPE, ""),
         "signature_asset_declared": VSIX_SIGNATURE_ASSET_TYPE in assets,
         "signature_asset_url": assets.get(VSIX_SIGNATURE_ASSET_TYPE, ""),
     }

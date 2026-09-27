@@ -98,6 +98,9 @@ class RegistryTests(unittest.TestCase):
             "versions": [{
                 "version": "1.2.3",
                 "files": [{
+                    "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                    "source": "https://cdn.example/package",
+                }, {
                     "assetType": "Microsoft.VisualStudio.Services.VsixSignature",
                     "source": "https://cdn.example/signature",
                 }],
@@ -110,6 +113,7 @@ class RegistryTests(unittest.TestCase):
         })
 
         self.assertEqual(metadata["vsix_sha256"], digest)
+        self.assertEqual(metadata["download_url"], "https://cdn.example/package")
         self.assertTrue(metadata["signature_asset_declared"])
         self.assertEqual(metadata["signature_asset_url"], "https://cdn.example/signature")
 
@@ -209,6 +213,7 @@ class RegistryTests(unittest.TestCase):
             "version": "1.2.3",
             "registry": "vs-marketplace",
             "vsix_sha256": digest,
+            "download_url": "https://cdn.example/package",
             "signature_asset_declared": True,
             "signature_asset_url": "https://cdn.example/signature",
         }, None)
@@ -219,6 +224,7 @@ class RegistryTests(unittest.TestCase):
             downloaded = result.read_bytes()
 
         self.assertEqual(downloaded, payload)
+        self.assertEqual(download.call_args.args[0], "https://cdn.example/package")
         self.assertEqual(source["expected_sha256"], digest)
         self.assertEqual(source["sha256_verified"], "true")
         self.assertEqual(source["signature_asset_declared"], "true")
