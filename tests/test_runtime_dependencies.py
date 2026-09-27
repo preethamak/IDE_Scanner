@@ -21,6 +21,17 @@ def test_non_rust_extensions_do_not_require_sidecars(tmp_path: Path) -> None:
     assert runtime_dependencies.provision_for_extension(target, {"version": "1.0"}) == []
 
 
+def test_current_rust_analyzer_nightly_lock_matches_manifest(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_dependencies.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(runtime_dependencies.platform, "machine", lambda: "x86_64")
+
+    lock = runtime_dependencies._rust_lock({"releaseTag": "nightly", "version": "0.4.3062"})
+
+    assert lock is not None
+    assert lock["dependency"] == "rust-analyzer"
+    assert lock["binary_sha256"] == "86552b540278e7d1e0269bbf98eec3c1d75a001c4ed65edae97c8279eb0806bb"
+
+
 def test_missing_rust_sidecar_is_explicit(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         runtime_dependencies,

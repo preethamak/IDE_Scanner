@@ -33,6 +33,21 @@ RUNTIME_DEPENDENCY_LOCK: dict[str, dict[str, str]] = {
         "cache_subpath": "rust-analyzer-2026-07-13/rust-analyzer",
         "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-x86_64-unknown-linux-gnu.gz",
     },
+    # The Marketplace/Open VSX nightly channel currently publishes the
+    # 0.4.3062 standalone server. The upstream `nightly` tag is mutable, so
+    # keep the expected compressed and decompressed hashes here; provisioning
+    # must stop rather than accept a changed asset silently.
+    "rust-analyzer:nightly": {
+        "dependency": "rust-analyzer",
+        "release_tag": "nightly",
+        "version": "0.4.3062",
+        "platform": "linux-x86_64",
+        "asset_name": "rust-analyzer-x86_64-unknown-linux-gnu.gz",
+        "asset_sha256": "8538df3a4add2395d73470666bbc1ccc922dec0d319a5e80223403749d908521",
+        "binary_sha256": "86552b540278e7d1e0269bbf98eec3c1d75a001c4ed65edae97c8279eb0806bb",
+        "cache_subpath": "rust-analyzer-nightly/rust-analyzer",
+        "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/nightly/rust-analyzer-x86_64-unknown-linux-gnu.gz",
+    },
 }
 
 
