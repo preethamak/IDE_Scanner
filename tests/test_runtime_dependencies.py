@@ -29,7 +29,8 @@ def test_current_rust_analyzer_nightly_lock_matches_manifest(monkeypatch) -> Non
 
     assert lock is not None
     assert lock["dependency"] == "rust-analyzer"
-    assert lock["binary_sha256"] == "86552b540278e7d1e0269bbf98eec3c1d75a001c4ed65edae97c8279eb0806bb"
+    assert lock["asset_sha256"] == "07be8c813a8557180da5143ae424ea12388380ad1caeb9b6a9e6347a0cfcc115"
+    assert lock["binary_sha256"] == "dae966b7beb26d9cea97a73faaadc3ee1db879bd4aa63ac7c841f6c31cadd384"
 
 
 def test_missing_rust_sidecar_is_explicit(tmp_path: Path, monkeypatch) -> None:
