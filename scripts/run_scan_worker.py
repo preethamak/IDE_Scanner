@@ -30,6 +30,7 @@ def main() -> int:
         return 2
     max_jobs = bounded_jobs(os.environ.get("SCAN_JOBS_PER_WORKER", "1"))
     empty_claim_retries = bounded_retries(os.environ.get("SCAN_EMPTY_CLAIM_RETRIES", "5"))
+    claim_error_retries = bounded_retries(os.environ.get("SCAN_CLAIM_ERROR_RETRIES", "8"))
     artifact_root = Path(
         os.environ.get(
             "IDE_SCANNER_WORKER_ARTIFACTS",
@@ -56,6 +57,7 @@ def main() -> int:
             job_id=job_id,
             runner_suffix=str(index),
             retries=0 if job_id else empty_claim_retries,
+            error_retries=claim_error_retries,
         )
         if job is None:
             break
@@ -352,16 +354,31 @@ def claim_with_retries(
     job_id: str | None,
     runner_suffix: str,
     retries: int,
+    error_retries: int = 0,
 ) -> dict[str, object] | None:
-    """Retry empty claims briefly to absorb concurrent conditional-update races."""
-    for attempt in range(retries + 1):
-        job = claim_scan.claim_job(url, job_id=job_id, runner_suffix=runner_suffix)
+    """Retry empty claims and transient queue failures without losing work."""
+    empty_attempt = 0
+    error_attempt = 0
+    while True:
+        try:
+            job = claim_scan.claim_job(url, job_id=job_id, runner_suffix=runner_suffix)
+        except RuntimeError as error:
+            if not is_transient_claim_error(error) or error_attempt >= error_retries:
+                raise
+            time.sleep(min(10.0, 0.5 * (2**error_attempt)))
+            error_attempt += 1
+            continue
         if job is not None:
             return job
-        if attempt >= retries:
-            break
-        time.sleep(min(1.0, 0.2 * (2**attempt)))
-    return None
+        if empty_attempt >= retries:
+            return None
+        time.sleep(min(1.0, 0.2 * (2**empty_attempt)))
+        empty_attempt += 1
+
+
+def is_transient_claim_error(error: RuntimeError) -> bool:
+    message = str(error)
+    return any(f"HTTP {status}" in message for status in (500, 502, 503, 504))
 
 
 class temporary_environment:
