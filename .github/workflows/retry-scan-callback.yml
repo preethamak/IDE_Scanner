@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 10
     env:
       JOB_ID: ${{ inputs.job_id }}
+      SCAN_JOB_ID: ${{ inputs.job_id }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       SCAN_TARGET_PLATFORM: ${{ inputs.target_platform }}
       SCAN_CALLBACK_URL: https://abscissa.dev/api/internal/scan-results
