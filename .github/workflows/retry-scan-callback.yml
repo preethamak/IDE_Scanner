@@ -1,0 +1,71 @@
+name: Retry scan callback
+
+# A scan can finish successfully while the control-plane callback is
+# temporarily unavailable. Replay the exact stored bundle through the same
+# signed callback contract; never rerun analysis or bypass canonical checks.
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: GitHub Actions run containing the deep-scan artifact
+        required: true
+        type: string
+      job_id:
+        description: Exact scan job whose stored bundle should be replayed
+        required: true
+        type: string
+      target_platform:
+        description: Optional VS Marketplace target platform from the original job
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: guardrails-callback-retry-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JOB_ID: ${{ inputs.job_id }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SCAN_TARGET_PLATFORM: ${{ inputs.target_platform }}
+      SCAN_CALLBACK_URL: https://abscissa.dev/api/internal/scan-results
+      SCAN_INTERNAL_ALLOWED_HOSTS: abscissa.dev
+      SCAN_CALLBACK_SECRET: ${{ secrets.SCAN_CALLBACK_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate replay identity
+        run: |
+          if ! [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "source_run_id must be numeric."
+            exit 1
+          fi
+          if ! [[ "$JOB_ID" =~ ^(candidate-)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]; then
+            echo "job_id must be a UUID or candidate-prefixed UUID."
+            exit 1
+          fi
+          if [ -z "$SCAN_CALLBACK_SECRET" ]; then
+            echo "SCAN_CALLBACK_SECRET is required."
+            exit 1
+          fi
+      - name: Download exact worker artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-scan-worker-1
+          path: callback-artifact
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Replay signed callback
+        run: |
+          bundle=$(find callback-artifact -type f -name "$JOB_ID.json" -print -quit)
+          if [ -z "$bundle" ]; then
+            echo "No exact bundle was found for $JOB_ID."
+            exit 1
+          fi
+          python scripts/callback_scan.py "$bundle"
