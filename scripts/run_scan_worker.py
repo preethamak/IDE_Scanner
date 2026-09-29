@@ -110,12 +110,18 @@ def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int 
         os.environ.get("IDE_SCANNER_RUNTIME_TIMEOUT", "20"),
         "--format",
         "bundle.json",
-        "--include-raw-evidence",
         "--artifact-store",
         os.environ["IDE_SCANNER_ARTIFACT_STORE"],
         "--output",
         str(bundle_path),
     ]
+    # Public publication reports only need the bounded finding graph and
+    # separately stored previews. Raw evidence duplicates source snippets in
+    # every D1 report and can exhaust the scan database without improving the
+    # release contract. Keep raw evidence for interactive/user scans, but do
+    # not persist it for public cohorts or benchmark artifacts.
+    if str(job.get("scan_purpose") or "user_request") not in {"public_intelligence", "benchmark"}:
+        command.append("--include-raw-evidence")
     if target_platform:
         command.extend(["--target-platform", target_platform])
 

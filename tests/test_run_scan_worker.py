@@ -71,6 +71,64 @@ def test_scan_timeout_kills_the_entire_process_group(tmp_path: Path) -> None:
     assert process.wait_calls == 2
 
 
+def test_public_scan_worker_omits_raw_evidence_to_bound_public_storage(tmp_path: Path) -> None:
+    class CompletedProcess:
+        pid = 1234
+
+        def wait(self, timeout: int) -> int:
+            return 0
+
+        def poll(self) -> int:
+            return 0
+
+    with patch.dict("os.environ", {"IDE_SCANNER_ARTIFACT_STORE": str(tmp_path)}, clear=True), patch.object(
+        run_scan_worker.subprocess, "Popen", return_value=CompletedProcess()
+    ) as popen, patch.object(run_scan_worker, "bundle_has_immutable_identity", return_value=True):
+        (tmp_path / "scan.json").touch()
+        assert run_scan_worker.run_scan(
+            {
+                "id": "public-job",
+                "extension_id": "publisher.extension",
+                "version": "1.0.0",
+                "scan_purpose": "public_intelligence",
+            },
+            tmp_path / "scan.json",
+            timeout_seconds=60,
+        ) is True
+
+    command = popen.call_args.args[0]
+    assert "--include-raw-evidence" not in command
+
+
+def test_user_scan_worker_keeps_raw_evidence_opt_in(tmp_path: Path) -> None:
+    class CompletedProcess:
+        pid = 1234
+
+        def wait(self, timeout: int) -> int:
+            return 0
+
+        def poll(self) -> int:
+            return 0
+
+    with patch.dict("os.environ", {"IDE_SCANNER_ARTIFACT_STORE": str(tmp_path)}, clear=True), patch.object(
+        run_scan_worker.subprocess, "Popen", return_value=CompletedProcess()
+    ) as popen, patch.object(run_scan_worker, "bundle_has_immutable_identity", return_value=True):
+        (tmp_path / "scan.json").touch()
+        assert run_scan_worker.run_scan(
+            {
+                "id": "user-job",
+                "extension_id": "publisher.extension",
+                "version": "1.0.0",
+                "scan_purpose": "user_request",
+            },
+            tmp_path / "scan.json",
+            timeout_seconds=60,
+        ) is True
+
+    command = popen.call_args.args[0]
+    assert "--include-raw-evidence" in command
+
+
 def test_bundle_identity_contract_rejects_acquisition_failure(tmp_path: Path) -> None:
     bundle = tmp_path / "scan.json"
     bundle.write_text(
