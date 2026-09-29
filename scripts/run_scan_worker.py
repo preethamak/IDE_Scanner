@@ -144,6 +144,7 @@ def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int 
             file=sys.stderr,
         )
         return False
+    print_runtime_coverage_summary(bundle_path, job)
     return True
 
 
@@ -183,6 +184,61 @@ def bundle_has_immutable_identity(bundle_path: Path, job: dict[str, object]) -> 
         and extension_id.lower() == expected_extension_id.lower()
         and version == expected_version
     )
+
+
+def print_runtime_coverage_summary(bundle_path: Path, job: dict[str, object]) -> None:
+    """Log bounded runtime receipt facts for failed public callbacks.
+
+    The callback boundary intentionally returns only a generic coverage error.
+    Keep the worker log useful for diagnosis without printing raw extension
+    source, paths, commands, or runtime values.
+    """
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    if not isinstance(bundle, dict):
+        return
+    extensions = bundle.get("extensions")
+    if isinstance(extensions, dict):
+        details = [item for item in extensions.values() if isinstance(item, dict)]
+    elif isinstance(extensions, list):
+        details = [item for item in extensions if isinstance(item, dict)]
+    else:
+        return
+    if len(details) != 1:
+        return
+    detail = details[0]
+    coverage = detail.get("analysis_coverage")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    providers = coverage.get("providers")
+    providers = providers if isinstance(providers, dict) else {}
+    runtime = providers.get("dynamic_sandbox")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    intelligence = bundle.get("metadata")
+    intelligence = intelligence if isinstance(intelligence, dict) else {}
+    snapshot = intelligence.get("intelligence_snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    dynamic_snapshot = snapshot.get("dynamic_sandbox")
+    dynamic_snapshot = dynamic_snapshot if isinstance(dynamic_snapshot, dict) else {}
+    observed_kinds = dynamic_snapshot.get("observed_kinds")
+    if isinstance(observed_kinds, dict):
+        kinds = sorted({str(kind) for values in observed_kinds.values() if isinstance(values, list) for kind in values})[:20]
+    else:
+        kinds = []
+    print(json.dumps({
+        "job_id": str(job.get("id") or ""),
+        "extension_id": str(detail.get("extension_id") or job.get("extension_id") or ""),
+        "version": str(detail.get("version") or job.get("version") or ""),
+        "analysis_status": str(detail.get("analysis_status") or ""),
+        "coverage_status": str(coverage.get("status") or ""),
+        "required": runtime.get("required") is True,
+        "provider_status": str(runtime.get("status") or ""),
+        "runtime_run_status": str(runtime.get("runtime_run_status") or ""),
+        "external_syscall_trace": runtime.get("external_syscall_trace") is True,
+        "external_syscall_trace_available": dynamic_snapshot.get("external_syscall_trace_available") is True,
+        "observed_kinds": kinds,
+    }, sort_keys=True))
 
 
 def isolated_worker_command(command: list[str]) -> list[str]:
