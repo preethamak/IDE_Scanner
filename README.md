@@ -34,6 +34,20 @@ guardrails scan --file extension.vsix --profile deep --runtime --format zip --ou
 
 Website: [abscissa.dev](https://abscissa.dev)
 
+## MCP assessment service
+
+The Python service exposes the complete MCP catalog assessment at
+`POST /v1/scans/mcp`. Deploy the service separately from the web Worker and set
+the same `IDE_SCANNER_API_TOKEN` on both sides. The production image must also
+provide the `gitleaks` and `osv-scanner` executables; `owasp-depscan` is installed
+by the package dependencies. Without those providers the report keeps the
+affected metrics unavailable instead of converting missing evidence into a
+passing result.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
+```
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.
