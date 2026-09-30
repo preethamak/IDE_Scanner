@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ide_scanner.registry import MarketplaceDownloadError, _degzip_if_needed, _download_to_file, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
+from types import SimpleNamespace
+
+from ide_scanner.registry import MarketplaceDownloadError, _check_osv_many, _degzip_if_needed, _download_to_file, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
 
 
 OPENVSX_EXTENSION = {
@@ -25,6 +27,31 @@ OPENVSX_EXTENSION = {
 
 
 class RegistryTests(unittest.TestCase):
+    @patch("ide_scanner.registry._http_post_json")
+    def test_osv_false_positive_exclusion_is_exact(self, post_json) -> None:
+        post_json.return_value = {
+            "results": [
+                {"vulns": [{"id": "MAL-2025-21003"}]},
+                {"vulns": [{"id": "MAL-2026-99999"}]},
+            ]
+        }
+        extensions = [
+            SimpleNamespace(
+                extension_id="redhat.fabric8-analytics",
+                dependencies={"fs": "^0.0.1-security"},
+            ),
+            SimpleNamespace(
+                extension_id="example.extension",
+                dependencies={"fs": "0.0.2"},
+            ),
+        ]
+
+        findings, errors = _check_osv_many(extensions)
+
+        self.assertEqual(errors, [])
+        self.assertNotIn("redhat.fabric8-analytics", findings)
+        self.assertEqual(findings["example.extension"][0]["rule_id"], "malicious-npm-dependency")
+
     def test_marketplace_downloader_rejects_private_or_non_https_urls(self) -> None:
         with self.assertRaisesRegex(MarketplaceDownloadError, "public HTTPS"):
             _download_to_file("http://127.0.0.1/extension.vsix", tempfile.TemporaryFile(), 1024, 5)
