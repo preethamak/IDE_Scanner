@@ -30,6 +30,10 @@ dependencies = [
   "langfuse>=2,<4",
   "loguru>=0.7,<1",
   "mcp>=1,<2",
+  "packageurl-python>=0.16,<1",
+  "json5>=0.9,<1",
+  "pyyaml>=6,<7",
+  "packaging>=24,<27",
 ]
 
 [project.optional-dependencies]
