@@ -34,6 +34,7 @@ dependencies = [
   "json5>=0.9,<1",
   "pyyaml>=6,<7",
   "packaging>=24,<27",
+  "owasp-depscan>=4.2,<5",
 ]
 
 [project.optional-dependencies]
