@@ -25,6 +25,7 @@ from .scanner_adapter import (
     write_bundle,
 )
 from .snapshot import snapshot_installations
+from ide_scanner.mcp import scan_mcp_path
 from .ui.panels import banner, panel, section
 from .ui.prompts import confirm, prompt_choice, prompt_indices, prompt_text
 from .ui.renderers import render_rules, render_scan_report
@@ -81,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--file", metavar="PATH", help="Scan a VSIX, ZIP, or unpacked extension folder.")
     source.add_argument("--marketplace", metavar="ID[@VERSION]", help="Scan one exact Marketplace extension.")
     source.add_argument("--marketplace-search", metavar="QUERY", help="Search Marketplace, select, and scan an extension.")
+    source.add_argument("--mcp", metavar="PATH", help="Assess an MCP server JSON manifest or local server folder.")
     scan.add_argument("--all", action="store_true", help="Scan every installed extension matching the filters.")
     scan.add_argument("--ide", choices=IDE_CHOICES, help="Limit installed extensions to one IDE client.")
     scan.add_argument("--search", "--filter", dest="search", default="", help="Search installed extension names, publishers, and IDs.")
@@ -162,6 +164,8 @@ def interactive_home() -> int:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
+    if args.mcp:
+        return cmd_mcp_scan(args)
     if args.profile == "offline" and args.online:
         raise ValueError("--profile offline cannot be combined with --online.")
     if args.profile == "offline" and (args.marketplace or args.marketplace_search):
@@ -214,6 +218,46 @@ def cmd_scan(args: argparse.Namespace) -> int:
         _export_fresh(report, view, args.format, output, source=source, profile=args.profile)
         print(color(f"Saved {output}", "green"))
     return 3 if any(_decision(item) == "incomplete" for item in view.get("extensions", [])) else 0
+
+
+def cmd_mcp_scan(args: argparse.Namespace) -> int:
+    report = scan_mcp_path(args.mcp)
+    if args.format == "terminal":
+        metrics = _mcp_leaf_rows(report.get("metrics") or {})
+        print(panel(
+            str((report.get("subject") or {}).get("name") or "MCP server"),
+            key_values([
+                ("Decision", str(report.get("decision") or "incomplete").upper()),
+                ("Risk score", f"{report.get('risk_score', 'Unavailable')} / 100"),
+                ("Coverage", f"{(report.get('coverage') or {}).get('percent', 0)}%"),
+            ]),
+            subtitle="MCP assessment",
+        ))
+        print(table(["Metric", "Score", "Status", "Message"], metrics, max_widths=[34, 10, 12, 72]))
+        if args.output:
+            raise ValueError("Terminal output cannot be saved with --output; choose --format json.")
+        return 2 if report.get("decision") in {"block", "review", "incomplete"} else 0
+    output = args.output or "guardrails-mcp-report.json"
+    Path(output).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(color(f"Saved {output}", "green"))
+    return 2 if report.get("decision") in {"block", "review", "incomplete"} else 0
+
+
+def _mcp_leaf_rows(node: dict[str, Any]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    children = node.get("children") if isinstance(node, dict) else None
+    if isinstance(children, list):
+        for child in children:
+            rows.extend(_mcp_leaf_rows(child))
+        return rows
+    score = node.get("score")
+    rows.append([
+        str(node.get("title") or node.get("name") or "Metric"),
+        "—" if score is None else f"{float(score) * 100:.0f}",
+        str(node.get("status") or "unknown"),
+        str(node.get("message") or ""),
+    ])
+    return rows
 
 
 def _select_installed(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -480,7 +524,7 @@ def _parse_selection(value: str, count: int) -> list[int]:
 
 def _scan_namespace(**overrides: Any) -> argparse.Namespace:
     defaults = {
-        "file": None, "marketplace": None, "marketplace_search": None,
+        "file": None, "marketplace": None, "marketplace_search": None, "mcp": None,
         "all": False, "ide": None, "search": "", "extension": [], "select": None,
         "version": None, "profile": "standard", "online": False,
         "format": "terminal", "output": None, "show_all": False, "yes": False,
