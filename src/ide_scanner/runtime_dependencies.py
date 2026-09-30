@@ -34,17 +34,17 @@ RUNTIME_DEPENDENCY_LOCK: dict[str, dict[str, str]] = {
         "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-x86_64-unknown-linux-gnu.gz",
     },
     # The Marketplace/Open VSX nightly channel currently publishes the
-    # 0.4.3062 standalone server. The upstream `nightly` tag is mutable, so
-    # keep the expected compressed and decompressed hashes here; provisioning
-    # must stop rather than accept a changed asset silently.
+    # 0.4.3067 standalone server (2026-09-30). The upstream `nightly` tag is
+    # mutable, so keep the expected compressed and decompressed hashes here;
+    # provisioning must stop rather than accept a changed asset silently.
     "rust-analyzer:nightly": {
         "dependency": "rust-analyzer",
         "release_tag": "nightly",
-        "version": "0.4.3062",
+        "version": "0.4.3067",
         "platform": "linux-x86_64",
         "asset_name": "rust-analyzer-x86_64-unknown-linux-gnu.gz",
-        "asset_sha256": "07be8c813a8557180da5143ae424ea12388380ad1caeb9b6a9e6347a0cfcc115",
-        "binary_sha256": "dae966b7beb26d9cea97a73faaadc3ee1db879bd4aa63ac7c841f6c31cadd384",
+        "asset_sha256": "45dff6a58ac9063aa06c2663154817fc7e9fe65c17c89b554a460cfe4a1003fd",
+        "binary_sha256": "55c645333623e1ca9cc945e9c14072c9388bcda77998dde5fc95b8c71cce13a1",
         "cache_subpath": "rust-analyzer-nightly/rust-analyzer",
         "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/nightly/rust-analyzer-x86_64-unknown-linux-gnu.gz",
     },
