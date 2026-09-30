@@ -1,4 +1,4 @@
-"""Static MCP server assessment primitives for the GuardRails scanner."""
+"""Full MCP server risk assessment pipeline for the GuardRails scanner."""
 
 from .scanner import scan_mcp_path, scan_mcp_payload
 
