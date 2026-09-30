@@ -28,6 +28,15 @@ class MetricRunOutput:
     veto_message: str | None = None
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
+    # The reference metric engine calls this field ``artifacts``.  Keep both
+    # spellings while the public report contract remains ``details``.
+    artifacts: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.artifacts is not None:
+            self.details = self.artifacts
+        else:
+            self.artifacts = self.details
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +46,7 @@ class MetricRunOutput:
             "veto_message": self.veto_message,
             "message": self.message,
             "details": self.details,
+            "artifacts": self.details,
         }
 
 
