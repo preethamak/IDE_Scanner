@@ -33,3 +33,4 @@ benchmarks/real-world-cohort/v1/work/
 
 # Generated Cloudflare runtime bindings.
 container-worker/worker-configuration.d.ts
+container-worker/node_modules/
