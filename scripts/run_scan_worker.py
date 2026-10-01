@@ -65,7 +65,12 @@ def main() -> int:
         try:
             bundle_path = artifact_root / f"{safe_name(str(job['id']))}.json"
             scan_result = run_scan(job, bundle_path, timeout_seconds=job_timeout)
-            callback_result = submit_result(job, bundle_path if scan_result else None)
+            failure_reason = scan_failure_reason(bundle_path, job) if not scan_result else None
+            callback_result = submit_result(
+                job,
+                bundle_path if scan_result else None,
+                error_message=failure_reason,
+            )
             if not scan_result or not callback_result:
                 failures += 1
             else:
@@ -194,6 +199,53 @@ def bundle_has_immutable_identity(bundle_path: Path, job: dict[str, object]) -> 
     )
 
 
+def scan_failure_reason(bundle_path: Path, job: dict[str, object]) -> str:
+    """Return a bounded, actionable reason for a non-publication-ready scan.
+
+    Deep scans intentionally fail closed, but the old callback discarded the
+    scanner's structured acquisition/manifest reason and left the UI with a
+    generic message. Keep this diagnostic limited to the report contract: no
+    source code, command lines, or runtime values are included.
+    """
+    fallback = "Deep Scan failed before a canonical report was produced."
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(bundle, dict):
+        return fallback
+    raw_extensions = bundle.get("extensions")
+    if isinstance(raw_extensions, dict):
+        details = [item for item in raw_extensions.values() if isinstance(item, dict)]
+    elif isinstance(raw_extensions, list):
+        details = [item for item in raw_extensions if isinstance(item, dict)]
+    else:
+        return fallback
+    for detail in details:
+        inventory = detail.get("artifact_inventory")
+        inventory = inventory if isinstance(inventory, dict) else {}
+        coverage = detail.get("analysis_coverage")
+        coverage = coverage if isinstance(coverage, dict) else {}
+        providers = coverage.get("providers")
+        providers = providers if isinstance(providers, dict) else {}
+        provider_errors = [
+            str(provider.get("error") or "").strip()
+            for provider in providers.values()
+            if isinstance(provider, dict) and provider.get("error")
+        ]
+        reason = str(
+            inventory.get("skipped_reason")
+            or coverage.get("manifest_error")
+            or (provider_errors[0] if provider_errors else "")
+        ).strip()
+        if reason:
+            extension_id = str(detail.get("extension_id") or job.get("extension_id") or "extension").strip()
+            version = str(detail.get("version") or job.get("version") or "").strip()
+            identity = f"{extension_id}@{version}" if version else extension_id
+            return f"Deep Scan failed before a canonical report was produced for {identity}: {reason[:500]}"
+    return fallback
+
+
 def print_runtime_coverage_summary(bundle_path: Path, job: dict[str, object]) -> None:
     """Log bounded runtime receipt facts for failed public callbacks.
 
@@ -273,13 +325,18 @@ def terminate_process_group(process: subprocess.Popen[object]) -> None:
         pass
 
 
-def submit_result(job: dict[str, object], bundle_path: Path | None) -> bool:
+def submit_result(
+    job: dict[str, object],
+    bundle_path: Path | None,
+    *,
+    error_message: str | None = None,
+) -> bool:
     with temporary_environment(
         {
             "SCAN_JOB_ID": str(job["id"]),
             "SCAN_CALLBACK_URL": str(job["callback_url"]),
             "SCAN_TARGET_PLATFORM": str(job.get("target_platform") or ""),
-            "SCAN_ERROR": "Deep Scan failed before a canonical report was produced.",
+            "SCAN_ERROR": error_message or "Deep Scan failed before a canonical report was produced.",
         }
     ):
         try:
