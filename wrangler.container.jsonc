@@ -1,0 +1,32 @@
+{
+  "$schema": "./container-worker/node_modules/wrangler/config-schema.json",
+  "name": "guardrails-mcp-scanner",
+  "main": "container-worker/worker.ts",
+  "compatibility_date": "2026-09-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "containers": [
+    {
+      "class_name": "McpScannerContainer",
+      "image": "./Dockerfile",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_SCANNER",
+        "class_name": "McpScannerContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["McpScannerContainer"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
