@@ -174,6 +174,30 @@ def test_bundle_identity_contract_accepts_exact_artifact(tmp_path: Path) -> None
     ) is True
 
 
+def test_scan_failure_reason_exposes_bounded_manifest_failure(tmp_path: Path) -> None:
+    bundle = tmp_path / "scan.json"
+    bundle.write_text(
+        json.dumps({
+            "extensions": [{
+                "extension_id": "Codium.qodogen",
+                "version": "0.14.2",
+                "artifact_inventory": {
+                    "skipped_reason": "VSIX did not contain an extension package.json",
+                },
+            }]
+        }),
+        encoding="utf-8",
+    )
+    reason = run_scan_worker.scan_failure_reason(
+        bundle,
+        {"extension_id": "Codium.qodogen", "version": "0.14.2"},
+    )
+    assert reason == (
+        "Deep Scan failed before a canonical report was produced for "
+        "Codium.qodogen@0.14.2: VSIX did not contain an extension package.json"
+    )
+
+
 def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
     job = {
         "id": "job-1",
@@ -285,11 +309,15 @@ def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> N
     ), patch.object(run_scan_worker.claim_scan, "urllib") as urllib_module, patch.object(
         run_scan_worker.claim_scan, "claim_job", return_value=job
     ), patch.object(run_scan_worker, "run_scan", return_value=False), patch.object(
+        run_scan_worker,
+        "scan_failure_reason",
+        return_value="bounded reason",
+    ), patch.object(
         run_scan_worker, "submit_result", return_value=True
     ) as submit_result, patch.object(run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}):
         assert run_scan_worker.main() == 1
 
-    submit_result.assert_called_once_with(job, None)
+    submit_result.assert_called_once_with(job, None, error_message="bounded reason")
     urllib_module.request.install_opener.assert_called_once()
 
 
