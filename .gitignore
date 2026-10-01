@@ -30,3 +30,6 @@ benchmarks/external/results/
 # One local workspace for the frozen 50-extension cohort. The public manifest
 # and normalized result summary live beside it under real-world-cohort/v1.
 benchmarks/real-world-cohort/v1/work/
+
+# Generated Cloudflare runtime bindings.
+container-worker/worker-configuration.d.ts

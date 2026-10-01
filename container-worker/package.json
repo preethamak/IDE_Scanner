@@ -1,0 +1,18 @@
+{
+  "name": "guardrails-mcp-scanner-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy --config ../wrangler.container.jsonc",
+    "dry-run": "wrangler deploy --config ../wrangler.container.jsonc --dry-run",
+    "types": "wrangler types --config ../wrangler.container.jsonc"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261001.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.130.0"
+  }
+}
