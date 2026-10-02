@@ -25,12 +25,16 @@ def test_current_rust_analyzer_nightly_lock_matches_manifest(monkeypatch) -> Non
     monkeypatch.setattr(runtime_dependencies.platform, "system", lambda: "Linux")
     monkeypatch.setattr(runtime_dependencies.platform, "machine", lambda: "x86_64")
 
-    lock = runtime_dependencies._rust_lock({"releaseTag": "nightly", "version": "0.4.3067"})
+    lock = runtime_dependencies._rust_lock({"releaseTag": "nightly", "version": "0.4.3069"})
 
     assert lock is not None
     assert lock["dependency"] == "rust-analyzer"
-    assert lock["asset_sha256"] == "45dff6a58ac9063aa06c2663154817fc7e9fe65c17c89b554a460cfe4a1003fd"
-    assert lock["binary_sha256"] == "55c645333623e1ca9cc945e9c14072c9388bcda77998dde5fc95b8c71cce13a1"
+    assert lock["asset_sha256"] == "904400feb74d54f4e7244b778aa2b8e99c32490ac4102796b63da758cb465e81"
+    assert lock["binary_sha256"] == "b0def6ae13fa2c3edfaa853ec78fcbec13a28f63e47ae87a42b614c1bf4724b8"
+
+
+def test_batch_provisioning_excludes_mutable_nightly_assets() -> None:
+    assert all(item["release_tag"] != "nightly" for item in runtime_dependencies.locked_downloads())
 
 
 def test_missing_rust_sidecar_is_explicit(tmp_path: Path, monkeypatch) -> None:

@@ -34,17 +34,19 @@ RUNTIME_DEPENDENCY_LOCK: dict[str, dict[str, str]] = {
         "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-x86_64-unknown-linux-gnu.gz",
     },
     # The Marketplace/Open VSX nightly channel currently publishes the
-    # 0.4.3067 standalone server (2026-09-30). The upstream `nightly` tag is
-    # mutable, so keep the expected compressed and decompressed hashes here;
-    # provisioning must stop rather than accept a changed asset silently.
+    # 0.4.3069 standalone server (2026-10-02). This entry is retained only
+    # to validate an already-provisioned sidecar for an exact extension
+    # release. It is deliberately excluded from the batch provisioning list:
+    # the upstream `nightly` tag is mutable and must never make every scan
+    # worker fail when its asset changes.
     "rust-analyzer:nightly": {
         "dependency": "rust-analyzer",
         "release_tag": "nightly",
-        "version": "0.4.3067",
+        "version": "0.4.3069",
         "platform": "linux-x86_64",
         "asset_name": "rust-analyzer-x86_64-unknown-linux-gnu.gz",
-        "asset_sha256": "45dff6a58ac9063aa06c2663154817fc7e9fe65c17c89b554a460cfe4a1003fd",
-        "binary_sha256": "55c645333623e1ca9cc945e9c14072c9388bcda77998dde5fc95b8c71cce13a1",
+        "asset_sha256": "904400feb74d54f4e7244b778aa2b8e99c32490ac4102796b63da758cb465e81",
+        "binary_sha256": "b0def6ae13fa2c3edfaa853ec78fcbec13a28f63e47ae87a42b614c1bf4724b8",
         "cache_subpath": "rust-analyzer-nightly/rust-analyzer",
         "download_url": "https://github.com/rust-lang/rust-analyzer/releases/download/nightly/rust-analyzer-x86_64-unknown-linux-gnu.gz",
     },
@@ -154,4 +156,8 @@ def provision_for_extension(target: Path, manifest: dict[str, Any]) -> list[dict
 
 def locked_downloads() -> list[dict[str, str]]:
     """Return immutable download metadata for the provisioning command."""
-    return [dict(item) for item in RUNTIME_DEPENDENCY_LOCK.values()]
+    return [
+        dict(item)
+        for item in RUNTIME_DEPENDENCY_LOCK.values()
+        if item["release_tag"] != "nightly"
+    ]
