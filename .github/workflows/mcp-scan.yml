@@ -1,0 +1,79 @@
+name: MCP assessment worker
+
+run-name: MCP assessment ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Request identity used to locate the result artifact
+        required: true
+        type: string
+      payload_b64:
+        description: Base64-encoded MCP descriptor JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  assess:
+    name: Full MCP assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      OSV_SCANNER_VERSION: "2.6.0"
+      SCANNER_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Install verified native providers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o /tmp/gitleaks_checksums.txt
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" /tmp/gitleaks_checksums.txt | sed "s#  gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz#  /tmp/gitleaks.tar.gz#" | sha256sum -c -
+          sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64" -o /tmp/osv-scanner
+          curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_SHA256SUMS" -o /tmp/osv-scanner_checksums.txt
+          grep "osv-scanner_linux_amd64" /tmp/osv-scanner_checksums.txt | sed "s#  osv-scanner_linux_amd64#  /tmp/osv-scanner#" | sha256sum -c -
+          sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+
+      - name: Install scanner runtime
+        run: python -m pip install .
+
+      - name: Decode assessment input
+        env:
+          MCP_PAYLOAD_B64: ${{ inputs.payload_b64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$MCP_PAYLOAD_B64" | base64 --decode > "$RUNNER_TEMP/mcp-payload.json"
+          python -m json.tool "$RUNNER_TEMP/mcp-payload.json" >/dev/null
+
+      - name: Run full MCP assessment
+        env:
+          MCP_GITHUB_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
+        run: |
+          python scripts/run_mcp_assessment.py \
+            --input "$RUNNER_TEMP/mcp-payload.json" \
+            --output "$RUNNER_TEMP/mcp-report.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-report-${{ inputs.request_id }}
+          path: ${{ runner.temp }}/mcp-report.json
+          retention-days: 1
+          if-no-files-found: error
