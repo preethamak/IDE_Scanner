@@ -14,6 +14,7 @@ from concurrent.futures import ProcessPoolExecutor
 from itertools import repeat
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 from .artifact_store import ArtifactStore, ArtifactStoreError, StoredArtifact, artifact_store_from_environment
 from .artifact_input import ArtifactInputError, acquire_https_vsix
@@ -610,9 +611,21 @@ def _load_registry_snapshot(path: Path | str) -> dict[str, Any]:
     return captured
 
 
-def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[str, dict[str, Any]] | None = None) -> ExtensionReport:
+def scan_extension(
+    path: Path,
+    source: str = "vscode",
+    known_bad_hashes: dict[str, dict[str, Any]] | None = None,
+    *,
+    manifest_override: dict[str, Any] | None = None,
+    manifest_format: str = "vscode-package-json",
+    manifest_path: str = "package.json",
+) -> ExtensionReport:
     _enforce_extension_resource_budget(path)
-    manifest, manifest_status = _read_manifest_status(path / "package.json")
+    if manifest_override is None:
+        manifest, manifest_status = _read_manifest_status(path / "package.json")
+    else:
+        manifest = dict(manifest_override)
+        manifest_status = "valid"
     name = str(manifest.get("name") or path.name)
     publisher = str(manifest.get("publisher") or "unknown")
     version = str(manifest.get("version") or "0.0.0")
@@ -631,7 +644,15 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     files = _walk_extension_files(path)
     entrypoints, optional_missing_entrypoints = _declared_entrypoints(manifest, path)
     artifact_inventory = _artifact_inventory(path, files)
-    analysis_coverage = _new_analysis_coverage(files, entrypoints, path, optional_missing_entrypoints)
+    artifact_inventory["package_format"] = manifest_format
+    artifact_inventory["package_manifest_path"] = manifest_path
+    analysis_coverage = _new_analysis_coverage(
+        files,
+        entrypoints,
+        path,
+        optional_missing_entrypoints,
+        artifact_format=manifest_format,
+    )
     _add_artifact_inventory_findings(extension_id, version, artifact_inventory, known_bad_hashes or {}, findings, capabilities, path)
     _add_repository_posture_findings(extension_id, version, manifest, path, findings, artifact_inventory)
 
@@ -890,6 +911,8 @@ def scan_extension(path: Path, source: str = "vscode", known_bad_hashes: dict[st
     analysis_coverage["manifest_validation"] = {
         "status": manifest_status,
         "valid": manifest_status == "valid",
+        "format": manifest_format,
+        "path": manifest_path,
     }
     if manifest_status != "valid":
         analysis_coverage.setdefault("read_failures", [])
@@ -945,6 +968,9 @@ def scan_vsix(
     path: Path,
     known_bad_hashes: dict[str, dict[str, Any]] | None = None,
     artifact_origin: str = "user_uploaded_vsix",
+    *,
+    expected_extension_id: str | None = None,
+    expected_version: str | None = None,
 ) -> ExtensionReport:
     if artifact_origin not in ARTIFACT_ORIGINS:
         raise ValueError(f"Unsupported VSIX artifact origin: {artifact_origin}")
@@ -963,7 +989,23 @@ def scan_vsix(
             tmp_root = Path(tmp)
             archive_anomalies = _safe_extract_vsix(vsix_path, tmp_root)
             extension_root = _find_extracted_extension_root(tmp_root)
-            report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
+            visual_studio_manifest = _find_visual_studio_manifest(extension_root)
+            if visual_studio_manifest is not None:
+                manifest, manifest_path = _visual_studio_package_manifest(
+                    visual_studio_manifest,
+                    expected_extension_id=expected_extension_id,
+                    expected_version=expected_version,
+                )
+                report = scan_extension(
+                    extension_root,
+                    source="vsix",
+                    known_bad_hashes=known_bad_hashes,
+                    manifest_override=manifest,
+                    manifest_format="visual-studio-vsix",
+                    manifest_path=manifest_path,
+                )
+            else:
+                report = scan_extension(extension_root, source="vsix", known_bad_hashes=known_bad_hashes)
             report.install_path = str(original_path)
             report.source = "vsix"
             report.artifact_hash = vsix_hash
@@ -1134,6 +1176,13 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
     based rather than name based: a theme carrying a hidden native payload or
     network/process behavior still enters the required runtime path.
     """
+    coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
+    if coverage.get("artifact_format") == "visual-studio-vsix":
+        # Visual Studio extensions are .NET/VS extensibility packages, not
+        # VS Code Node extensions. The static package providers still inspect
+        # every extracted byte, but the VS Code sandbox cannot execute their
+        # managed entrypoints safely or meaningfully.
+        return False
     capability_ids = {
         str(item.get("id") or "")
         for item in report.capabilities
@@ -1141,7 +1190,6 @@ def _runtime_required_for_report(report: ExtensionReport) -> bool:
     }
     if capability_ids & _DYNAMIC_RUNTIME_CAPABILITIES:
         return True
-    coverage = report.analysis_coverage if isinstance(report.analysis_coverage, dict) else {}
     return bool(coverage.get("resolved_entrypoints"))
 
 
@@ -1373,7 +1421,13 @@ def scan_marketplace_extension(
                 target_platform=registry_source.get("target_platform", target_platform or ""),
             )
             scan_path = stored.path
-        report = scan_vsix(scan_path, known_bad_hashes=known_bad_hashes, artifact_origin="archive_artifact")
+        report = scan_vsix(
+            scan_path,
+            known_bad_hashes=known_bad_hashes,
+            artifact_origin="archive_artifact",
+            expected_extension_id=registry_source.get("extension_id", resolved_id),
+            expected_version=registry_source.get("version", version or "") or version,
+        )
         if dynamic_runtime and runtime_bundle is not None:
             runtime_required = _runtime_required_for_report(report)
             instance_key = _runtime_instance_key(report)
@@ -4954,6 +5008,9 @@ def _record_archive_anomalies(report: "ExtensionReport", anomalies: dict[str, li
     report.artifact_inventory["skipped_reason"] = "; ".join(limitations)
 
 
+VISUAL_STUDIO_MANIFEST_MAX_BYTES = 2 * 1024 * 1024
+
+
 def _find_extracted_extension_root(root: Path) -> Path:
     preferred = root / "extension" / "package.json"
     if preferred.exists():
@@ -4962,7 +5019,98 @@ def _find_extracted_extension_root(root: Path) -> Path:
         if "node_modules" in package_json.parts:
             continue
         return package_json.parent
-    raise ValueError("VSIX did not contain an extension package.json")
+    visual_studio_manifest = _find_visual_studio_manifest(root)
+    if visual_studio_manifest is not None:
+        return visual_studio_manifest.parent
+    raise ValueError("VSIX did not contain a supported package manifest")
+
+
+def _find_visual_studio_manifest(root: Path) -> Path | None:
+    candidates = sorted(
+        (
+            item
+            for item in root.rglob("*")
+            if item.is_file() and item.name.casefold() == "extension.vsixmanifest"
+        ),
+        key=lambda item: (len(item.relative_to(root).parts), item.relative_to(root).as_posix().casefold()),
+    )
+    return candidates[0] if candidates else None
+
+
+def _visual_studio_xml_children(element: ET.Element, name: str) -> list[ET.Element]:
+    return [child for child in list(element) if child.tag.rsplit("}", 1)[-1] == name]
+
+
+def _visual_studio_xml_text(element: ET.Element, name: str) -> str:
+    for child in element.iter():
+        if child is element:
+            continue
+        if child.tag.rsplit("}", 1)[-1] == name:
+            return (child.text or "").strip()
+    return ""
+
+
+def _visual_studio_package_manifest(
+    path: Path,
+    *,
+    expected_extension_id: str | None = None,
+    expected_version: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Visual Studio extension manifest could not be read: {exc}") from exc
+    if len(raw) > VISUAL_STUDIO_MANIFEST_MAX_BYTES:
+        raise ValueError("Visual Studio extension manifest exceeds the parser size limit")
+    try:
+        document = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise ValueError(f"Visual Studio extension manifest is invalid XML: {exc}") from exc
+
+    metadata_nodes = [node for node in document.iter() if node.tag.rsplit("}", 1)[-1] == "Metadata"]
+    metadata = metadata_nodes[0] if metadata_nodes else document
+    identity_nodes = _visual_studio_xml_children(metadata, "Identity")
+    identity = identity_nodes[0] if identity_nodes else next(
+        (node for node in document.iter() if node.tag.rsplit("}", 1)[-1] == "Identity"),
+        None,
+    )
+    if identity is None:
+        raise ValueError("Visual Studio extension manifest does not declare an Identity")
+
+    manifest_publisher = str(identity.attrib.get("Publisher") or "").strip()
+    manifest_version = str(identity.attrib.get("Version") or "").strip()
+    manifest_identity = str(identity.attrib.get("Id") or "").strip()
+    if not manifest_version:
+        raise ValueError("Visual Studio extension manifest does not declare a version")
+    if expected_version and str(expected_version).strip() != manifest_version:
+        raise ValueError(
+            "Visual Studio extension manifest version does not match the requested Marketplace version: "
+            f"{manifest_version} != {str(expected_version).strip()}"
+        )
+
+    display_name = _visual_studio_xml_text(metadata, "DisplayName") or manifest_identity or path.parent.name
+    description = _visual_studio_xml_text(metadata, "Description")
+    canonical_version = manifest_version
+    canonical_id = str(expected_extension_id or "").strip()
+    if canonical_id:
+        parts = canonical_id.split(".", 1)
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            raise ValueError(f"Marketplace extension identity is invalid: {canonical_id}")
+        publisher, name = (part.strip() for part in parts)
+    else:
+        publisher = re.sub(r"[^A-Za-z0-9_-]+", "", manifest_publisher) or "visualstudio"
+        name = re.sub(r"[^A-Za-z0-9_-]+", "", manifest_identity.split(".", 1)[0]) or "extension"
+
+    return {
+        "publisher": publisher,
+        "name": name,
+        "version": canonical_version,
+        "displayName": display_name,
+        "description": description,
+        "_ide_scanner_package_format": "visual-studio-vsix",
+        "_ide_scanner_manifest_identity": manifest_identity,
+        "_ide_scanner_manifest_publisher": manifest_publisher,
+    }, path.name
 
 
 def _apply_vsix_known_bad_match(report: ExtensionReport, known_bad_hashes: dict[str, dict[str, Any]]) -> None:
@@ -5094,6 +5242,8 @@ def _new_analysis_coverage(
     entrypoints: set[str],
     path: Path,
     optional_missing_entrypoints: list[str] | None = None,
+    *,
+    artifact_format: str = "vscode-package-json",
 ) -> dict[str, Any]:
     all_paths = {file.relative_to(path).as_posix() for file in files}
     candidates = sorted(
@@ -5111,6 +5261,8 @@ def _new_analysis_coverage(
         and _is_ignored_static_asset(rel)
     )
     return {
+        "artifact_format": artifact_format,
+        "execution_scope": "static-package" if artifact_format == "visual-studio-vsix" else "static-and-runtime-capable",
         "status": "pending",
         "coverage_percent": 0,
         "discovered_files": len(files),

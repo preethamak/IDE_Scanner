@@ -107,6 +107,56 @@ class ManifestFailClosedTests(unittest.TestCase):
         self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "missing-identity")
         self.assertEqual(report.decision, "incomplete")
 
+    def test_visual_studio_vsix_without_package_json_produces_canonical_report(self) -> None:
+        manifest = """
+        <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata>
+            <Identity Id="QodoGen.52e802ef" Version="0.14.2" Publisher="Qodo (formerly Codium)" />
+            <DisplayName>Qodo - AI Code Review</DisplayName>
+            <Description>Visual Studio code review extension.</Description>
+          </Metadata>
+          <Installation ExtensionType="VSSDK+VisualStudio.Extensibility" />
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+                archive.writestr("QodoGenVS.dll", b"MZ" + b"\0" * 32)
+                archive.writestr(".vsextension/extension.json", "{\"entryPoint\": {}}")
+            report = scan_vsix(
+                vsix,
+                artifact_origin="archive_artifact",
+                expected_extension_id="Codium.qodogen",
+                expected_version="0.14.2",
+            )
+
+        self.assertEqual(report.extension_id, "Codium.qodogen")
+        self.assertEqual(report.version, "0.14.2")
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertEqual(report.analysis_coverage["artifact_format"], "visual-studio-vsix")
+        self.assertEqual(report.analysis_coverage["execution_scope"], "static-package")
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["format"], "visual-studio-vsix")
+        self.assertFalse(report.artifact_inventory["scan_incomplete"])
+
+    def test_visual_studio_vsix_rejects_marketplace_version_mismatch(self) -> None:
+        manifest = """
+        <PackageManifest xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata><Identity Id="QodoGen.abc" Version="0.14.2" Publisher="Codium" /></Metadata>
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+            with self.assertRaisesRegex(ValueError, "version does not match"):
+                scan_vsix(
+                    vsix,
+                    artifact_origin="archive_artifact",
+                    expected_extension_id="Codium.qodogen",
+                    expected_version="0.14.3",
+                )
+
     def test_full_identity_manifest_is_valid(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

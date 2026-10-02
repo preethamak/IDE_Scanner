@@ -725,7 +725,13 @@ class ScannerTests(unittest.TestCase):
                 )
 
             store.preserve.assert_called_once()
-            scan.assert_called_once_with(preserved, known_bad_hashes=None, artifact_origin="archive_artifact")
+            scan.assert_called_once_with(
+                preserved,
+                known_bad_hashes=None,
+                artifact_origin="archive_artifact",
+                expected_extension_id="publisher.extension",
+                expected_version="1.2.3",
+            )
             self.assertFalse(downloaded.exists())
             self.assertTrue(preserved.exists())
             self.assertEqual(result.artifact_identity["target_platform"], "linux-x64")
