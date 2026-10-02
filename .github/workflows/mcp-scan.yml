@@ -9,8 +9,8 @@ on:
         description: Request identity used to locate the result artifact
         required: true
         type: string
-      payload_b64:
-        description: Base64-encoded MCP descriptor JSON
+      payload_enc:
+        description: AES-GCM encrypted MCP descriptor payload
         required: true
         type: string
 
@@ -57,19 +57,21 @@ jobs:
 
       - name: Decode assessment input
         env:
-          MCP_PAYLOAD_B64: ${{ inputs.payload_b64 }}
+          MCP_PAYLOAD_ENC: ${{ inputs.payload_enc }}
         run: |
           set -euo pipefail
-          printf '%s' "$MCP_PAYLOAD_B64" | base64 --decode > "$RUNNER_TEMP/mcp-payload.json"
-          python -m json.tool "$RUNNER_TEMP/mcp-payload.json" >/dev/null
+          printf '%s' "$MCP_PAYLOAD_ENC" > "$RUNNER_TEMP/mcp-payload.enc"
 
       - name: Run full MCP assessment
         env:
           MCP_GITHUB_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
+          MCP_SCAN_ENCRYPTION_KEY: ${{ secrets.MCP_SCAN_ENCRYPTION_KEY }}
         run: |
           python scripts/run_mcp_assessment.py \
-            --input "$RUNNER_TEMP/mcp-payload.json" \
-            --output "$RUNNER_TEMP/mcp-report.json"
+            --input "$RUNNER_TEMP/mcp-payload.enc" \
+            --output "$RUNNER_TEMP/mcp-report.json" \
+            --encrypted-input \
+            --encrypted-output
 
       - uses: actions/upload-artifact@v4
         with:
