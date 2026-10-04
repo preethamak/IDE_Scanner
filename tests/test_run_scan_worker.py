@@ -290,7 +290,7 @@ def test_worker_retries_transient_claim_error(tmp_path: Path) -> None:
     urllib_module.request.install_opener.assert_called_once()
 
 
-def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> None:
+def test_failed_scan_is_reported_without_failing_the_worker_run(tmp_path: Path) -> None:
     job = {
         "id": "job-1",
         "extension_id": "publisher.extension",
@@ -315,7 +315,7 @@ def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> N
     ), patch.object(
         run_scan_worker, "submit_result", return_value=True
     ) as submit_result, patch.object(run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}):
-        assert run_scan_worker.main() == 1
+        assert run_scan_worker.main() == 0
 
     submit_result.assert_called_once_with(job, None, error_message="bounded reason")
     urllib_module.request.install_opener.assert_called_once()

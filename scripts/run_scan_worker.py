@@ -46,6 +46,7 @@ def main() -> int:
     enqueued_job_id = os.environ.get("SCAN_ENQUEUED_JOB_ID", "").strip() or None
     job_timeout = bounded_job_timeout(os.environ.get("SCAN_JOB_TIMEOUT_SECONDS", "300"))
     failures = 0
+    callback_failures = 0
     completed = 0
 
     for index in range(max_jobs):
@@ -73,16 +74,25 @@ def main() -> int:
             )
             if not scan_result or not callback_result:
                 failures += 1
+                if not callback_result:
+                    callback_failures += 1
             else:
                 completed += 1
         except Exception as error:  # noqa: BLE001 - report one bad artifact, then drain the queue.
             failures += 1
-            report_failure(job, f"Deep Scan worker failed: {type(error).__name__}: {error}")
+            if not report_failure(job, f"Deep Scan worker failed: {type(error).__name__}: {error}"):
+                callback_failures += 1
         if exact_job_id:
             break
 
     print(json.dumps({"completed": completed, "failures": failures, "max_jobs": max_jobs}, sort_keys=True))
-    return 1 if failures else 0
+    if failures and not callback_failures:
+        print(
+            "Deep Scan job failures were recorded in the control plane; "
+            "the worker run itself completed.",
+            file=sys.stderr,
+        )
+    return 1 if callback_failures else 0
 
 
 def require_runtime_preflight() -> None:
@@ -347,7 +357,7 @@ def submit_result(
             return False
 
 
-def report_failure(job: dict[str, object], error_message: str) -> None:
+def report_failure(job: dict[str, object], error_message: str) -> bool:
     with temporary_environment(
         {
             "SCAN_JOB_ID": str(job["id"]),
@@ -358,8 +368,10 @@ def report_failure(job: dict[str, object], error_message: str) -> None:
     ):
         try:
             callback_scan.main([])
+            return True
         except Exception as error:  # noqa: BLE001 - preserve the original failure and continue draining.
             print(f"Failure callback failed for {job['id']}: {error}", file=sys.stderr)
+            return False
 
 
 def claim_url() -> str:
