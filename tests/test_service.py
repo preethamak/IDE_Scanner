@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -5,13 +6,18 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import urlopen
+
+from http.server import ThreadingHTTPServer
 
 from ide_scanner.service import (
     JobStore,
     ScanWorkerPool,
+    ScannerServiceHandler,
     cleanup_stale_jobs,
     execute_marketplace_job,
     health_payload,
+    readiness_payload,
     serve,
 )
 
@@ -70,6 +76,47 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["providers"]["semgrep"], "optional")
         self.assertEqual(health["providers"]["yara"], "optional")
+
+    def test_readiness_reports_persistent_store_and_worker_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            pool = ScanWorkerPool(store, max_workers=1, max_queue=3)
+            ready, payload = readiness_payload(store, pool)
+
+            self.assertTrue(ready)
+            self.assertEqual(payload["status"], "ready")
+            self.assertEqual(payload["storage"], "ready")
+            self.assertEqual(payload["workers"]["workers_alive"], 1)
+            self.assertEqual(payload["workers"]["queue_capacity"], 3)
+
+    def test_readiness_reports_storage_failure_without_job_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            pool = ScanWorkerPool(store, max_workers=1)
+            with patch.object(store, "ready", return_value=(False, "job_store_unavailable: OSError")):
+                ready, payload = readiness_payload(store, pool)
+
+            self.assertFalse(ready)
+            self.assertEqual(payload["status"], "not_ready")
+            self.assertEqual(payload["storage"], "unavailable")
+            self.assertNotIn("jobs", payload)
+
+    def test_readyz_is_an_unauthenticated_http_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/readyz", timeout=2) as response:
+                    payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["status"], "ready")
+            finally:
+                server.shutdown()
+                server.server_close()
 
 
 class ScanWorkerPoolTests(unittest.TestCase):
