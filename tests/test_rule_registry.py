@@ -9,7 +9,7 @@ class RuleRegistryTests(unittest.TestCase):
     def test_all_rules_publish_engine_and_decision_semantics(self) -> None:
         rules = rule_registry()
 
-        self.assertEqual(len(rules), 118)
+        self.assertEqual(len(rules), 120)
         self.assertTrue(all(rule.engine for rule in rules))
 
     def test_classifier_and_registry_rule_ids_are_published(self) -> None:
@@ -53,6 +53,8 @@ class RuleRegistryTests(unittest.TestCase):
         self.assertEqual(rules["sandbox-runtime-error"].decision_effect, "review-context")
         self.assertEqual(rules["observed-secret-exfil"].decision_effect, "review-or-block-by-policy")
         self.assertEqual(rules["runtime-canary-exposed"].decision_effect, "review-context")
+        self.assertEqual(rules["extension-install-surface"].evidence_class, "capability")
+        self.assertEqual(rules["malformed-extension-relationship"].default_severity, "MEDIUM")
 
     def test_rules_json_is_self_describing(self) -> None:
         payload = rules_json()

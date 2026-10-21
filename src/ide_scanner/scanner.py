@@ -218,6 +218,7 @@ CAPABILITY_RULES = {
     "credential-global-state-storage",
     "credential-inputbox-prompt",
     "dynamic-shell-execution",
+    "extension-install-surface",
     "lifecycle-script",
     "mcp-server-command",
     "native-or-packed-artifact",
@@ -237,6 +238,7 @@ POSTURE_RULES = {
     "workflow-token-permissions-broad",
     "entrypoint-ast-unparsed",
     "executable-heavy-obfuscation",
+    "malformed-extension-relationship",
 }
 REPUTATION_RULES = {
     "marketplace-extension-not-found",
@@ -639,6 +641,14 @@ def scan_extension(
     ast_unparsed_entrypoints: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
+    extension_relationships = _extension_relationship_inventory(manifest)
+    _add_extension_relationship_findings(
+        extension_id,
+        version,
+        extension_relationships,
+        findings,
+        capabilities,
+    )
     _add_dependency_source_findings(extension_id, version, manifest, findings)
 
     files = _walk_extension_files(path)
@@ -646,6 +656,7 @@ def scan_extension(
     artifact_inventory = _artifact_inventory(path, files)
     artifact_inventory["package_format"] = manifest_format
     artifact_inventory["package_manifest_path"] = manifest_path
+    artifact_inventory["extension_relationship_inventory"] = extension_relationships
     analysis_coverage = _new_analysis_coverage(
         files,
         entrypoints,
@@ -1796,6 +1807,98 @@ def _add_manifest_findings(
             capabilities.setdefault("agentic", {"id": "agentic", "evidence": []})["evidence"].append(key)
             _add_agent_capability_findings(extension_id, version, key, contributes.get(key), findings, capabilities)
     _add_cross_extension_manifest_findings(extension_id, version, contributes, findings, capabilities)
+
+
+def _extension_relationship_inventory(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Capture extension packages that the published manifest can pull in."""
+    entries: list[dict[str, str]] = []
+    invalid_entries: list[dict[str, str]] = []
+    for field, relationship in (
+        ("extensionPack", "extension_pack"),
+        ("extensionDependencies", "extension_dependency"),
+    ):
+        value = manifest.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            invalid_entries.append({"field": field, "value": _manifest_value_summary(value), "reason": "expected an array"})
+            continue
+        for item in value:
+            if not isinstance(item, str):
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "expected an extension identifier string"})
+                continue
+            extension_id = item.strip()
+            if not _is_extension_identifier(extension_id):
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "invalid extension identifier"})
+                continue
+            entries.append({
+                "extension_id": extension_id.casefold(),
+                "relationship": relationship,
+                "declared_in": field,
+            })
+
+    unique_entries = {(item["relationship"], item["extension_id"]): item for item in entries}
+    return {
+        "entries": sorted(unique_entries.values(), key=lambda item: (item["relationship"], item["extension_id"])),
+        "invalid_entries": invalid_entries,
+    }
+
+
+def _add_extension_relationship_findings(
+    extension_id: str,
+    version: str,
+    inventory: dict[str, Any],
+    findings: list[Finding],
+    capabilities: dict[str, dict[str, Any]],
+) -> None:
+    entries = inventory.get("entries") if isinstance(inventory.get("entries"), list) else []
+    invalid_entries = inventory.get("invalid_entries") if isinstance(inventory.get("invalid_entries"), list) else []
+    if entries:
+        identifiers = [str(item["extension_id"]) for item in entries if isinstance(item, dict) and isinstance(item.get("extension_id"), str)]
+        capabilities["extension_install_surface"] = {
+            "id": "extension_install_surface",
+            "evidence": identifiers,
+        }
+        findings.append(_finding(
+            extension_id,
+            version,
+            "extension-install-surface",
+            "supply-chain",
+            "LOW",
+            0.58,
+            "Manifest declares additional extension packages that can expand the installed capability surface.",
+            ["package.json"],
+            "Review each declared extension package at its intended version; this artifact scan does not imply that related packages were scanned.",
+            {"relationships": entries},
+        ))
+    if invalid_entries:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "malformed-extension-relationship",
+            "supply-chain",
+            "MEDIUM",
+            0.76,
+            "Manifest contains malformed extensionPack or extensionDependencies declarations.",
+            ["package.json"],
+            "Do not treat the extension install surface as complete until the manifest declarations are corrected and the referenced packages are reviewed.",
+            {"invalid_relationships": invalid_entries},
+        ))
+
+
+def _is_extension_identifier(value: str) -> bool:
+    if not value or any(character.isspace() for character in value):
+        return False
+    publisher, separator, name = value.partition(".")
+    return bool(separator and publisher and name and "." not in publisher)
+
+
+def _manifest_value_summary(value: Any) -> str:
+    if isinstance(value, str):
+        return value[:200]
+    if value is None:
+        return "null"
+    return type(value).__name__
 
 
 def _add_dependency_source_findings(
