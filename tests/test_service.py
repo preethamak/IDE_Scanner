@@ -1,14 +1,18 @@
 import os
+import json
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import urlopen
+from http.server import ThreadingHTTPServer
 
 from ide_scanner.service import (
     JobStore,
     ScanWorkerPool,
+    ScannerServiceHandler,
     cleanup_stale_jobs,
     execute_marketplace_job,
     health_payload,
@@ -88,6 +92,25 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(paths["/v1/scans/marketplace"]["post"]["security"], [{"bearerAuth": []}])
         self.assertIn("429", paths["/v1/scans/marketplace"]["post"]["responses"])
         self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed"])
+
+    def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/v1/openapi.json", timeout=2) as response:
+                    payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["openapi"], "3.1.0")
+                self.assertIn("/v1/scans/marketplace", payload["paths"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
 
 class ScanWorkerPoolTests(unittest.TestCase):
