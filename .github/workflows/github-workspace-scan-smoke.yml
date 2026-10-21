@@ -1,0 +1,48 @@
+name: GuardRails workspace action smoke
+
+on:
+  push:
+    paths:
+      - ".github/actions/workspace-extension-scan/**"
+      - ".github/workflows/github-workspace-scan-smoke.yml"
+      - "fixtures/workspace-empty/**"
+      - "src/ide_scanner/workspace.py"
+      - "src/ide_scanner/cli.py"
+  pull_request:
+    paths:
+      - ".github/actions/workspace-extension-scan/**"
+      - ".github/workflows/github-workspace-scan-smoke.yml"
+      - "fixtures/workspace-empty/**"
+      - "src/ide_scanner/workspace.py"
+      - "src/ide_scanner/cli.py"
+
+permissions:
+  contents: read
+
+jobs:
+  scan-empty-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: guardrails
+        uses: ./.github/actions/workspace-extension-scan
+        with:
+          root: fixtures/workspace-empty
+          output: guardrails-workspace.json
+          fail_on: review
+      - name: Verify action outputs and report schema
+        env:
+          EXTENSION_COUNT: ${{ steps.guardrails.outputs.extension_count }}
+          HIGHEST_DECISION: ${{ steps.guardrails.outputs.highest_decision }}
+          REPORT_FILE: ${{ steps.guardrails.outputs.report_file }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          report = json.load(open(os.environ["REPORT_FILE"], encoding="utf-8"))
+          assert report["schema_version"] == "guardrails.workspace-extension-scan.v1"
+          assert report["recommendation_count"] == 0
+          assert os.environ["EXTENSION_COUNT"] == "0"
+          assert os.environ["HIGHEST_DECISION"] == "allow"
+          PY
