@@ -25,6 +25,11 @@ Entries skipped due to a self-reference, direct requested target, acquisition
 failure, or fan-out limit remain explicit in the root artifact's relationship
 resolution data.
 
+Malformed declarations, case-insensitive duplicates, and a package that names
+itself are not acquired. They remain in `invalid_entries` and produce a review
+finding because GuardRails cannot safely claim a complete install surface from
+an ambiguous manifest.
+
 For an installed extension inventory, the local agent can preserve the same
 one-hop relationship evidence in the uploaded workspace report:
 
