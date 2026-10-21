@@ -87,7 +87,10 @@ def _dependency_component(dependency: dict[str, Any], bom_ref: str) -> dict[str,
     return {
         "type": "library", "bom-ref": bom_ref, "name": _text(dependency.get("name"), 300),
         "version": _text(dependency.get("version"), 160), "purl": bom_ref,
-        "properties": [_property("guardrails:relationship", _text(dependency.get("relationship"), 80) or "unknown")],
+        "properties": [
+            _property("guardrails:relationship", _text(dependency.get("relationship"), 80) or "unknown"),
+            _property("guardrails:ecosystem", _text(dependency.get("ecosystem"), 80) or "npm"),
+        ],
     }
 
 
@@ -105,15 +108,19 @@ def _vulnerabilities(extension: dict[str, Any], extension_id: str, version: str,
     if not isinstance(findings, list):
         return []
     records: list[dict[str, Any]] = []
+    used_ids: dict[str, int] = {}
     for index, finding in enumerate(findings):
         if not isinstance(finding, dict) or _text(finding.get("actionability"), 32) not in {"review", "block"}:
             continue
         rule_id = _text(finding.get("rule_id"), 160) or "unknown-rule"
         finding_id = _text(finding.get("finding_id"), 160) or f"{rule_id}-{index + 1}"
+        base_id = f"guardrails:{quote(extension_id, safe='')}@{quote(version, safe='')}:{quote(finding_id, safe='')}"
+        occurrence = used_ids.get(base_id, 0) + 1
+        used_ids[base_id] = occurrence
         severity = _cyclonedx_severity(_text(finding.get("effective_severity"), 16) or _text(finding.get("severity"), 16))
         evidence = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
         records.append({
-            "id": f"guardrails:{quote(extension_id, safe='')}@{quote(version, safe='')}:{quote(finding_id, safe='')}",
+            "id": base_id if occurrence == 1 else f"{base_id}-{occurrence}",
             "source": {"name": "GuardRails", "url": "https://abscissa.dev"},
             "ratings": [{"method": "other", "severity": severity}],
             "description": _text(finding.get("evidence_summary"), 2_000) or f"GuardRails {rule_id} finding.",
@@ -139,7 +146,9 @@ def _npm_ref(name: str, version: str) -> str:
 
 def _artifact_hash(extension: dict[str, Any]) -> Any:
     identity = extension.get("artifact_identity")
-    return identity.get("sha256") if isinstance(identity, dict) else extension.get("artifact_hash")
+    if isinstance(identity, dict) and identity.get("sha256"):
+        return identity.get("sha256")
+    return extension.get("artifact_sha256") or extension.get("artifact_hash")
 
 
 def _coverage_percent(extension: dict[str, Any]) -> int:

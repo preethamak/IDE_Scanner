@@ -36,12 +36,27 @@ class CycloneDxTests(unittest.TestCase):
         self.assertEqual(vulnerability["affects"], [{"ref": extension_ref}])
         self.assertEqual(vulnerability["ratings"], [{"method": "other", "severity": "high"}])
         self.assertIn({"name": "guardrails:actionability", "value": "review"}, vulnerability["properties"])
+        dependency = next(component for component in bom["components"] if component["bom-ref"] == "pkg:npm/%40scope/tool@4.5.6")
+        self.assertIn({"name": "guardrails:ecosystem", "value": "npm"}, dependency["properties"])
 
-    def test_cyclonedx_falls_back_to_resolved_dependency_map_and_rejects_invalid_hashes(self) -> None:
-        bom = build_cyclonedx_bom({"extensions": [{"extension_id": "publisher.extension", "version": "1", "artifact_hash": "not-a-hash", "dependencies": {"left-pad": "1.3.0"}}]})
+    def test_cyclonedx_falls_back_to_resolved_dependency_map_and_accepts_artifact_sha256(self) -> None:
+        bom = build_cyclonedx_bom({"extensions": [{"extension_id": "publisher.extension", "version": "1", "artifact_hash": "not-a-hash", "artifact_sha256": "c" * 64, "dependencies": {"left-pad": "1.3.0"}}]})
         extension = next(component for component in bom["components"] if component["type"] == "application")
-        self.assertEqual(extension["hashes"], [])
+        self.assertEqual(extension["hashes"], [{"alg": "SHA-256", "content": "c" * 64}])
         self.assertIn("pkg:npm/left-pad@1.3.0", [component["bom-ref"] for component in bom["components"]])
+
+    def test_cyclonedx_makes_repeated_finding_identifiers_unique(self) -> None:
+        bom = build_cyclonedx_bom({"extensions": [{
+            "extension_id": "publisher.extension", "version": "1",
+            "findings": [
+                {"finding_id": "same", "rule_id": "network", "severity": "HIGH", "actionability": "review"},
+                {"finding_id": "same", "rule_id": "network", "severity": "HIGH", "actionability": "review"},
+            ],
+        }]})
+        self.assertEqual([item["id"] for item in bom["vulnerabilities"]], [
+            "guardrails:publisher.extension@1:same",
+            "guardrails:publisher.extension@1:same-2",
+        ])
 
     def test_report_zip_carries_the_same_cyclonedx_evidence(self) -> None:
         report = {"scan_id": "scan-bundle", "extensions": [{"extension_id": "publisher.extension", "version": "1", "artifact_hash": "a" * 64, "dependencies": {"left-pad": "1.3.0"}}]}
