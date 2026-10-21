@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abscissa.dev/schemas/guardrails-mcp-descriptor.v1.json",
+  "title": "GuardRails MCP descriptor",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "mcp_url": {"type": "string", "format": "uri"},
+    "url": {"type": "string", "format": "uri"},
+    "transport": {"type": "string"},
+    "transport_type": {"type": "string"},
+    "is_local": {"type": "boolean"},
+    "repo_url": {"type": "string", "format": "uri"},
+    "package": {"type": "string"},
+    "tools": {"type": "array", "items": {"type": "object"}},
+    "auth_modes": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}
+  },
+  "anyOf": [
+    {"required": ["mcp_url"]},
+    {"required": ["url"]},
+    {"properties": {"is_local": {"const": true}}, "required": ["is_local"]},
+    {"properties": {"transport": {"enum": ["stdio", "local", "command"]}}, "required": ["transport"]}
+  ]
+}
