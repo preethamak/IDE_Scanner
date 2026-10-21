@@ -44,6 +44,12 @@ by the package dependencies. Without those providers the report keeps the
 affected metrics unavailable instead of converting missing evidence into a
 passing result.
 
+Use `GET /health` as a liveness probe. Use unauthenticated `GET /readyz` as a
+readiness probe: it verifies that the persistent job store accepts atomic
+writes and that every configured scan worker is alive. A non-ready service
+returns `503` and a bounded JSON reason; it never includes queued job data or
+report content.
+
 The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
 the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
 providers, and publishes a short-lived encrypted report artifact. Configure
