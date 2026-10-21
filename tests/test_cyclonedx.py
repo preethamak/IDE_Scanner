@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+import unittest
+
+from ide_scanner.cyclonedx import build_cyclonedx_bom
+
+class CycloneDxTests(unittest.TestCase):
+    def test_cyclonedx_binds_dependencies_to_the_exact_extension_artifact(self) -> None:
+        report = {"scan_id": "scan-1", "created_at": "2026-10-22T00:00:00Z", "scanner_build": "a" * 40, "extensions": [{
+            "extension_id": "publisher.extension", "version": "1.2.3", "artifact_identity": {"sha256": "B" * 64},
+            "decision": "review", "analysis_status": "complete", "analysis_coverage": {"coverage_percent": 91},
+            "artifact_inventory": {"dependency_inventory": [{"name": "@scope/tool", "version": "4.5.6", "relationship": "direct"}, {"name": "transitive", "version": "1.0.0", "relationship": "transitive"}]},
+        }]}
+        bom = build_cyclonedx_bom(report, profile="deep", source="marketplace")
+        extension_ref = "pkg:generic/publisher/extension@1.2.3?type=vsix"
+        self.assertEqual(bom["bomFormat"], "CycloneDX")
+        self.assertEqual(bom["specVersion"], "1.5")
+        self.assertEqual(bom["serialNumber"], build_cyclonedx_bom(report)["serialNumber"])
+        extension = next(component for component in bom["components"] if component["bom-ref"] == extension_ref)
+        self.assertEqual(extension["hashes"], [{"alg": "SHA-256", "content": "b" * 64}])
+        self.assertEqual(next(item for item in bom["dependencies"] if item["ref"] == extension_ref)["dependsOn"], ["pkg:npm/%40scope/tool@4.5.6", "pkg:npm/transitive@1.0.0"])
+
+    def test_cyclonedx_falls_back_to_resolved_dependency_map_and_rejects_invalid_hashes(self) -> None:
+        bom = build_cyclonedx_bom({"extensions": [{"extension_id": "publisher.extension", "version": "1", "artifact_hash": "not-a-hash", "dependencies": {"left-pad": "1.3.0"}}]})
+        extension = next(component for component in bom["components"] if component["type"] == "application")
+        self.assertEqual(extension["hashes"], [])
+        self.assertIn("pkg:npm/left-pad@1.3.0", [component["bom-ref"] for component in bom["components"]])
