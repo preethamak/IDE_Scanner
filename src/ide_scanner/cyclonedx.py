@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
 from typing import Any
 from urllib.parse import quote
@@ -34,7 +35,16 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
         relationships.append({"ref": extension_ref, "dependsOn": sorted(set(dependency_refs))})
 
     namespace = uuid.UUID("c62e2a1c-66dc-4e14-a1eb-76c4d46fcc33")
-    identity = "|".join([scan_id, *sorted(components)])
+    component_list = [components[component_ref] for component_ref in sorted(components)]
+    relationship_list = sorted(relationships, key=lambda item: str(item["ref"]))
+    vulnerability_list = sorted(vulnerabilities, key=lambda item: str(item["id"]))
+    # The serial identifies the actual exported evidence, not merely the
+    # extension coordinates. A changed finding must produce a new serial.
+    identity = json.dumps(
+        {"scan_id": scan_id, "components": component_list, "dependencies": relationship_list, "vulnerabilities": vulnerability_list},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
@@ -52,9 +62,9 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
                 _property("guardrails:ruleset-version", _text(report.get("ruleset_version"), 160) or "unknown"),
             ],
         },
-        "components": [components[component_ref] for component_ref in sorted(components)],
-        "dependencies": sorted(relationships, key=lambda item: str(item["ref"])),
-        "vulnerabilities": sorted(vulnerabilities, key=lambda item: str(item["id"])),
+        "components": component_list,
+        "dependencies": relationship_list,
+        "vulnerabilities": vulnerability_list,
     }
 
 
