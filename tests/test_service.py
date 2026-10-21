@@ -18,6 +18,7 @@ from ide_scanner.service import (
     execute_marketplace_job,
     health_payload,
     openapi_payload,
+    retry_failed_webhook_deliveries,
     serve,
 )
 
@@ -260,6 +261,30 @@ class ScanWorkerPoolTests(unittest.TestCase):
             store.write(job)
             cleanup_stale_jobs(store)
             self.assertEqual(store.get(job["id"])["status"], "failed")
+
+    def test_restart_retries_failed_terminal_webhooks_with_a_bounded_total(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job.update({"status": "complete", "stage": "complete", "webhook_delivery": {"status": "failed", "attempts": 3, "total_attempts": 3}})
+            store.write(job)
+            with patch("ide_scanner.service.deliver_terminal_webhook", return_value={"delivery_id": "delivery_retry", "status": "delivered", "attempts": 2}) as deliver:
+                self.assertEqual(retry_failed_webhook_deliveries(store), 1)
+            persisted = store.get(job["id"])["webhook_delivery"]
+            self.assertEqual(deliver.call_count, 1)
+            self.assertEqual(persisted["status"], "delivered")
+            self.assertEqual(persisted["total_attempts"], 5)
+
+    def test_restart_dead_letters_delivery_that_exhausted_its_retry_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job.update({"status": "failed", "stage": "timeout", "webhook_delivery": {"status": "failed", "attempts": 3, "total_attempts": 9}})
+            store.write(job)
+            with patch("ide_scanner.service.deliver_terminal_webhook") as deliver:
+                self.assertEqual(retry_failed_webhook_deliveries(store), 0)
+            self.assertEqual(deliver.call_count, 0)
+            self.assertEqual(store.get(job["id"])["webhook_delivery"]["status"], "dead_lettered")
 
 
 class ServeSecureDefaultTests(unittest.TestCase):

@@ -18,6 +18,9 @@ match the comma-separated host allow-list. Invalid partial configuration stops
 the service at startup. Delivery retries only transient HTTP and transport
 errors, at most three times. A delivery failure never changes the scanner's
 completed or failed job result; it is recorded on the authenticated job record.
+On service startup, failed terminal deliveries are retried from that record.
+The service caps attempts at nine across restarts, then records
+`dead_lettered` for explicit operator follow-up.
 
 Each request includes:
 

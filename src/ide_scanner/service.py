@@ -43,6 +43,7 @@ MAX_SCAN_WORKERS = _bounded_env_int("IDE_SCANNER_MAX_WORKERS", 2, 1, 16)
 MAX_SCAN_QUEUE = _bounded_env_int("IDE_SCANNER_MAX_QUEUE", 32, 1, 1024)
 JOB_TIMEOUT_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_TIMEOUT", 600, 30, 3600)
 MCP_REQUEST_MAX_BYTES = _bounded_env_int("IDE_SCANNER_MCP_MAX_BYTES", 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
+WEBHOOK_MAX_TOTAL_ATTEMPTS = 9
 
 
 class JobStore:
@@ -323,11 +324,52 @@ def _notify_terminal_job(store: JobStore, job_id: str) -> None:
     job = store.get(job_id)
     if not job:
         return
+    previous = job.get("webhook_delivery") if isinstance(job.get("webhook_delivery"), dict) else {}
+    if previous.get("status") in {"delivered", "dead_lettered"}:
+        return
     delivery = deliver_terminal_webhook(job)
     if delivery is None:
         return
+    total_attempts = _delivery_attempts(previous) + _delivery_attempts(delivery)
+    delivery["total_attempts"] = total_attempts
+    if delivery.get("status") == "failed" and total_attempts >= WEBHOOK_MAX_TOTAL_ATTEMPTS:
+        delivery["status"] = "dead_lettered"
+        delivery["error"] = str(delivery.get("error") or "Webhook delivery exhausted its retry budget.")
     job["webhook_delivery"] = delivery
     store.write(job)
+
+
+def retry_failed_webhook_deliveries(store: JobStore) -> int:
+    """Retry persisted terminal webhook failures once when the service starts.
+
+    The job record is the durable outbox. Delivery IDs remain per attempt, so
+    recipients must deduplicate them; the bounded total prevents restart loops
+    from creating an unbounded retry stream.
+    """
+    retried = 0
+    for path in sorted(store.jobs_dir.glob("job_*.json")):
+        job_id = path.stem
+        job = store.get(job_id)
+        if not job or job.get("status") not in {"complete", "failed"}:
+            continue
+        delivery = job.get("webhook_delivery")
+        if not isinstance(delivery, dict) or delivery.get("status") != "failed":
+            continue
+        if _delivery_attempts(delivery) >= WEBHOOK_MAX_TOTAL_ATTEMPTS:
+            delivery["status"] = "dead_lettered"
+            job["webhook_delivery"] = delivery
+            store.write(job)
+            continue
+        _notify_terminal_job(store, job_id)
+        retried += 1
+    return retried
+
+
+def _delivery_attempts(delivery: dict[str, Any]) -> int:
+    try:
+        return max(0, int(delivery.get("total_attempts", delivery.get("attempts", 0))))
+    except (TypeError, ValueError):
+        return 0
 
 
 class ScannerServiceHandler(BaseHTTPRequestHandler):
@@ -509,6 +551,7 @@ def openapi_payload() -> dict[str, Any]:
             "updated_at": {"type": "string", "format": "date-time"},
             "report_ref": {"type": ["string", "null"], "description": "Present only after a complete job; fetch with the same bearer token."},
             "error": {"type": ["string", "null"]},
+            "webhook_delivery": {"type": "object", "description": "Bounded webhook delivery receipt when configured; it contains no webhook secret."},
         },
     }
     return {
@@ -606,6 +649,7 @@ def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DA
             file=sys.stderr,
         )
     store = JobStore(data_dir)
+    retry_failed_webhook_deliveries(store)
     cleanup_stale_jobs(store)
     server = ThreadingHTTPServer((host, port), ScannerServiceHandler)
     server.job_store = store  # type: ignore[attr-defined]
