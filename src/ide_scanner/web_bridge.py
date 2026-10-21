@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(marketplace_ids, list) or not all(isinstance(item, str) for item in marketplace_ids):
             _emit_error("marketplace_ids must be a list of strings")
             return 2
+        try:
+            expand_relationships, max_related_extensions = _relationship_expansion_options(payload)
+        except ValueError as exc:
+            _emit_error(str(exc))
+            return 2
         sandbox_observations_file: str | None = None
         if payload.get("sandbox") and paths:
             observations = _run_sandboxes(paths, bool(payload.get("allow_execute", False)), int(payload.get("timeout", 15) or 15))
@@ -50,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
         request = ScanRequest(
             paths=[Path(item) for item in paths],
             marketplace_scan_ids=marketplace_ids,
+            expand_extension_relationships=expand_relationships,
+            max_related_extensions=max_related_extensions,
             online=bool(payload.get("online", False)),
             sandbox_observations_file=sandbox_observations_file or payload.get("sandbox_observations_file"),
             previous_report_file=_write_previous_report(payload.get("previous_report")),
@@ -118,6 +125,16 @@ def _run_sandboxes(paths: list[str], allow_execute: bool, timeout: int) -> dict[
         for extension_id, observations in (result.get("extensions") or {}).items():
             merged["extensions"].setdefault(extension_id, []).extend(observations)
     return merged
+
+
+def _relationship_expansion_options(payload: dict[str, Any]) -> tuple[bool, int]:
+    expand = payload.get("expand_extension_relationships", False)
+    if not isinstance(expand, bool):
+        raise ValueError("expand_extension_relationships must be a boolean")
+    limit = payload.get("max_related_extensions", 20)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("max_related_extensions must be an integer between 1 and 100")
+    return expand, limit
 
 
 def _write_previous_report(value: Any) -> str | None:
