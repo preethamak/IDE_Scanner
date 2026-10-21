@@ -3640,6 +3640,33 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("dependencies", report["version_deltas"][0]["changes"])
         self.assertTrue(report["human_summary"])
 
+    def test_previous_report_reports_declared_extension_relationship_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extension = root / "current"
+            extension.mkdir()
+            (extension / "package.json").write_text(
+                '{"publisher":"example","name":"relationships","version":"2.0.0",'
+                '"extensionPack":["vendor.added"],"extensionDependencies":["vendor.same"]}',
+                encoding="utf-8",
+            )
+            previous = root / "previous.json"
+            previous.write_text(
+                '{"extensions":[{"extension_id":"example.relationships","version":"1.0.0",'
+                '"verdict":"clean","risk_score":0,"malware_score":0,"dependencies":{},'
+                '"artifact_inventory":{"risky_artifacts":[],"declared_extension_relationships":['
+                '{"extension_id":"vendor.same","relationship":"extension_dependency"},'
+                '{"extension_id":"vendor.removed","relationship":"extension_pack"}]}}]}',
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[extension], previous_report_file=previous)
+
+        delta = report["version_deltas"][0]
+        self.assertIn("extension_relationships", delta["changes"])
+        self.assertEqual(delta["added_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.added"}])
+        self.assertEqual(delta["removed_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.removed"}])
+
     def test_sandbox_runner_plan_does_not_execute_by_default(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
