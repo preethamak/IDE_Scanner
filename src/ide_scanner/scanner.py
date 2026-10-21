@@ -653,7 +653,7 @@ def scan_extension(
     ast_unparsed_entrypoints: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
-    extension_relationships = _extension_relationship_inventory(manifest)
+    extension_relationships = _extension_relationship_inventory(manifest, extension_id)
     _add_extension_relationship_findings(
         extension_id,
         version,
@@ -1922,10 +1922,11 @@ def _add_manifest_findings(
     _add_cross_extension_manifest_findings(extension_id, version, contributes, findings, capabilities)
 
 
-def _extension_relationship_inventory(manifest: dict[str, Any]) -> dict[str, Any]:
+def _extension_relationship_inventory(manifest: dict[str, Any], extension_id: str) -> dict[str, Any]:
     """Capture extension packages that the published manifest can pull in."""
     entries: list[dict[str, str]] = []
     invalid_entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for field, relationship in (
         ("extensionPack", "extension_pack"),
         ("extensionDependencies", "extension_dependency"),
@@ -1940,19 +1941,27 @@ def _extension_relationship_inventory(manifest: dict[str, Any]) -> dict[str, Any
             if not isinstance(item, str):
                 invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "expected an extension identifier string"})
                 continue
-            extension_id = item.strip()
-            if not _is_extension_identifier(extension_id):
+            related_extension_id = item.strip()
+            if not _is_extension_identifier(related_extension_id):
                 invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "invalid extension identifier"})
                 continue
+            normalized_id = related_extension_id.casefold()
+            key = (relationship, normalized_id)
+            if normalized_id == extension_id.casefold():
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "self-referential extension relationship"})
+                continue
+            if key in seen:
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "duplicate extension relationship"})
+                continue
+            seen.add(key)
             entries.append({
-                "extension_id": extension_id.casefold(),
+                "extension_id": normalized_id,
                 "relationship": relationship,
                 "declared_in": field,
             })
 
-    unique_entries = {(item["relationship"], item["extension_id"]): item for item in entries}
     return {
-        "entries": sorted(unique_entries.values(), key=lambda item: (item["relationship"], item["extension_id"])),
+        "entries": sorted(entries, key=lambda item: (item["relationship"], item["extension_id"])),
         "invalid_entries": invalid_entries,
     }
 

@@ -2167,10 +2167,37 @@ class ScannerTests(unittest.TestCase):
                 {"extension_id": "vendor.theme", "relationship": "extension_pack", "declared_in": "extensionPack"},
             ],
         )
-        self.assertEqual(len(inventory["invalid_entries"]), 2)
+        self.assertEqual(len(inventory["invalid_entries"]), 3)
+        self.assertIn(
+            {"field": "extensionPack", "value": "vendor.theme", "reason": "duplicate extension relationship"},
+            inventory["invalid_entries"],
+        )
         findings = {finding.rule_id: finding for finding in report.findings}
         self.assertEqual(findings["extension-install-surface"].evidence["evidence_class"], "capability")
         self.assertEqual(findings["malformed-extension-relationship"].severity, "MEDIUM")
+        self.assertEqual(report.decision, "review")
+
+    def test_self_referential_extension_relationship_is_withheld_from_acquisition(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "self-reference",
+                    "version": "1.0.0",
+                    "extensionDependencies": ["Example.Self-Reference"],
+                }),
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        inventory = report.artifact_inventory["extension_relationship_inventory"]
+        self.assertEqual(inventory["entries"], [])
+        self.assertEqual(
+            inventory["invalid_entries"],
+            [{"field": "extensionDependencies", "value": "Example.Self-Reference", "reason": "self-referential extension relationship"}],
+        )
+        self.assertIn("malformed-extension-relationship", {finding.rule_id for finding in report.findings})
         self.assertEqual(report.decision, "review")
 
     def test_install_time_chains_are_suspicious(self) -> None:
