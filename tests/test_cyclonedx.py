@@ -25,6 +25,9 @@ class CycloneDxTests(unittest.TestCase):
         self.assertEqual(bom["bomFormat"], "CycloneDX")
         self.assertEqual(bom["specVersion"], "1.5")
         self.assertEqual(bom["serialNumber"], build_cyclonedx_bom(report)["serialNumber"])
+        changed_evidence = json.loads(json.dumps(report))
+        changed_evidence["extensions"][0]["findings"][0]["evidence_summary"] = "A different observed credential flow."
+        self.assertNotEqual(bom["serialNumber"], build_cyclonedx_bom(changed_evidence)["serialNumber"])
         extension = next(component for component in bom["components"] if component["bom-ref"] == extension_ref)
         self.assertEqual(extension["hashes"], [{"alg": "SHA-256", "content": "b" * 64}])
         self.assertEqual(next(item for item in bom["dependencies"] if item["ref"] == extension_ref)["dependsOn"], ["pkg:npm/%40scope/tool@4.5.6", "pkg:npm/transitive@1.0.0"])
