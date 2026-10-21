@@ -50,6 +50,11 @@ providers, and publishes a short-lived encrypted report artifact. Configure
 `MCP_SCAN_ENCRYPTION_KEY` as a repository Actions secret; the web Worker uses
 the same secret when dispatching and reading MCP assessments.
 
+For VS Code workspace governance, use the reusable [GitHub extension policy
+action](docs/github-extension-policy-action.md). It resolves the exact
+published VSIX for repository-recommended extensions and enforces
+version-and-SHA-256 approvals in CI.
+
 ```bash
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```
