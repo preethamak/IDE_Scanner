@@ -646,6 +646,15 @@ def scan_extension(
     artifact_inventory = _artifact_inventory(path, files)
     artifact_inventory["package_format"] = manifest_format
     artifact_inventory["package_manifest_path"] = manifest_path
+    relationships = _manifest_extension_relationships(manifest)
+    artifact_inventory["declared_extension_relationships"] = relationships
+    _add_extension_relationship_findings(
+        extension_id,
+        version,
+        relationships,
+        findings,
+        capabilities,
+    )
     analysis_coverage = _new_analysis_coverage(
         files,
         entrypoints,
@@ -2066,6 +2075,71 @@ def _add_cross_extension_manifest_findings(
             {"command": command_id, "text": _truncate_evidence_text(text), "surface": "RequestedCommands"},
         ))
         capabilities.setdefault("credential_commands", {"id": "credential_commands", "evidence": []})["evidence"].append(command_id)
+
+
+def _manifest_extension_relationships(manifest: dict[str, Any]) -> list[dict[str, str]]:
+    """Return normalized VS Code extension references declared by the artifact.
+
+    A package manifest declares extension packs and dependencies by identifier,
+    not artifact version. Keep that distinction explicit: these entries are
+    evidence of an install-time relationship, never proof that a particular
+    related release was reviewed with this artifact.
+    """
+    relationships: list[dict[str, str]] = []
+    for field, relationship in (
+        ("extensionPack", "extension_pack"),
+        ("extensionDependencies", "extension_dependency"),
+    ):
+        raw_values = manifest.get(field)
+        if not isinstance(raw_values, list):
+            continue
+        for raw_value in raw_values:
+            try:
+                related_id = parse_marketplace_reference(str(raw_value))
+            except MarketplaceDownloadError:
+                continue
+            relationships.append({"extension_id": related_id, "relationship": relationship})
+    return sorted(
+        {(
+            item["extension_id"].lower(),
+            item["relationship"],
+        ): item for item in relationships}.values(),
+        key=lambda item: (item["relationship"], item["extension_id"].lower()),
+    )
+
+
+def _add_extension_relationship_findings(
+    extension_id: str,
+    version: str,
+    relationships: list[dict[str, str]],
+    findings: list[Finding],
+    capabilities: dict[str, dict[str, Any]],
+) -> None:
+    if not relationships:
+        return
+    packs = [item["extension_id"] for item in relationships if item["relationship"] == "extension_pack"]
+    dependencies = [item["extension_id"] for item in relationships if item["relationship"] == "extension_dependency"]
+    findings.append(_finding(
+        extension_id,
+        version,
+        "declared-extension-relationships",
+        "supply-chain",
+        "INFO",
+        0.92,
+        "Extension manifest declares related extension releases that can be installed alongside this artifact.",
+        ["package.json"],
+        "Review every declared extension pack or dependency as a separate release; these manifest references are not version-pinned.",
+        {
+            "evidence_class": "capability",
+            "extension_packs": packs,
+            "extension_dependencies": dependencies,
+            "version_pinned": False,
+        },
+    ))
+    capabilities["extension_relationships"] = {
+        "id": "extension_relationships",
+        "evidence": relationships,
+    }
 
 
 def _add_repository_posture_findings(
