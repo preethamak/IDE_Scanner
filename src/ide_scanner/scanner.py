@@ -646,7 +646,6 @@ def scan_extension(
     artifact_inventory = _artifact_inventory(path, files)
     artifact_inventory["package_format"] = manifest_format
     artifact_inventory["package_manifest_path"] = manifest_path
-    artifact_inventory["extension_relationship_inventory"] = _extension_relationship_inventory(manifest)
     analysis_coverage = _new_analysis_coverage(
         files,
         entrypoints,
@@ -6423,35 +6422,6 @@ def _dependency_inventory(manifest: dict[str, Any], dependencies: dict[str, str]
         }
         for name, version in sorted(dependencies.items())
     ]
-
-
-def _extension_relationship_inventory(manifest: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
-    """Record declared extension bundles without treating them as scanned artifacts.
-
-    VS Code installs `extensionPack` and `extensionDependencies` entries beside
-    the reviewed package. They need their own artifact acquisition and scan, so
-    this inventory only records the manifest declaration and starts with no
-    resolution records.
-    """
-    entries: list[dict[str, str]] = []
-    for field in ("extensionPack", "extensionDependencies"):
-        declared = manifest.get(field)
-        if not isinstance(declared, list):
-            continue
-        for raw_extension_id in declared:
-            if not isinstance(raw_extension_id, str):
-                continue
-            extension_id = raw_extension_id.strip().lower()
-            if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+", extension_id):
-                continue
-            entries.append({
-                "extension_id": extension_id,
-                "relationship": field,
-                "declared_in": field,
-            })
-    entries = list({(item["relationship"], item["extension_id"]): item for item in entries}.values())
-    entries.sort(key=lambda item: (item["relationship"], item["extension_id"]))
-    return {"entries": entries, "resolution": []}
 
 
 def _package_lock_dependencies(path: Path) -> dict[str, str]:
