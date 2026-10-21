@@ -6,7 +6,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer
 
 from ide_scanner.service import (
@@ -91,6 +92,8 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertNotIn("security", paths["/health"]["get"])
         self.assertEqual(paths["/v1/scans/marketplace"]["post"]["security"], [{"bearerAuth": []}])
         self.assertIn("429", paths["/v1/scans/marketplace"]["post"]["responses"])
+        self.assertIn("409", paths["/v1/scans/marketplace"]["post"]["responses"])
+        self.assertEqual(paths["/v1/scans/marketplace"]["post"]["parameters"][0]["name"], "Idempotency-Key")
         self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed"])
 
     def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
@@ -107,6 +110,76 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["openapi"], "3.1.0")
                 self.assertIn("/v1/scans/marketplace", payload["paths"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_marketplace_submission_reuses_an_idempotency_key_only_for_the_same_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            started = threading.Event()
+
+            def blocking_runner(_store, _job):
+                started.set()
+                time.sleep(0.5)
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=2, runner=blocking_runner)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/scans/marketplace"
+            headers = {"Content-Type": "application/json", "Idempotency-Key": "release-review-42"}
+            try:
+                request = Request(endpoint, data=b'{"extension_id":"publisher.extension","version":"1.2.3"}', headers=headers, method="POST")
+                with urlopen(request, timeout=2) as response:
+                    first = json.loads(response.read())
+                    self.assertEqual(response.status, 202)
+                    self.assertIsNone(response.headers.get("Idempotent-Replayed"))
+                self.assertTrue(started.wait(2))
+                with urlopen(request, timeout=2) as response:
+                    replay = json.loads(response.read())
+                    self.assertEqual(response.status, 202)
+                    self.assertEqual(response.headers.get("Idempotent-Replayed"), "true")
+                self.assertEqual(replay["id"], first["id"])
+
+                changed = Request(endpoint, data=b'{"extension_id":"publisher.extension","version":"1.2.4"}', headers=headers, method="POST")
+                with self.assertRaises(HTTPError) as raised:
+                    urlopen(changed, timeout=2)
+                self.assertEqual(raised.exception.code, 409)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_rejected_submission_replays_its_retryable_capacity_response(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+
+            class FullPool:
+                @staticmethod
+                def submit(_job):
+                    return False
+
+            server.scan_pool = FullPool()  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/v1/scans/marketplace",
+                data=b'{"extension_id":"publisher.extension"}',
+                headers={"Content-Type": "application/json", "Idempotency-Key": "capacity-42"},
+                method="POST",
+            )
+            try:
+                for replay in (False, True):
+                    with self.assertRaises(HTTPError) as raised:
+                        urlopen(request, timeout=2)
+                    self.assertEqual(raised.exception.code, 429)
+                    self.assertEqual(raised.exception.headers.get("Retry-After"), "30")
+                    self.assertEqual(raised.exception.headers.get("Idempotent-Replayed"), "true" if replay else None)
             finally:
                 server.shutdown()
                 server.server_close()

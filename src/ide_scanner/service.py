@@ -24,6 +24,7 @@ from .scanner import scan_targets
 SERVICE_VERSION = "0.1.0"
 DEFAULT_DATA_DIR = Path(os.environ.get("IDE_SCANNER_DATA_DIR", ".ide-scanner-data"))
 MARKETPLACE_ID = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$")
+IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -53,20 +54,49 @@ class JobStore:
         self._lock = threading.Lock()
 
     def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
-        now = _now()
-        job = {
-            "id": f"job_{uuid.uuid4().hex}",
-            "status": "queued",
-            "extension_id": extension_id,
-            "version": version,
-            "target_platform": target_platform,
-            "created_at": now,
-            "updated_at": now,
-            "error": None,
-            "report_ref": None,
-        }
-        self.write(job)
+        job, _, _ = self.create_or_reuse(extension_id, version=version, target_platform=target_platform)
         return job
+
+    def create_or_reuse(
+        self,
+        extension_id: str,
+        *,
+        version: str | None = None,
+        target_platform: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> tuple[dict[str, Any], bool, bool]:
+        """Atomically reserve a job for a client request.
+
+        A retry with the same key and exact release request returns the original
+        job. A key bound to different request data is a client conflict instead
+        of a potentially surprising scan of another artifact.
+        """
+        fingerprint = _request_fingerprint(extension_id, version, target_platform)
+        with self._lock:
+            if idempotency_key:
+                for path in self.jobs_dir.glob("job_*.json"):
+                    current = self._read_json_locked(path)
+                    if not isinstance(current, dict) or current.get("idempotency_key") != idempotency_key:
+                        continue
+                    if current.get("request_fingerprint") == fingerprint:
+                        return current, False, False
+                    return current, False, True
+            now = _now()
+            job = {
+                "id": f"job_{uuid.uuid4().hex}",
+                "status": "queued",
+                "extension_id": extension_id,
+                "version": version,
+                "target_platform": target_platform,
+                "created_at": now,
+                "updated_at": now,
+                "error": None,
+                "report_ref": None,
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": fingerprint if idempotency_key else None,
+            }
+            self._write_json_locked(self.jobs_dir / f"{job['id']}.json", job)
+            return job, True, False
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         if not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
@@ -352,13 +382,35 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
             self._json(400, {"error": "target_platform is invalid."})
             return
-        job = self.store.create(extension_id, version=version, target_platform=target_platform)
+        idempotency_key = self.headers.get("idempotency-key", "").strip() or None
+        if idempotency_key and not IDEMPOTENCY_KEY.fullmatch(idempotency_key):
+            self._json(400, {"error": "Idempotency-Key must be 1-128 URL-safe characters."})
+            return
+        job, created, conflict = self.store.create_or_reuse(
+            extension_id,
+            version=version,
+            target_platform=target_platform,
+            idempotency_key=idempotency_key,
+        )
+        if conflict:
+            self._json(409, {"error": "Idempotency-Key is already bound to a different scan request.", "job": job})
+            return
+        if not created:
+            if job.get("stage") == "rejected":
+                self._json(
+                    429,
+                    {"error": "Scanner is at capacity; retry later.", "job": job},
+                    headers={"Idempotent-Replayed": "true", "Retry-After": "30"},
+                )
+                return
+            self._json(202, job, headers={"Idempotent-Replayed": "true"})
+            return
         if not self.pool.submit(job):
             job["status"] = "failed"
             job["stage"] = "rejected"
             job["error"] = "Scanner is at capacity; retry later."
             self.store.write(job)
-            self._json(429, {"error": "Scanner is at capacity; retry later.", "job": job})
+            self._json(429, {"error": "Scanner is at capacity; retry later.", "job": job}, headers={"Retry-After": "30"})
             return
         self._json(202, job)
 
@@ -384,20 +436,22 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         supplied = self.headers.get("authorization", "")
         return hmac.compare_digest(supplied, f"Bearer {token}")
 
-    def _json(self, status: int, payload: Any) -> None:
+    def _json(self, status: int, payload: Any, *, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self._cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
     def _cors_headers(self) -> None:
         origin = os.environ.get("IDE_SCANNER_ALLOWED_ORIGIN", "http://127.0.0.1:8765")
         self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Headers", "content-type, authorization")
+        self.send_header("Access-Control-Allow-Headers", "content-type, authorization, idempotency-key")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
 
@@ -434,6 +488,7 @@ def openapi_payload() -> dict[str, Any]:
             "extension_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"},
             "version": {"type": ["string", "null"]},
             "target_platform": {"type": ["string", "null"]},
+            "idempotency_key": {"type": ["string", "null"], "description": "Accepted request key; never use this field as an authorization secret."},
             "created_at": {"type": "string", "format": "date-time"},
             "updated_at": {"type": "string", "format": "date-time"},
             "report_ref": {"type": ["string", "null"], "description": "Present only after a complete job; fetch with the same bearer token."},
@@ -486,7 +541,8 @@ def openapi_payload() -> dict[str, Any]:
                             },
                         },
                     },
-                    "responses": {"202": {"description": "Job accepted; it is not an approval result.", "content": {"application/json": {"schema": job}}}, "400": {"description": "Invalid request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "429": {"description": "Queue capacity exhausted; retry later.", "content": {"application/json": {"schema": error}}}},
+                    "parameters": [{"in": "header", "name": "Idempotency-Key", "required": False, "schema": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "description": "Reuse a prior job only for an identical extension/version/platform request."}],
+                    "responses": {"202": {"description": "Job accepted or replayed; it is not an approval result.", "headers": {"Idempotent-Replayed": {"schema": {"type": "string", "enum": ["true"]}, "description": "Present when the key returned an existing job."}}, "content": {"application/json": {"schema": job}}}, "400": {"description": "Invalid request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "409": {"description": "Idempotency key belongs to a different request", "content": {"application/json": {"schema": error}}}, "429": {"description": "Queue capacity exhausted; retry later.", "headers": {"Retry-After": {"schema": {"type": "integer"}, "description": "Seconds before a new-key retry is appropriate."}}, "content": {"application/json": {"schema": error}}}},
                 },
             },
             "/v1/scans/mcp": {
@@ -552,6 +608,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _request_fingerprint(extension_id: str, version: str | None, target_platform: str | None) -> str:
+    return json.dumps(
+        {"extension_id": extension_id, "target_platform": target_platform, "version": version},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 if __name__ == "__main__":
