@@ -9,6 +9,7 @@
 - `models.py`, `classification_policy.py`, and `public_outcomes.py` define the report and decision contract.
 - `providers/` owns native/provider integration; unavailable required providers must result in incomplete analysis, never an allow decision.
 - `registry.py` owns marketplace and dependency intelligence; captured snapshots are attached to reports for replayability.
+- Declared extension packs and extension dependencies are artifact-manifest evidence. Optional relationship traversal is bounded and records fetched children as latest-release, unpinned evidence rather than changing the exact identity of the primary artifact.
 - `sandbox_runner.py` owns the bounded Bubblewrap runtime. Runtime coverage is required only for artifacts whose declared or observed surface can answer a security question; ordinary declarative themes and other non-executable packages are explicitly marked not applicable.
 
 ## Versioning and trust

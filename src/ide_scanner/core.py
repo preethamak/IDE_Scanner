@@ -17,6 +17,8 @@ class ScanRequest:
     marketplace_scan_ids: list[str] = field(default_factory=list)
     marketplace_version: str | None = None
     marketplace_target_platform: str | None = None
+    expand_extension_relationships: bool = False
+    max_related_extensions: int = 20
     marketplace_artifact_store: ArtifactStore | None = None
     include_fixtures: bool = False
     all_local: bool = False
@@ -59,6 +61,8 @@ def run_scan(request: ScanRequest) -> dict[str, Any]:
         marketplace_scan_ids=request.marketplace_scan_ids,
         marketplace_version=request.marketplace_version,
         marketplace_target_platform=request.marketplace_target_platform,
+        expand_extension_relationships=request.expand_extension_relationships,
+        max_related_extensions=request.max_related_extensions,
         marketplace_artifact_store=request.marketplace_artifact_store,
         include_fixtures=request.include_fixtures,
         all_local=request.all_local,

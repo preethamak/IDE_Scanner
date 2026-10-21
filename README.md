@@ -39,6 +39,26 @@ direct/transitive relationships, and records artifact SHA-256, scanner build,
 and ruleset identity when available. It does not include source previews or raw
 finding evidence.
 
+### Related extension releases
+
+VS Code extension packs and `extensionDependencies` can install other
+extensions alongside the release being reviewed. To inspect those declarations
+as well, opt into bounded relationship traversal:
+
+```bash
+PYTHONPATH=src python -m ide_scanner scan \
+  --extension-id publisher.extension --version 1.2.3 \
+  --expand-extension-relationships --max-related-extensions 20 \
+  --format json --out report.json
+```
+
+The requested extension remains the exact, version-pinned primary artifact.
+Related manifest entries do not contain a version, so each additional scan is
+recorded as `latest_available` evidence with `version_pinned: false`. The walk
+is cycle-safe and stops at the configured release budget; a truncated walk is
+reported explicitly. See [relationship scanning](docs/relationship-scanning.md)
+for the review procedure and report fields.
+
 Website: [abscissa.dev](https://abscissa.dev)
 
 ## MCP assessment service

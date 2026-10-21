@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
+    scan.add_argument("--expand-extension-relationships", action="store_true", help="Also scan declared extension packs and extension dependencies as bounded latest-release evidence; declarations are not version-pinned.")
+    scan.add_argument("--max-related-extensions", type=int, default=20, help="Maximum related Marketplace releases to scan with --expand-extension-relationships (1-100).")
     scan.add_argument("--artifact-store", help="Preserve downloaded Marketplace VSIX files in this private vault.")
     scan.add_argument("--artifact-url", help="Final public HTTPS URL for a non-registry VSIX; requires --artifact-sha256.")
     scan.add_argument("--artifact-sha256", help="Required SHA-256 for --artifact-url acquisition.")
@@ -182,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --artifact-url and --artifact-sha256 must be provided together")
         if not 1 <= args.runtime_timeout <= 300:
             parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
+        if not 1 <= args.max_related_extensions <= 100:
+            parser.error("scan --max-related-extensions must be between 1 and 100")
         if args.profile == "deep" and not args.runtime:
             parser.error("scan --profile deep requires --runtime; use standard for static-only scans")
         report = scan_targets(
@@ -189,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
             marketplace_scan_ids=args.extension_id,
             marketplace_version=args.version,
             marketplace_target_platform=args.target_platform,
+            expand_extension_relationships=args.expand_extension_relationships,
+            max_related_extensions=args.max_related_extensions,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=not args.offline,
