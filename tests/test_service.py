@@ -59,6 +59,7 @@ class ScannerServiceTests(unittest.TestCase):
             store = JobStore(Path(temp))
             job = store.create("publisher.extension")
             job["version"] = "1.2.3"
+            store.write(job)
             execute_marketplace_job(store, job, scan=fake_scan)
             completed = store.get(job["id"])
             report = store.get_report(job["id"])
@@ -100,7 +101,9 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertIn("429", paths["/v1/scans/marketplace"]["post"]["responses"])
         self.assertIn("409", paths["/v1/scans/marketplace"]["post"]["responses"])
         self.assertEqual(paths["/v1/scans/marketplace"]["post"]["parameters"][0]["name"], "Idempotency-Key")
-        self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed"])
+        self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed", "cancelled"])
+        self.assertEqual(paths["/v1/jobs/{job_id}"]["delete"]["security"], [{"bearerAuth": []}])
+        self.assertIn("409", paths["/v1/jobs/{job_id}"]["delete"]["responses"])
 
     def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -116,6 +119,29 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["openapi"], "3.1.0")
                 self.assertIn("/v1/scans/marketplace", payload["paths"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_http_delete_cancels_a_queued_job_and_rejects_a_repeat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.cancelled")
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs/{job['id']}"
+            try:
+                with urlopen(Request(endpoint, method="DELETE"), timeout=2) as response:
+                    payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["status"], "cancelled")
+                with self.assertRaises(HTTPError) as rejected:
+                    urlopen(Request(endpoint, method="DELETE"), timeout=2)
+                self.assertEqual(rejected.exception.code, 409)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -266,6 +292,62 @@ class ScanWorkerPoolTests(unittest.TestCase):
             store.write(job)
             cleanup_stale_jobs(store)
             self.assertEqual(store.get(job["id"])["status"], "failed")
+
+    def test_cancelled_queued_job_is_not_claimed_by_a_late_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.cancelled")
+            cancelled, did_cancel = store.cancel(job["id"])
+
+            self.assertTrue(did_cancel)
+            self.assertEqual(cancelled["status"], "cancelled")
+            self.assertIsNone(store.try_start(job["id"]))
+            self.assertEqual(store.get(job["id"])["stage"], "cancelled")
+
+    def test_cancelling_running_job_prevents_late_report_publication(self) -> None:
+        fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.cancelled")
+            self.assertIsNotNone(store.try_start(job["id"]))
+            cancelled, did_cancel = store.cancel(job["id"])
+
+            from ide_scanner.scanner import scan_targets
+
+            report = scan_targets(paths=[fixture], include_posture=False)
+            self.assertTrue(did_cancel)
+            self.assertEqual(cancelled["status"], "cancelled")
+            self.assertFalse(store.try_complete(job["id"], {"decision": "review"}, report))
+            self.assertIsNone(store.get_report(job["id"]))
+
+    def test_execution_does_not_publish_after_scan_is_cancelled(self) -> None:
+        fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.cancelled")
+
+            def cancelling_scan(**_kwargs: object):
+                from ide_scanner.scanner import scan_targets
+
+                store.cancel(job["id"])
+                return scan_targets(paths=[fixture], include_posture=False)
+
+            with patch("ide_scanner.service.deliver_terminal_webhook") as deliver:
+                execute_marketplace_job(store, job, scan=cancelling_scan)
+            self.assertEqual(store.get(job["id"])["status"], "cancelled")
+            self.assertIsNone(store.get_report(job["id"]))
+            deliver.assert_not_called()
+
+    def test_terminal_job_cannot_be_cancelled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.complete")
+            self.assertIsNotNone(store.try_start(job["id"]))
+            self.assertTrue(store.try_fail(job["id"], "scanner failed"))
+
+            persisted, did_cancel = store.cancel(job["id"])
+            self.assertFalse(did_cancel)
+            self.assertEqual(persisted["status"], "failed")
 
     def test_restart_retries_failed_terminal_webhooks_with_a_bounded_total(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
