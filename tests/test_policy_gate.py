@@ -4,6 +4,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def policy_gate():
@@ -68,3 +69,24 @@ class PolicyGateTests(unittest.TestCase):
         outcome, reason = gate._lock_outcome(entry, "b" * 64, "1.0.0")
         self.assertEqual(outcome, "fail")
         self.assertIn("SHA-256", reason)
+
+    def test_evaluation_fails_before_policy_when_resolved_artifact_drifts(self) -> None:
+        gate = policy_gate()
+        report = {
+            "extensions": [{"artifact_hash": "b" * 64, "version": "1.0.0", "decision": "allow"}],
+            "ruleset_version": "test-ruleset",
+        }
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(gate, "recommended_extensions", return_value=["publisher.extension"]),
+            patch.object(gate, "download_marketplace_vsix", return_value=Path("/tmp/extension.vsix")),
+            patch.object(gate, "scan_targets", return_value=report),
+        ):
+            result = gate.evaluate(
+                Path(directory),
+                {},
+                {"extensions": {"publisher.extension": {"version": "1.0.0", "sha256": "a" * 64}}},
+            )
+        row = result["extensions"][0]
+        self.assertEqual(row["outcome"], "fail")
+        self.assertIn("Release lock", row["reason"])
