@@ -5,6 +5,9 @@ CI. It writes the complete machine-readable evidence report as an artifact and
 exposes the decision and coverage as action outputs. The action assesses the
 descriptor; it does not install, execute, or grant the server access.
 
+Use the [MCP descriptor contract](mcp-descriptor-contract.md) for the accepted
+input schema and the distinction between local and remote descriptors.
+
 ```yaml
 name: MCP assessment
 

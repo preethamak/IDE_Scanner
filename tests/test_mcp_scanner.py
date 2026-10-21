@@ -1,6 +1,7 @@
 import asyncio
 
 from ide_scanner.mcp import scan_mcp_payload
+from ide_scanner.mcp.scanner import _normalize_input
 from ide_scanner.mcp.extractors.auth_modes import AuthModesResult
 from ide_scanner.mcp.extractors.classification import ClassificationResult
 from ide_scanner.mcp.extractors.fingerprint import FingerprintResult, TransportLevelEnum
@@ -29,6 +30,25 @@ def test_mcp_metric_contract_has_twelve_weighted_leaves():
     assert {item["name"] for item in leaves} >= {"auth-strength", "metadata-security", "secrets-risk"}
     assert report["schema_version"] == "guardrails.mcp-risk-report.v1"
     assert report["scanner"]["mode"] == "full"
+
+
+def test_descriptor_validation_requires_an_identity_and_explicit_local_or_remote_transport():
+    import pytest
+
+    with pytest.raises(ValueError, match="requires a non-empty name"):
+        scan_mcp_payload({"transport": "stdio"})
+    with pytest.raises(ValueError, match="requires mcp_url/url"):
+        scan_mcp_payload({"name": "ambiguous"})
+    with pytest.raises(ValueError, match="must not include credentials"):
+        scan_mcp_payload({"name": "unsafe-url", "url": "https://secret@example.test/mcp"})
+    with pytest.raises(ValueError, match="tools must be an array"):
+        scan_mcp_payload({"name": "bad-tools", "transport": "stdio", "tools": ["not-an-object"]})
+
+
+def test_descriptor_validation_allows_insecure_http_to_be_assessed_as_transport_risk():
+    normalized = _normalize_input({"name": "http-server", "url": "http://server.invalid/mcp", "tools": []})
+    assert normalized["mcp_url"] == "http://server.invalid/mcp"
+    assert normalized["is_local"] is False
 
 
 def test_reference_auth_and_hosting_scores_are_preserved():
@@ -71,4 +91,3 @@ def test_reference_transport_and_metadata_vetoes_are_preserved():
     metadata_output = asyncio.run(MetadataSecurityRunner().run(tool_analysis, {}))
     assert metadata_output.score == 1.0
     assert metadata_output.veto == VetoLevelEnum.FAILURE
-
