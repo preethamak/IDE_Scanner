@@ -302,6 +302,8 @@ def scan_targets(
     marketplace_scan_ids: list[str] | None = None,
     marketplace_version: str | None = None,
     marketplace_target_platform: str | None = None,
+    expand_extension_relationships: bool = False,
+    max_related_extensions: int = 20,
     include_fixtures: bool = False,
     all_local: bool = False,
     online: bool = False,
@@ -325,12 +327,16 @@ def scan_targets(
         raise ValueError("jobs must be between 1 and 32")
     if not 1 <= runtime_timeout_seconds <= 300:
         raise ValueError("runtime_timeout_seconds must be between 1 and 300")
+    if not 1 <= max_related_extensions <= 100:
+        raise ValueError("max_related_extensions must be between 1 and 100")
     request = ScanRequest.create(
         paths=paths,
         extension_ids=extension_ids,
         marketplace_scan_ids=marketplace_scan_ids,
         marketplace_version=marketplace_version,
         marketplace_target_platform=marketplace_target_platform,
+        expand_extension_relationships=expand_extension_relationships,
+        max_related_extensions=max_related_extensions,
         include_fixtures=include_fixtures,
         all_local=all_local,
         online=online,
@@ -426,6 +432,16 @@ def _scan_request(
             runtime_timeout_seconds=request.runtime_timeout_seconds,
             runtime_bundle=runtime_bundle if request.dynamic_runtime else None,
         ))
+    if request.expand_extension_relationships:
+        _expand_declared_extension_relationships(
+            extensions,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=marketplace_artifact_store,
+            dynamic_runtime=request.dynamic_runtime,
+            runtime_timeout_seconds=request.runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle if request.dynamic_runtime else None,
+            max_related_extensions=request.max_related_extensions,
+        )
     _apply_threat_feed(extensions, _load_threat_feed(request.threat_feed_file))
     advisory_bundle = _load_extension_advisories(request.extension_advisories_file)
     if request.artifact_url or request.artifact_sha256:
@@ -1543,6 +1559,83 @@ def scan_marketplace_extension(
         report.artifact_identity["storage"] = storage
         report.artifact_inventory["artifact_storage"] = storage
     return report
+
+
+def _expand_declared_extension_relationships(
+    extensions: list[ExtensionReport],
+    *,
+    known_bad_hashes: dict[str, dict[str, Any]],
+    artifact_store: ArtifactStore | None,
+    dynamic_runtime: bool,
+    runtime_timeout_seconds: int,
+    runtime_bundle: dict[str, Any] | None,
+    max_related_extensions: int,
+) -> None:
+    """Append bounded scans for manifest-declared extension relationships.
+
+    VS Code manifests reference only extension identifiers, not a related
+    artifact version. The optional traversal therefore scans the currently
+    resolved Marketplace release and records that limitation on every child.
+    It never changes the exact identity claim for the primary artifact.
+    """
+    queue: list[tuple[ExtensionReport, dict[str, str], int]] = []
+    seen = {str(item.extension_id).lower() for item in extensions}
+    for report in extensions:
+        queue.extend((report, relationship, 1) for relationship in _declared_relationships(report))
+
+    scanned = 0
+    while queue and scanned < max_related_extensions:
+        parent, relationship, depth = queue.pop(0)
+        related_id = str(relationship["extension_id"])
+        normalized_id = related_id.lower()
+        if normalized_id in seen:
+            continue
+        seen.add(normalized_id)
+        related = scan_marketplace_extension(
+            related_id,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=artifact_store,
+            dynamic_runtime=dynamic_runtime,
+            runtime_timeout_seconds=runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle,
+        )
+        scanned += 1
+        relationship_scan = {
+            "parent_extension_id": str(parent.extension_id),
+            "parent_version": str(parent.version),
+            "relationship": str(relationship["relationship"]),
+            "selection": "latest_available",
+            "version_pinned": False,
+            "depth": depth,
+        }
+        related.artifact_inventory["relationship_scan"] = relationship_scan
+        related.artifact_identity["relationship_scan"] = relationship_scan
+        extensions.append(related)
+        queue.extend((related, child, depth + 1) for child in _declared_relationships(related))
+
+    exhausted = bool(queue)
+    for report in extensions:
+        inventory = report.artifact_inventory
+        if _declared_relationships(report) or "relationship_scan" in inventory:
+            inventory["relationship_expansion"] = {
+                "requested": True,
+                "max_related_extensions": max_related_extensions,
+                "scanned_related_extensions": scanned,
+                "truncated": exhausted,
+            }
+
+
+def _declared_relationships(report: ExtensionReport) -> list[dict[str, str]]:
+    relationships = report.artifact_inventory.get("declared_extension_relationships")
+    if not isinstance(relationships, list):
+        return []
+    return [
+        {"extension_id": str(item["extension_id"]), "relationship": str(item["relationship"])}
+        for item in relationships
+        if isinstance(item, dict)
+        and isinstance(item.get("extension_id"), str)
+        and isinstance(item.get("relationship"), str)
+    ]
 
 
 def scan_remote_artifact(

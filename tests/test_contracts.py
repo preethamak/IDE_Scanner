@@ -16,6 +16,15 @@ class ScanRequestTests(unittest.TestCase):
         self.assertEqual(request.extension_ids, ("publisher.extension",))
         self.assertEqual(request.required_providers, frozenset({"semgrep", "yara"}))
 
+    def test_create_preserves_relationship_expansion_limits(self) -> None:
+        request = ScanRequest.create(
+            expand_extension_relationships=True,
+            max_related_extensions=7,
+        )
+
+        self.assertTrue(request.expand_extension_relationships)
+        self.assertEqual(request.max_related_extensions, 7)
+
 
 if __name__ == "__main__":
     unittest.main()
