@@ -11,6 +11,7 @@ from typing import Any
 from .artifact_store import FilesystemArtifactStore
 
 from .agent import build_agent_report, upload_agent_report
+from .cyclonedx import build_cyclonedx_bom
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
@@ -42,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
-    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "cyclonedx.json"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, report.zip when --output ends in .zip, and CycloneDX JSON when --output ends in .cdx.json.")
     scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -241,6 +242,9 @@ def main(argv: list[str] | None = None) -> int:
             from .report_bundle import build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
             return scan_exit_code
+        if output_format == "cyclonedx.json":
+            _emit(build_cyclonedx_bom(report, profile=args.profile, source=source), args.output)
+            return scan_exit_code
         if output_format == "terminal":
             if args.output:
                 parser.error("scan --format terminal cannot write an output file; use --format report.zip or json.")
@@ -362,6 +366,8 @@ def _scan_output_format(output: str | None, explicit_format: str | None) -> str:
         return explicit_format
     if output and output.lower().endswith(".zip"):
         return "report.zip"
+    if output and output.lower().endswith(".cdx.json"):
+        return "cyclonedx.json"
     return "terminal" if sys.stdout.isatty() and not output else "json"
 
 

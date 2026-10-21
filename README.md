@@ -30,7 +30,14 @@ Examples:
 ```bash
 guardrails scan --file extension.vsix --runtime --format json --output report.json
 guardrails scan --file extension.vsix --profile deep --runtime --format zip --output report.zip
+guardrails scan --file extension.vsix --format cyclonedx.json --output extension.cdx.json
 ```
+
+`cyclonedx.json` emits a CycloneDX 1.5 SBOM from the resolved scan result. It
+binds each exact scanned extension to its resolved npm dependencies, preserves
+direct/transitive relationships, and records artifact SHA-256, scanner build,
+and ruleset identity when available. It does not include source previews or raw
+finding evidence.
 
 Website: [abscissa.dev](https://abscissa.dev)
 
