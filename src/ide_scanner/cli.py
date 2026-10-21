@@ -16,7 +16,7 @@ from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmar
 from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
-from .report_bundle import iter_report_events, write_report_bundle
+from .report_bundle import iter_report_events, verify_report_bundle, write_report_bundle
 from .sandbox_runner import run_sandbox, sandbox_preflight
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     artifacts.add_argument("--registry")
     artifacts.add_argument("--target-platform")
     artifacts.add_argument("--sha256")
+
+    report = subparsers.add_parser("report", help="Inspect or verify a GuardRails report bundle.")
+    report_subparsers = report.add_subparsers(dest="report_command", required=True)
+    report_verify = report_subparsers.add_parser("verify", help="Verify report ZIP member hashes.")
+    report_verify.add_argument("--bundle", required=True, help="Report ZIP produced by ide-scanner scan --format report.zip.")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -255,6 +260,13 @@ def main(argv: list[str] | None = None) -> int:
             target_platform=args.target_platform, sha256=args.sha256,
         )}, None)
         return 0
+    if args.command == "report":
+        try:
+            _emit(verify_report_bundle(args.bundle), None)
+            return 0
+        except ValueError as exc:
+            _emit({"valid": False, "bundle": str(args.bundle), "error": str(exc)}, None)
+            return 2
     if args.command == "inventory":
         targets: list[dict[str, str]] = []
         for item in args.path:
