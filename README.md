@@ -25,6 +25,10 @@ extension directly, and packages that do not expose an executable security
 surface are recorded as runtime not-applicable rather than forced through a
 meaningless entrypoint.
 
+For repository-level review, use the [workspace extension scan
+workflow](docs/workspace-extension-scan.md) to discover VS Code and Dev
+Container recommendations and inspect their published Marketplace artifacts.
+
 Examples:
 
 ```bash
