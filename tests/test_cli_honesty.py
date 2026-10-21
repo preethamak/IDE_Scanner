@@ -85,6 +85,14 @@ class CliHonestyTests(unittest.TestCase):
             code = cli.main(["scan", "--fixtures", "--profile", "deep", "--runtime", "--format", "json"])
         self.assertEqual(code, 1)
 
+    def test_cli_writes_a_cyclonedx_dependency_inventory(self) -> None:
+        report = {"scan_id": "scan-1", "created_at": "2026-10-22T00:00:00Z", "extensions": [{"extension_id": "publisher.extension", "version": "1.2.3", "artifact_inventory": {"dependency_inventory": [{"name": "package", "version": "1.0.0"}]}}]}
+        with tempfile.TemporaryDirectory() as tmp, patch("ide_scanner.cli.scan_targets", return_value=report):
+            output = Path(tmp) / "extension.cdx.json"
+            code = cli.main(["scan", "--fixtures", "--format", "cyclonedx.json", "--out", str(output)])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["bomFormat"], "CycloneDX")
+
     def test_cli_rejects_unimplemented_output_formats(self) -> None:
         for output_format in ("sarif", "sqlite"):
             error = io.StringIO()
