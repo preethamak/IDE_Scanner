@@ -2063,6 +2063,36 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("unpinned-dependency", {finding.rule_id for finding in report.findings})
         self.assertIn("mutable-dependency-source", {finding.rule_id for finding in report.findings})
 
+    def test_extension_relationships_are_release_evidence_and_malformed_values_require_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "relationships",
+                    "version": "1.0.0",
+                    "extensionPack": ["Vendor.Theme", "vendor.theme"],
+                    "extensionDependencies": ["vendor.helper", "bad id", 7],
+                }),
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        inventory = report.artifact_inventory["extension_relationship_inventory"]
+        self.assertEqual(
+            inventory["entries"],
+            [
+                {"extension_id": "vendor.helper", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+                {"extension_id": "vendor.theme", "relationship": "extension_pack", "declared_in": "extensionPack"},
+            ],
+        )
+        self.assertEqual(len(inventory["invalid_entries"]), 2)
+        findings = {finding.rule_id: finding for finding in report.findings}
+        self.assertEqual(findings["extension-install-surface"].evidence["evidence_class"], "capability")
+        self.assertEqual(findings["malformed-extension-relationship"].severity, "MEDIUM")
+        self.assertEqual(report.decision, "review")
+
     def test_install_time_chains_are_suspicious(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
