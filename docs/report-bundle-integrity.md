@@ -23,6 +23,22 @@ For a release, CI job, or controlled scanner worker, sign the bundle with an
 approved Ed25519 private key. The private key must be an unencrypted PEM file;
 keep it in the CI secret store and never place it in a repository or report.
 
+Generate a new keypair only on a controlled operator workstation or secure CI
+bootstrap environment. GuardRails refuses to overwrite either path and writes
+the private PEM with owner-only permissions:
+
+```sh
+python -m ide_scanner keys generate-report-signing-key \
+  --private-key ./guardrails-prod-2026.pem \
+  --public-key ./guardrails-prod-2026.pub.pem \
+  --key-id guardrails-prod-2026
+```
+
+Move the private PEM immediately into the CI secret manager, retain the public
+PEM in the organization's trusted-key channel, and remove the local private
+file when the handoff is complete. The command prints the public-key fingerprint
+to make that distribution checkable.
+
 ```sh
 python -m ide_scanner scan --path extension.vsix --format report.zip \
   --output guardrails-report.zip \

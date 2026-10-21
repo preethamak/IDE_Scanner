@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import zipfile
 from importlib.metadata import PackageNotFoundError, version
@@ -829,6 +830,52 @@ def _signed_provenance(
     return {**provenance, "signature_base64": base64.b64encode(signature).decode("ascii")}
 
 
+def generate_report_signing_keypair(
+    private_key_path: Path | str,
+    public_key_path: Path | str,
+    *,
+    signing_key_id: str | None = None,
+) -> dict[str, str]:
+    """Create a non-overwritable Ed25519 keypair for report provenance.
+
+    The private key is deliberately unencrypted because the scanner's signing
+    interface accepts CI-injected PEM material without an interactive prompt.
+    It must be moved to an access-controlled secret store before use in CI.
+    """
+    private_path = Path(private_key_path)
+    public_path = Path(public_key_path)
+    if private_path.resolve() == public_path.resolve():
+        raise ValueError("Private and public signing key paths must be different.")
+    if private_path.exists() or public_path.exists():
+        raise ValueError("Refusing to overwrite an existing signing key file.")
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    public_path.parent.mkdir(parents=True, exist_ok=True)
+    private_key = Ed25519PrivateKey.generate()
+    private_payload = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public_payload = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    _write_new_key_file(private_path, private_payload, mode=0o600)
+    try:
+        _write_new_key_file(public_path, public_payload, mode=0o644)
+    except Exception:
+        private_path.unlink(missing_ok=True)
+        raise
+    fingerprint = _public_key_fingerprint(private_key.public_key())
+    return {
+        "algorithm": "ed25519",
+        "private_key": str(private_path),
+        "public_key": str(public_path),
+        "public_key_fingerprint": fingerprint,
+        "signing_key_id": signing_key_id or fingerprint,
+    }
+
+
 def _read_provenance(archive: zipfile.ZipFile, names: list[str]) -> dict[str, Any] | None:
     if "provenance.json" not in names:
         return None
@@ -943,6 +990,18 @@ def _load_ed25519_public_key(path: Path | str) -> Ed25519PublicKey:
 def _public_key_fingerprint(public_key: Ed25519PublicKey) -> str:
     encoded = public_key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _write_new_key_file(path: Path, payload: bytes, *, mode: int) -> None:
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    except FileExistsError as exc:
+        raise ValueError("Refusing to overwrite an existing signing key file.") from exc
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(path, mode)
 
 
 def _json_bytes(data: Any) -> bytes:
