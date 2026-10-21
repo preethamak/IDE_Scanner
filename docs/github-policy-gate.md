@@ -19,9 +19,15 @@ jobs:
           lock: .ide-scanner/extensions.lock.json
 ```
 
-Generate a reviewed lock first with `python scripts/policy_gate.py --write-lock`.
-`REVIEW` needs a version-and-hash approval or exception. `INCOMPLETE` fails.
-`BLOCK` fails unless an explicit, expiring `allow_block_override` is present.
+Generate a reviewed lock first with `python scripts/policy_gate.py --write-lock`
+and commit it. Normal gate runs fail when an extension has no lock or when its
+resolved version or SHA-256 differs from the lock, including a republished
+artifact under the same version.
+
+`REVIEW` needs a version-and-hash approval or exception with an ISO-8601
+expiry and a non-empty review reason. `INCOMPLETE` fails. `BLOCK` fails unless
+an explicit, expiring `allow_block_override` is present. Generating a lock is a
+bootstrap action, not approval: review its artifact evidence before merging it.
 
 For continuous monitoring, copy
 [`templates/ide-scanner-release-monitor.yml`](../templates/ide-scanner-release-monitor.yml)

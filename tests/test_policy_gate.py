@@ -30,15 +30,41 @@ class PolicyGateTests(unittest.TestCase):
         gate = policy_gate()
         outcome, _ = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "review", {}, {})
         self.assertEqual(outcome, "fail")
-        approval = {"publisher.extension": {"sha256": "a" * 64, "version": "1.0.0", "expires_at": "2027-01-01T00:00:00Z"}}
+        approval = {"publisher.extension": {"sha256": "a" * 64, "version": "1.0.0", "expires_at": "2027-01-01T00:00:00Z", "reason": "Security review"}}
         outcome, _ = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "review", approval, {})
         self.assertEqual(outcome, "pass")
 
     def test_block_override_is_explicit(self) -> None:
         gate = policy_gate()
-        approval = {"publisher.extension": {"sha256": "a" * 64, "version": "1.0.0", "expires_at": "2027-01-01T00:00:00Z"}}
+        approval = {"publisher.extension": {"sha256": "a" * 64, "version": "1.0.0", "expires_at": "2027-01-01T00:00:00Z", "reason": "Security review"}}
         outcome, _ = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "block", approval, {})
         self.assertEqual(outcome, "fail")
         approval["publisher.extension"]["allow_block_override"] = True
         outcome, _ = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "block", approval, {})
         self.assertEqual(outcome, "pass")
+
+    def test_review_approval_needs_expiry_and_reason(self) -> None:
+        gate = policy_gate()
+        approval = {"publisher.extension": {"sha256": "a" * 64, "version": "1.0.0"}}
+        outcome, reason = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "review", approval, {})
+        self.assertEqual(outcome, "fail")
+        self.assertIn("expiry", reason)
+        approval["publisher.extension"]["expires_at"] = "not-a-date"
+        outcome, reason = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "review", approval, {})
+        self.assertEqual(outcome, "fail")
+        self.assertIn("invalid", reason)
+        approval["publisher.extension"]["expires_at"] = "2027-01-01T00:00:00"
+        outcome, reason = gate._policy_outcome("publisher.extension", "a" * 64, "1.0.0", "review", approval, {})
+        self.assertEqual(outcome, "fail")
+        self.assertIn("timezone", reason)
+
+    def test_release_lock_must_match_exact_artifact(self) -> None:
+        gate = policy_gate()
+        entry = {"version": "1.0.0", "sha256": "a" * 64}
+        self.assertEqual(gate._lock_outcome(entry, "a" * 64, "1.0.0")[0], "pass")
+        outcome, reason = gate._lock_outcome({}, "a" * 64, "1.0.0")
+        self.assertEqual(outcome, "fail")
+        self.assertIn("No reviewed", reason)
+        outcome, reason = gate._lock_outcome(entry, "b" * 64, "1.0.0")
+        self.assertEqual(outcome, "fail")
+        self.assertIn("SHA-256", reason)
