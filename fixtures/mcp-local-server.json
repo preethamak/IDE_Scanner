@@ -1,0 +1,5 @@
+{
+  "name": "guardrails-smoke-local-server",
+  "transport": "stdio",
+  "tools": []
+}

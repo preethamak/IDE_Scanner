@@ -1,0 +1,48 @@
+name: GuardRails MCP action smoke
+
+on:
+  push:
+    paths:
+      - ".github/actions/mcp-assessment/**"
+      - ".github/workflows/github-mcp-assessment-smoke.yml"
+      - "fixtures/mcp-local-server.json"
+      - "src/ide_scanner/cli.py"
+      - "src/ide_scanner/mcp/**"
+      - "tests/test_mcp_cli_and_action.py"
+  pull_request:
+    paths:
+      - ".github/actions/mcp-assessment/**"
+      - ".github/workflows/github-mcp-assessment-smoke.yml"
+      - "fixtures/mcp-local-server.json"
+      - "src/ide_scanner/cli.py"
+      - "src/ide_scanner/mcp/**"
+      - "tests/test_mcp_cli_and_action.py"
+
+permissions:
+  contents: read
+
+jobs:
+  assess-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: guardrails
+        uses: ./.github/actions/mcp-assessment
+        with:
+          descriptor: fixtures/mcp-local-server.json
+          output: guardrails-mcp-assessment.json
+      - name: Verify assessment artifact and action outputs
+        env:
+          DECISION: ${{ steps.guardrails.outputs.decision }}
+          COVERAGE_PERCENT: ${{ steps.guardrails.outputs.coverage_percent }}
+          REPORT_FILE: ${{ steps.guardrails.outputs.report_file }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          report = json.load(open(os.environ["REPORT_FILE"], encoding="utf-8"))
+          assert report["schema_version"] == "guardrails.mcp-risk-report.v1"
+          assert report["decision"] == os.environ["DECISION"]
+          assert float(os.environ["COVERAGE_PERCENT"]) == report["coverage"]["percent"]
+          PY
