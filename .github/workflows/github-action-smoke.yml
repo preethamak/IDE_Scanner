@@ -1,0 +1,44 @@
+name: GuardRails action smoke
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - src/ide_scanner/**
+      - tests/fixtures/**
+      - .github/workflows/github-action-smoke.yml
+  push:
+    branches: [main]
+    paths:
+      - action.yml
+      - src/ide_scanner/**
+      - tests/fixtures/**
+      - .github/workflows/github-action-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  scan-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: guardrails
+        uses: ./
+        with:
+          path: tests/fixtures/benign-formatter
+          profile: standard
+          output: ${{ runner.temp }}/guardrails.sarif.json
+      - name: Validate SARIF contract
+        env:
+          SARIF_FILE: ${{ steps.guardrails.outputs.sarif_file }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["SARIF_FILE"]).read_text(encoding="utf-8"))
+          assert payload["version"] == "2.1.0"
+          assert payload["runs"][0]["tool"]["driver"]["name"] == "GuardRails Scanner"
+          PY
