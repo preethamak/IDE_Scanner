@@ -44,6 +44,10 @@ by the package dependencies. Without those providers the report keeps the
 affected metrics unavailable instead of converting missing evidence into a
 passing result.
 
+Marketplace scan clients should use the documented [idempotent retry
+contract](docs/scanner-service-retries.md) so network retries do not create
+duplicate exact-artifact analysis jobs.
+
 The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
 the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
 providers, and publishes a short-lived encrypted report artifact. Configure
