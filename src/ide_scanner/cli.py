@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--skip-posture", action="store_true", help="Skip local IDE/client posture checks; useful for portable extension corpus scans.")
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
+    scan.add_argument("--signing-key", help="Unencrypted PEM Ed25519 private key used to sign a report.zip provenance record.")
+    scan.add_argument("--signing-key-id", help="Trusted key identifier recorded in signed report.zip provenance.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
 
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
@@ -72,8 +74,11 @@ def main(argv: list[str] | None = None) -> int:
 
     report = subparsers.add_parser("report", help="Inspect or verify a GuardRails report bundle.")
     report_subparsers = report.add_subparsers(dest="report_command", required=True)
-    report_verify = report_subparsers.add_parser("verify", help="Verify report ZIP member hashes.")
+    report_verify = report_subparsers.add_parser("verify", help="Verify report ZIP integrity and optional signed provenance.")
     report_verify.add_argument("--bundle", required=True, help="Report ZIP produced by ide-scanner scan --format report.zip.")
+    report_verify.add_argument("--public-key", help="Trusted PEM Ed25519 public key for provenance authentication.")
+    report_verify.add_argument("--expected-key-id", help="Require this signing key id in the provenance record.")
+    report_verify.add_argument("--require-signature", action="store_true", help="Fail unless a trusted public key authenticates signed provenance.")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -188,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
         if args.profile == "deep" and not args.runtime:
             parser.error("scan --profile deep requires --runtime; use standard for static-only scans")
+        if args.signing_key_id and not args.signing_key:
+            parser.error("scan --signing-key-id requires --signing-key")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             marketplace_scan_ids=args.extension_id,
@@ -215,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
         scan_exit_code = _scan_exit_code(report, profile=args.profile)
         output_format = _scan_output_format(args.output, args.format)
         source = _scan_source(args.installed, args.path, args.extension_id, args.fixtures)
+        if args.signing_key and output_format != "report.zip":
+            parser.error("scan --signing-key requires --format report.zip and --output")
         if args.stream:
             output = ""
             if args.output:
@@ -226,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
                     profile=args.profile,
                     source=source,
                     include_raw_evidence=args.include_raw_evidence,
+                    signing_key=args.signing_key,
+                    signing_key_id=args.signing_key_id,
                 )
                 output = str(receipt["output"])
             _emit_ndjson(iter_report_events(report, profile=args.profile, source=source, output=output))
@@ -239,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                 profile=args.profile,
                 source=source,
                 include_raw_evidence=args.include_raw_evidence,
+                signing_key=args.signing_key,
+                signing_key_id=args.signing_key_id,
             )
             _emit(receipt, None)
             return scan_exit_code
@@ -262,7 +275,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "report":
         try:
-            _emit(verify_report_bundle(args.bundle), None)
+            _emit(verify_report_bundle(
+                args.bundle,
+                public_key=args.public_key,
+                expected_key_id=args.expected_key_id,
+                require_signature=args.require_signature,
+            ), None)
             return 0
         except ValueError as exc:
             _emit({"valid": False, "bundle": str(args.bundle), "error": str(exc)}, None)
