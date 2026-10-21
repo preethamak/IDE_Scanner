@@ -9,8 +9,13 @@ def report(extension_id: str, version: str, relationships: list[dict[str, str]])
     return SimpleNamespace(
         extension_id=extension_id,
         version=version,
-        artifact_inventory={"declared_extension_relationships": relationships},
+        artifact_inventory={
+            "declared_extension_relationships": relationships,
+            "extension_relationship_inventory": {"entries": [], "resolution": []},
+        },
         artifact_identity={},
+        artifact_hash="a" * 64,
+        source="marketplace",
     )
 
 
@@ -41,6 +46,13 @@ class ExtensionRelationshipExpansionTests(unittest.TestCase):
             "version_pinned": False, "depth": 1,
         })
         self.assertFalse(root.artifact_inventory["relationship_expansion"]["truncated"])
+        self.assertEqual(root.artifact_inventory["extension_relationship_inventory"]["resolution"], [
+            {
+                "extension_id": "vendor.child", "relationship": "extensionPack", "status": "scanned",
+                "resolved_extension_id": "vendor.child", "resolved_version": "2.0.0",
+                "resolved_artifact_sha256": "a" * 64,
+            },
+        ])
 
     def test_stops_at_the_related_release_budget_and_discloses_truncation(self) -> None:
         root = report("vendor.root", "1.0.0", [

@@ -664,6 +664,17 @@ def scan_extension(
     artifact_inventory["package_manifest_path"] = manifest_path
     relationships = _manifest_extension_relationships(manifest)
     artifact_inventory["declared_extension_relationships"] = relationships
+    artifact_inventory["extension_relationship_inventory"] = {
+        "entries": [
+            {
+                "extension_id": item["extension_id"],
+                "relationship": _relationship_manifest_field(item["relationship"]),
+                "declared_in": _relationship_manifest_field(item["relationship"]),
+            }
+            for item in relationships
+        ],
+        "resolution": [],
+    }
     _add_extension_relationship_findings(
         extension_id,
         version,
@@ -1589,6 +1600,11 @@ def _expand_declared_extension_relationships(
         related_id = str(relationship["extension_id"])
         normalized_id = related_id.lower()
         if normalized_id in seen:
+            _record_relationship_resolution(
+                parent,
+                relationship,
+                "skipped_self_reference" if normalized_id == str(parent.extension_id).lower() else "already_scanned_as_requested_target",
+            )
             continue
         seen.add(normalized_id)
         related = scan_marketplace_extension(
@@ -1610,10 +1626,22 @@ def _expand_declared_extension_relationships(
         }
         related.artifact_inventory["relationship_scan"] = relationship_scan
         related.artifact_identity["relationship_scan"] = relationship_scan
+        if related.source == "marketplace-error":
+            _record_relationship_resolution(parent, relationship, "acquisition_failed")
+        else:
+            _record_relationship_resolution(
+                parent,
+                relationship,
+                "scanned",
+                related,
+            )
         extensions.append(related)
         queue.extend((related, child, depth + 1) for child in _declared_relationships(related))
 
     exhausted = bool(queue)
+    if exhausted:
+        for parent, relationship, _ in queue:
+            _record_relationship_resolution(parent, relationship, "not_scanned_limit_reached")
     for report in extensions:
         inventory = report.artifact_inventory
         if _declared_relationships(report) or "relationship_scan" in inventory:
@@ -1636,6 +1664,45 @@ def _declared_relationships(report: ExtensionReport) -> list[dict[str, str]]:
         and isinstance(item.get("extension_id"), str)
         and isinstance(item.get("relationship"), str)
     ]
+
+
+def _relationship_manifest_field(relationship: str) -> str:
+    return "extensionPack" if relationship == "extension_pack" else "extensionDependencies"
+
+
+def _record_relationship_resolution(
+    parent: ExtensionReport,
+    relationship: dict[str, str],
+    status: str,
+    related: ExtensionReport | None = None,
+) -> None:
+    inventory = parent.artifact_inventory.setdefault("extension_relationship_inventory", {})
+    resolutions = inventory.setdefault("resolution", [])
+    if not isinstance(resolutions, list):
+        return
+    field = _relationship_manifest_field(str(relationship["relationship"]))
+    extension_id = str(relationship["extension_id"])
+    item: dict[str, Any] = {
+        "extension_id": extension_id,
+        "relationship": field,
+        "status": status,
+    }
+    if related is not None:
+        item.update({
+            "resolved_extension_id": str(related.extension_id),
+            "resolved_version": str(related.version),
+            "resolved_artifact_sha256": str(related.artifact_hash),
+        })
+    resolutions[:] = [
+        existing
+        for existing in resolutions
+        if not (
+            isinstance(existing, dict)
+            and str(existing.get("extension_id") or "").lower() == extension_id.lower()
+            and str(existing.get("relationship") or "") == field
+        )
+    ]
+    resolutions.append(item)
 
 
 def scan_remote_artifact(

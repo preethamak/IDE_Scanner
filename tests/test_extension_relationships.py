@@ -29,6 +29,10 @@ class ExtensionRelationshipTests(unittest.TestCase):
         finding = next(item for item in report.findings if item.rule_id == "declared-extension-relationships")
         self.assertEqual(finding.evidence["evidence_class"], "capability")
         self.assertFalse(finding.evidence["version_pinned"])
+        self.assertEqual(report.artifact_inventory["extension_relationship_inventory"]["entries"], [
+            {"extension_id": "vendor.beta", "relationship": "extensionDependencies", "declared_in": "extensionDependencies"},
+            {"extension_id": "vendor.alpha", "relationship": "extensionPack", "declared_in": "extensionPack"},
+        ])
         self.assertEqual(report.verdict, "clean")
 
 
