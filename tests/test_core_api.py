@@ -7,6 +7,7 @@ def test_run_scan_forwards_exact_marketplace_identity_and_store() -> None:
     request = ScanRequest(
         marketplace_scan_ids=["publisher.extension"], marketplace_version="1.2.3",
         marketplace_target_platform="linux-x64", marketplace_artifact_store=sentinel.store,
+        scan_related_marketplace_extensions=True,
     )
     with patch("ide_scanner.core.scan_targets", return_value={"extensions": []}) as scan:
         assert run_scan(request) == {"extensions": []}
@@ -14,6 +15,7 @@ def test_run_scan_forwards_exact_marketplace_identity_and_store() -> None:
     assert scan.call_args.kwargs["marketplace_version"] == "1.2.3"
     assert scan.call_args.kwargs["marketplace_target_platform"] == "linux-x64"
     assert scan.call_args.kwargs["marketplace_artifact_store"] is sentinel.store
+    assert scan.call_args.kwargs["scan_related_marketplace_extensions"] is True
 
 
 def test_summary_uses_policy_severity_and_preserves_detector_severity() -> None:

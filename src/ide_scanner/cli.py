@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
+    scan.add_argument("--scan-related", action="store_true", help="Also acquire and scan declared Marketplace extensionPack and extensionDependencies targets, one hop only.")
     scan.add_argument("--artifact-store", help="Preserve downloaded Marketplace VSIX files in this private vault.")
     scan.add_argument("--artifact-url", help="Final public HTTPS URL for a non-registry VSIX; requires --artifact-sha256.")
     scan.add_argument("--artifact-sha256", help="Required SHA-256 for --artifact-url acquisition.")
@@ -188,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             marketplace_scan_ids=args.extension_id,
             marketplace_version=args.version,
             marketplace_target_platform=args.target_platform,
+            scan_related_marketplace_extensions=args.scan_related,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=not args.offline,

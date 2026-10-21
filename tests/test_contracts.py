@@ -9,11 +9,13 @@ class ScanRequestTests(unittest.TestCase):
         request = ScanRequest.create(
             paths=[Path("fixture")],
             extension_ids=["publisher.extension"],
+            scan_related_marketplace_extensions=True,
             required_providers={" Semgrep ", "YARA", ""},
         )
 
         self.assertEqual(request.paths, (Path("fixture"),))
         self.assertEqual(request.extension_ids, ("publisher.extension",))
+        self.assertTrue(request.scan_related_marketplace_extensions)
         self.assertEqual(request.required_providers, frozenset({"semgrep", "yara"}))
 
 
