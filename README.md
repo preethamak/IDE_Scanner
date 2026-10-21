@@ -48,6 +48,9 @@ Marketplace scan clients should use the documented [idempotent retry
 contract](docs/scanner-service-retries.md) so network retries do not create
 duplicate exact-artifact analysis jobs.
 
+Trusted internal systems can receive signed terminal-job notifications through
+the [scanner service webhook contract](docs/scanner-service-webhooks.md).
+
 The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
 the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
 providers, and publishes a short-lived encrypted report artifact. Configure
