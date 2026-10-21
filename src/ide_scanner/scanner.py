@@ -4743,7 +4743,7 @@ def _human_summary(
             for item in top
         ))
     if version_deltas:
-        notes.append(f"Compared with previous report: {len(version_deltas)} extension(s) changed version, score, dependency, or artifact inventory.")
+        notes.append(f"Compared with previous report: {len(version_deltas)} extension(s) changed version, score, dependency, declared relationship, or artifact inventory.")
     return notes
 
 
@@ -4802,6 +4802,14 @@ def _version_deltas(extensions: list[ExtensionReport], previous_report: dict[str
             delta["changes"].append("dependencies")
             delta["added_dependencies"] = added_deps[:25]
             delta["removed_dependencies"] = removed_deps[:25]
+        previous_relationships = _declared_relationship_set(previous)
+        current_relationships = _declared_relationship_set({"artifact_inventory": extension.artifact_inventory})
+        added_relationships = sorted(current_relationships - previous_relationships)
+        removed_relationships = sorted(previous_relationships - current_relationships)
+        if added_relationships or removed_relationships:
+            delta["changes"].append("extension_relationships")
+            delta["added_extension_relationships"] = _relationship_delta_items(added_relationships)
+            delta["removed_extension_relationships"] = _relationship_delta_items(removed_relationships)
         previous_artifacts = _artifact_paths(previous)
         current_artifacts = {str(item.get("path")) for item in extension.artifact_inventory.get("risky_artifacts", []) if isinstance(item, dict)}
         added_artifacts = sorted(current_artifacts - previous_artifacts)
@@ -4985,6 +4993,40 @@ def _artifact_paths(extension: dict[str, Any]) -> set[str]:
     if not isinstance(artifacts, list):
         return set()
     return {str(item.get("path")) for item in artifacts if isinstance(item, dict)}
+
+
+def _declared_relationship_set(extension: dict[str, Any]) -> set[tuple[str, str]]:
+    inventory = extension.get("artifact_inventory")
+    if not isinstance(inventory, dict):
+        return set()
+    relationships = inventory.get("declared_extension_relationships")
+    if isinstance(relationships, list):
+        return {
+            (str(item.get("relationship") or ""), str(item.get("extension_id") or "").lower())
+            for item in relationships
+            if isinstance(item, dict)
+            and str(item.get("relationship") or "") in {"extension_pack", "extension_dependency"}
+            and str(item.get("extension_id") or "")
+        }
+    legacy = inventory.get("extension_relationship_inventory")
+    entries = legacy.get("entries") if isinstance(legacy, dict) else None
+    return {
+        (
+            "extension_pack" if str(item.get("relationship") or "") == "extensionPack" else "extension_dependency",
+            str(item.get("extension_id") or "").lower(),
+        )
+        for item in entries or []
+        if isinstance(item, dict)
+        and str(item.get("relationship") or "") in {"extensionPack", "extensionDependencies"}
+        and str(item.get("extension_id") or "")
+    }
+
+
+def _relationship_delta_items(values: list[tuple[str, str]]) -> list[dict[str, str]]:
+    return [
+        {"relationship": relationship, "extension_id": extension_id}
+        for relationship, extension_id in values[:25]
+    ]
 
 
 def _empty_artifact_inventory() -> dict[str, Any]:
