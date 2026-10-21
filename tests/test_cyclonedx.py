@@ -25,3 +25,31 @@ class CycloneDxTests(unittest.TestCase):
         extension = next(component for component in bom["components"] if component["type"] == "application")
         self.assertEqual(extension["hashes"], [])
         self.assertIn("pkg:npm/left-pad@1.3.0", [component["bom-ref"] for component in bom["components"]])
+
+    def test_cyclonedx_links_only_related_extensions_present_in_the_scan(self) -> None:
+        report = {"extensions": [
+            {
+                "extension_id": "vendor.root", "version": "1.0.0",
+                "artifact_inventory": {"declared_extension_relationships": [
+                    {"extension_id": "vendor.child", "relationship": "extension_pack"},
+                    {"extension_id": "vendor.not-scanned", "relationship": "extension_dependency"},
+                ]},
+            },
+            {
+                "extension_id": "vendor.child", "version": "2.0.0",
+                "artifact_identity": {"relationship_scan": {
+                    "parent_extension_id": "vendor.root", "relationship": "extension_pack",
+                    "selection": "latest_available", "version_pinned": False,
+                }},
+            },
+        ]}
+
+        bom = build_cyclonedx_bom(report)
+        root_ref = "pkg:generic/vendor/root@1.0.0?type=vsix"
+        child_ref = "pkg:generic/vendor/child@2.0.0?type=vsix"
+        root_dependency = next(item for item in bom["dependencies"] if item["ref"] == root_ref)
+        self.assertEqual(root_dependency["dependsOn"], [child_ref])
+        child = next(item for item in bom["components"] if item["bom-ref"] == child_ref)
+        properties = {item["name"]: item["value"] for item in child["properties"]}
+        self.assertEqual(properties["guardrails:relationship-selection"], "latest_available")
+        self.assertEqual(properties["guardrails:relationship-version-pinned"], "false")
