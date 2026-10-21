@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .jsonc import loads_jsonc
-from .scanner import scan_targets
+from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
 EXTENSION_ID = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$")
 IGNORED_DIRECTORIES = frozenset({".git", ".next", "node_modules", "vendor"})
@@ -55,7 +55,19 @@ def load_workspace_lock(path: Path | None) -> dict[str, dict[str, str]]:
     return locked
 
 
-def scan_workspace_extensions(root: Path, *, lock_path: Path | None = None, scanner: Callable[..., dict[str, Any]] = scan_targets) -> dict[str, Any]:
+def scan_workspace_extensions(
+    root: Path,
+    *,
+    lock_path: Path | None = None,
+    profile: str = "standard",
+    dynamic_runtime: bool = False,
+    runtime_timeout_seconds: int = 15,
+    scanner: Callable[..., dict[str, Any]] = scan_targets,
+) -> dict[str, Any]:
+    if profile not in {"standard", "deep"}:
+        raise ValueError("Workspace profile must be standard or deep")
+    if profile == "deep" and not dynamic_runtime:
+        raise ValueError("Workspace deep profile requires runtime execution")
     discovery = discover_workspace_extensions(root)
     locked = load_workspace_lock(lock_path)
     records: list[dict[str, Any]] = []
@@ -67,9 +79,12 @@ def scan_workspace_extensions(root: Path, *, lock_path: Path | None = None, scan
             marketplace_target_platform=pin.get("target_platform") or None,
             online=True,
             include_posture=False,
+            required_providers=DEEP_REQUIRED_PROVIDERS if profile == "deep" else None,
+            dynamic_runtime=dynamic_runtime,
+            runtime_timeout_seconds=runtime_timeout_seconds,
         )
         records.append({"extension_id": extension_id, "declared_in": discovery["sources"][extension_id], "requested_version": pin.get("version") or None, "requested_target_platform": pin.get("target_platform") or None, "scan": report})
-    return {"schema_version": "guardrails.workspace-extension-scan.v1", "workspace": discovery["workspace"], "lock_path": str(lock_path) if lock_path else None, "recommendation_count": len(records), "extensions": records}
+    return {"schema_version": "guardrails.workspace-extension-scan.v1", "workspace": discovery["workspace"], "lock_path": str(lock_path) if lock_path else None, "profile": profile, "recommendation_count": len(records), "extensions": records}
 
 
 def _extension_values(value: Any) -> set[str]:
