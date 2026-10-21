@@ -71,6 +71,64 @@ def test_scan_timeout_kills_the_entire_process_group(tmp_path: Path) -> None:
     assert process.wait_calls == 2
 
 
+def test_public_scan_worker_omits_raw_evidence_to_bound_public_storage(tmp_path: Path) -> None:
+    class CompletedProcess:
+        pid = 1234
+
+        def wait(self, timeout: int) -> int:
+            return 0
+
+        def poll(self) -> int:
+            return 0
+
+    with patch.dict("os.environ", {"IDE_SCANNER_ARTIFACT_STORE": str(tmp_path)}, clear=True), patch.object(
+        run_scan_worker.subprocess, "Popen", return_value=CompletedProcess()
+    ) as popen, patch.object(run_scan_worker, "bundle_has_immutable_identity", return_value=True):
+        (tmp_path / "scan.json").touch()
+        assert run_scan_worker.run_scan(
+            {
+                "id": "public-job",
+                "extension_id": "publisher.extension",
+                "version": "1.0.0",
+                "scan_purpose": "public_intelligence",
+            },
+            tmp_path / "scan.json",
+            timeout_seconds=60,
+        ) is True
+
+    command = popen.call_args.args[0]
+    assert "--include-raw-evidence" not in command
+
+
+def test_user_scan_worker_keeps_raw_evidence_opt_in(tmp_path: Path) -> None:
+    class CompletedProcess:
+        pid = 1234
+
+        def wait(self, timeout: int) -> int:
+            return 0
+
+        def poll(self) -> int:
+            return 0
+
+    with patch.dict("os.environ", {"IDE_SCANNER_ARTIFACT_STORE": str(tmp_path)}, clear=True), patch.object(
+        run_scan_worker.subprocess, "Popen", return_value=CompletedProcess()
+    ) as popen, patch.object(run_scan_worker, "bundle_has_immutable_identity", return_value=True):
+        (tmp_path / "scan.json").touch()
+        assert run_scan_worker.run_scan(
+            {
+                "id": "user-job",
+                "extension_id": "publisher.extension",
+                "version": "1.0.0",
+                "scan_purpose": "user_request",
+            },
+            tmp_path / "scan.json",
+            timeout_seconds=60,
+        ) is True
+
+    command = popen.call_args.args[0]
+    assert "--include-raw-evidence" in command
+
+
 def test_bundle_identity_contract_rejects_acquisition_failure(tmp_path: Path) -> None:
     bundle = tmp_path / "scan.json"
     bundle.write_text(
@@ -114,6 +172,30 @@ def test_bundle_identity_contract_accepts_exact_artifact(tmp_path: Path) -> None
         bundle,
         {"extension_id": "example.extension", "version": "1.0.0"},
     ) is True
+
+
+def test_scan_failure_reason_exposes_bounded_manifest_failure(tmp_path: Path) -> None:
+    bundle = tmp_path / "scan.json"
+    bundle.write_text(
+        json.dumps({
+            "extensions": [{
+                "extension_id": "Codium.qodogen",
+                "version": "0.14.2",
+                "artifact_inventory": {
+                    "skipped_reason": "VSIX did not contain an extension package.json",
+                },
+            }]
+        }),
+        encoding="utf-8",
+    )
+    reason = run_scan_worker.scan_failure_reason(
+        bundle,
+        {"extension_id": "Codium.qodogen", "version": "0.14.2"},
+    )
+    assert reason == (
+        "Deep Scan failed before a canonical report was produced for "
+        "Codium.qodogen@0.14.2: VSIX did not contain an extension package.json"
+    )
 
 
 def test_worker_drains_until_claim_endpoint_is_empty(tmp_path: Path) -> None:
@@ -177,7 +259,38 @@ def test_worker_retries_transient_empty_claim(tmp_path: Path) -> None:
     urllib_module.request.install_opener.assert_called_once()
 
 
-def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> None:
+def test_worker_retries_transient_claim_error(tmp_path: Path) -> None:
+    job = {
+        "id": "job-1",
+        "extension_id": "publisher.extension",
+        "version": "1.0.0",
+        "callback_url": "https://example.invalid/callback",
+    }
+    with patch.dict(
+        "os.environ",
+        {
+            "SCAN_CLAIM_URLS": "https://example.invalid/claim",
+            "SCAN_RUNNER_ID": "runner-1",
+            "SCAN_JOBS_PER_WORKER": "1",
+            "SCAN_CLAIM_ERROR_RETRIES": "1",
+            "IDE_SCANNER_WORKER_ARTIFACTS": str(tmp_path),
+        },
+        clear=True,
+    ), patch.object(run_scan_worker.claim_scan, "urllib") as urllib_module, patch.object(
+        run_scan_worker.claim_scan, "claim_job", side_effect=[RuntimeError("Scan claim returned HTTP 503"), job]
+    ) as claim_job, patch.object(run_scan_worker, "run_scan", return_value=True), patch.object(
+        run_scan_worker, "submit_result", return_value=True
+    ), patch.object(run_scan_worker.time, "sleep") as sleep, patch.object(
+        run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}
+    ):
+        assert run_scan_worker.main() == 0
+
+    assert claim_job.call_count == 2
+    sleep.assert_called_once_with(0.5)
+    urllib_module.request.install_opener.assert_called_once()
+
+
+def test_failed_scan_is_reported_without_failing_the_worker_run(tmp_path: Path) -> None:
     job = {
         "id": "job-1",
         "extension_id": "publisher.extension",
@@ -196,11 +309,15 @@ def test_failed_scan_is_reported_and_worker_returns_failure(tmp_path: Path) -> N
     ), patch.object(run_scan_worker.claim_scan, "urllib") as urllib_module, patch.object(
         run_scan_worker.claim_scan, "claim_job", return_value=job
     ), patch.object(run_scan_worker, "run_scan", return_value=False), patch.object(
+        run_scan_worker,
+        "scan_failure_reason",
+        return_value="bounded reason",
+    ), patch.object(
         run_scan_worker, "submit_result", return_value=True
     ) as submit_result, patch.object(run_scan_worker, "sandbox_preflight", return_value={"status": "ready"}):
-        assert run_scan_worker.main() == 1
+        assert run_scan_worker.main() == 0
 
-    submit_result.assert_called_once_with(job, None)
+    submit_result.assert_called_once_with(job, None, error_message="bounded reason")
     urllib_module.request.install_opener.assert_called_once()
 
 

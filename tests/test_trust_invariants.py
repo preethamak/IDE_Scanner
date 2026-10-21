@@ -107,6 +107,56 @@ class ManifestFailClosedTests(unittest.TestCase):
         self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "missing-identity")
         self.assertEqual(report.decision, "incomplete")
 
+    def test_visual_studio_vsix_without_package_json_produces_canonical_report(self) -> None:
+        manifest = """
+        <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata>
+            <Identity Id="QodoGen.52e802ef" Version="0.14.2" Publisher="Qodo (formerly Codium)" />
+            <DisplayName>Qodo - AI Code Review</DisplayName>
+            <Description>Visual Studio code review extension.</Description>
+          </Metadata>
+          <Installation ExtensionType="VSSDK+VisualStudio.Extensibility" />
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+                archive.writestr("QodoGenVS.dll", b"MZ" + b"\0" * 32)
+                archive.writestr(".vsextension/extension.json", "{\"entryPoint\": {}}")
+            report = scan_vsix(
+                vsix,
+                artifact_origin="archive_artifact",
+                expected_extension_id="Codium.qodogen",
+                expected_version="0.14.2",
+            )
+
+        self.assertEqual(report.extension_id, "Codium.qodogen")
+        self.assertEqual(report.version, "0.14.2")
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertEqual(report.analysis_coverage["artifact_format"], "visual-studio-vsix")
+        self.assertEqual(report.analysis_coverage["execution_scope"], "static-package")
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["format"], "visual-studio-vsix")
+        self.assertFalse(report.artifact_inventory["scan_incomplete"])
+
+    def test_visual_studio_vsix_rejects_marketplace_version_mismatch(self) -> None:
+        manifest = """
+        <PackageManifest xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata><Identity Id="QodoGen.abc" Version="0.14.2" Publisher="Codium" /></Metadata>
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+            with self.assertRaisesRegex(ValueError, "version does not match"):
+                scan_vsix(
+                    vsix,
+                    artifact_origin="archive_artifact",
+                    expected_extension_id="Codium.qodogen",
+                    expected_version="0.14.3",
+                )
+
     def test_full_identity_manifest_is_valid(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -125,8 +175,11 @@ class ProviderStatusTests(unittest.TestCase):
 
     def test_generated_entrypoint_resource_skip_names_its_budget(self) -> None:
         record = _javascript_ast_provider_status(["generated-resource-skipped"], ["dist/extension.js"])
-        self.assertEqual(record["status"], "failed")
-        self.assertIn("generated entrypoints", record["error"])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["failed_files"], 0)
+        self.assertEqual(record["skipped_files"], 1)
+        self.assertIn("generated file(s)", record["note"])
+        self.assertEqual(record["skipped_paths"], ["dist/extension.js"])
         self.assertIn("generated_entrypoint_max_bytes", record)
 
     def test_ast_resource_skip_is_disclosed_and_fails_required_provider(self) -> None:
@@ -232,6 +285,30 @@ class ProviderStatusTests(unittest.TestCase):
                 report = scan_extension(root)
         rule_ids = {f.rule_id for f in report.findings}
         self.assertNotIn("entrypoint-ast-unparsed", rule_ids)
+
+    def test_generated_entrypoint_budget_skip_is_disclosed_without_incomplete_scan(self) -> None:
+        # Generated bundles remain covered by bounded analyzers when the AST
+        # tree would exceed its memory budget. A declared activation path gets
+        # a review nudge, but the provider is not falsely reported as failed.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dist").mkdir()
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "generated", "version": "1.0.0", "main": "dist/extension.js"},
+                main="dist/extension.js",
+                source="const x = 1;\n",
+            )
+            with patch("ide_scanner.scanner._is_generated_code_blob", return_value=True), patch(
+                "ide_scanner.scanner.GENERATED_ENTRYPOINT_AST_MAX_BYTES", 1
+            ):
+                report = scan_extension(root)
+        provider = report.analysis_coverage["providers"]["javascript_ast"]
+        self.assertEqual(provider["status"], "completed")
+        self.assertEqual(provider["skipped_files"], 1)
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertIn("entrypoint-ast-unparsed", {f.rule_id for f in report.findings})
+        self.assertNotEqual(report.decision, "allow")
 
 
 class CoverageHonestyTests(unittest.TestCase):

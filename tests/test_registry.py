@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ide_scanner.registry import MarketplaceDownloadError, _degzip_if_needed, _download_to_file, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
+from types import SimpleNamespace
+
+from ide_scanner.registry import MarketplaceDownloadError, _check_osv_many, _degzip_if_needed, _download_to_file, _fetch_openvsx_metadata, _normalize_marketplace_extension, download_marketplace_vsix, search_marketplace_extensions
 
 
 OPENVSX_EXTENSION = {
@@ -25,6 +27,31 @@ OPENVSX_EXTENSION = {
 
 
 class RegistryTests(unittest.TestCase):
+    @patch("ide_scanner.registry._http_post_json")
+    def test_osv_false_positive_exclusion_is_exact(self, post_json) -> None:
+        post_json.return_value = {
+            "results": [
+                {"vulns": [{"id": "MAL-2025-21003"}]},
+                {"vulns": [{"id": "MAL-2026-99999"}]},
+            ]
+        }
+        extensions = [
+            SimpleNamespace(
+                extension_id="redhat.fabric8-analytics",
+                dependencies={"fs": "^0.0.1-security"},
+            ),
+            SimpleNamespace(
+                extension_id="example.extension",
+                dependencies={"fs": "0.0.2"},
+            ),
+        ]
+
+        findings, errors = _check_osv_many(extensions)
+
+        self.assertEqual(errors, [])
+        self.assertNotIn("redhat.fabric8-analytics", findings)
+        self.assertEqual(findings["example.extension"][0]["rule_id"], "malicious-npm-dependency")
+
     def test_marketplace_downloader_rejects_private_or_non_https_urls(self) -> None:
         with self.assertRaisesRegex(MarketplaceDownloadError, "public HTTPS"):
             _download_to_file("http://127.0.0.1/extension.vsix", tempfile.TemporaryFile(), 1024, 5)
@@ -98,6 +125,9 @@ class RegistryTests(unittest.TestCase):
             "versions": [{
                 "version": "1.2.3",
                 "files": [{
+                    "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                    "source": "https://cdn.example/package",
+                }, {
                     "assetType": "Microsoft.VisualStudio.Services.VsixSignature",
                     "source": "https://cdn.example/signature",
                 }],
@@ -110,6 +140,7 @@ class RegistryTests(unittest.TestCase):
         })
 
         self.assertEqual(metadata["vsix_sha256"], digest)
+        self.assertEqual(metadata["download_url"], "https://cdn.example/package")
         self.assertTrue(metadata["signature_asset_declared"])
         self.assertEqual(metadata["signature_asset_url"], "https://cdn.example/signature")
 
@@ -209,6 +240,7 @@ class RegistryTests(unittest.TestCase):
             "version": "1.2.3",
             "registry": "vs-marketplace",
             "vsix_sha256": digest,
+            "download_url": "https://cdn.example/package",
             "signature_asset_declared": True,
             "signature_asset_url": "https://cdn.example/signature",
         }, None)
@@ -219,6 +251,7 @@ class RegistryTests(unittest.TestCase):
             downloaded = result.read_bytes()
 
         self.assertEqual(downloaded, payload)
+        self.assertEqual(download.call_args.args[0], "https://cdn.example/package")
         self.assertEqual(source["expected_sha256"], digest)
         self.assertEqual(source["sha256_verified"], "true")
         self.assertEqual(source["signature_asset_declared"], "true")

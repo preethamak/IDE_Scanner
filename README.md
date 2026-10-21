@@ -44,6 +44,12 @@ by the package dependencies. Without those providers the report keeps the
 affected metrics unavailable instead of converting missing evidence into a
 passing result.
 
+The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
+the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
+providers, and publishes a short-lived encrypted report artifact. Configure
+`MCP_SCAN_ENCRYPTION_KEY` as a repository Actions secret; the web Worker uses
+the same secret when dispatching and reading MCP assessments.
+
 ```bash
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```

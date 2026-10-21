@@ -725,7 +725,13 @@ class ScannerTests(unittest.TestCase):
                 )
 
             store.preserve.assert_called_once()
-            scan.assert_called_once_with(preserved, known_bad_hashes=None, artifact_origin="archive_artifact")
+            scan.assert_called_once_with(
+                preserved,
+                known_bad_hashes=None,
+                artifact_origin="archive_artifact",
+                expected_extension_id="publisher.extension",
+                expected_version="1.2.3",
+            )
             self.assertFalse(downloaded.exists())
             self.assertTrue(preserved.exists())
             self.assertEqual(result.artifact_identity["target_platform"], "linux-x64")
@@ -3705,6 +3711,37 @@ class ScannerTests(unittest.TestCase):
             source = runner.read_text(encoding="utf-8")
 
         self.assertIn('path.resolve(target, "dist/rn-extension")', source)
+
+    def test_prepare_target_adds_esm_vscode_bridge_without_replacing_artifact_dependency(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "extension"
+            source.mkdir()
+            (source / "package.json").write_text(
+                '{"name":"esm-extension","version":"1.0.0","type":"module"}',
+                encoding="utf-8",
+            )
+            target = _prepare_target(source, root / "prepared")
+            bridge = target / "node_modules" / "vscode"
+
+            self.assertEqual(target, root / "prepared")
+            self.assertEqual(
+                json.loads((bridge / "package.json").read_text(encoding="utf-8"))["main"],
+                "index.cjs",
+            )
+            self.assertIn("exports.commands = stub.commands", (bridge / "index.cjs").read_text(encoding="utf-8"))
+
+            shipped_source = root / "shipped"
+            shipped_source.mkdir()
+            (shipped_source / "package.json").write_text('{"name":"shipped","version":"1.0.0"}', encoding="utf-8")
+            shipped_vscode = shipped_source / "node_modules" / "vscode"
+            shipped_vscode.mkdir(parents=True)
+            (shipped_vscode / "package.json").write_text('{"name":"artifact-vscode"}', encoding="utf-8")
+            shipped_target = _prepare_target(shipped_source, root / "prepared-shipped")
+            self.assertEqual(
+                json.loads((shipped_target / "node_modules" / "vscode" / "package.json").read_text(encoding="utf-8"))["name"],
+                "artifact-vscode",
+            )
 
     def test_runtime_lifecycle_error_is_contextual_not_coverage_failure(self) -> None:
         with TemporaryDirectory() as tmp:

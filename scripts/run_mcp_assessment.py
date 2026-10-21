@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ide_scanner.mcp import scan_mcp_payload
 from ide_scanner.mcp.orchestrator import ServerCatalogRiskConfig
 
@@ -28,14 +30,49 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--encrypted-input", action="store_true")
+    parser.add_argument("--encrypted-output", action="store_true")
     args = parser.parse_args()
 
-    payload = json.loads(args.input.read_text(encoding="utf-8"))
+    input_bytes = args.input.read_bytes()
+    if args.encrypted_input:
+        input_bytes = _decrypt_packet(input_bytes)
+    payload = json.loads(input_bytes.decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("MCP assessment input must be a JSON object")
     report = scan_mcp_payload(payload, config=_config())
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, separators=(",", ":"), default=str), encoding="utf-8")
+    output = json.dumps(report, separators=(",", ":"), default=str).encode("utf-8")
+    if args.encrypted_output:
+        output = _encrypt_packet(output)
+    args.output.write_bytes(output)
+
+
+def _encryption_key() -> bytes:
+    encoded = os.environ.get("MCP_SCAN_ENCRYPTION_KEY", "")
+    try:
+        key = base64.b64decode(encoded, validate=True)
+    except Exception as error:
+        raise RuntimeError("MCP_SCAN_ENCRYPTION_KEY is not valid base64") from error
+    if len(key) != 32:
+        raise RuntimeError("MCP_SCAN_ENCRYPTION_KEY must decode to 32 bytes")
+    return key
+
+
+def _decrypt_packet(encoded: bytes) -> bytes:
+    try:
+        packet = base64.b64decode(encoded, validate=True)
+    except Exception as error:
+        raise RuntimeError("Encrypted MCP input is not valid base64") from error
+    if len(packet) < 13:
+        raise RuntimeError("Encrypted MCP input is truncated")
+    return AESGCM(_encryption_key()).decrypt(packet[:12], packet[12:], None)
+
+
+def _encrypt_packet(plaintext: bytes) -> bytes:
+    nonce = os.urandom(12)
+    packet = nonce + AESGCM(_encryption_key()).encrypt(nonce, plaintext, None)
+    return base64.b64encode(packet)
 
 
 if __name__ == "__main__":
