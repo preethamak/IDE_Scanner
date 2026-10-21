@@ -305,6 +305,9 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if path == "/health":
             self._json(200, health_payload())
             return
+        if path == "/v1/openapi.json":
+            self._json(200, openapi_payload())
+            return
         if path == "/v1/rules":
             self._json(200, rules_json())
             return
@@ -410,6 +413,108 @@ def health_payload() -> dict[str, Any]:
             "yara": "optional",
             "dependency_intelligence": "online",
         },
+    }
+
+
+def openapi_payload() -> dict[str, Any]:
+    """Return the stable public contract for the local scanner service.
+
+    Report bundles deliberately remain an open JSON object here: their detailed
+    evidence schema is versioned by the bundle itself, and consumers must check
+    its scanner/policy/ruleset identity before making a decision.
+    """
+    error = {"type": "object", "required": ["error"], "properties": {"error": {"type": "string"}}}
+    job = {
+        "type": "object",
+        "required": ["id", "status", "extension_id", "created_at", "updated_at"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"},
+            "status": {"type": "string", "enum": ["queued", "running", "complete", "failed"]},
+            "stage": {"type": "string", "description": "Terminal failures use rejected, timeout, or interrupted when applicable."},
+            "extension_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"},
+            "version": {"type": ["string", "null"]},
+            "target_platform": {"type": ["string", "null"]},
+            "created_at": {"type": "string", "format": "date-time"},
+            "updated_at": {"type": "string", "format": "date-time"},
+            "report_ref": {"type": ["string", "null"], "description": "Present only after a complete job; fetch with the same bearer token."},
+            "error": {"type": ["string", "null"]},
+        },
+    }
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "GuardRails Scanner Service",
+            "version": SERVICE_VERSION,
+            "description": "Private exact-artifact scanning service. A completed report is evidence, not a safety guarantee.",
+        },
+        "paths": {
+            "/health": {
+                "get": {
+                    "summary": "Read service health and provider availability",
+                    "responses": {"200": {"description": "Service health", "content": {"application/json": {"schema": {"type": "object"}}}}},
+                },
+            },
+            "/v1/openapi.json": {
+                "get": {
+                    "summary": "Read this service contract",
+                    "responses": {"200": {"description": "OpenAPI document", "content": {"application/json": {"schema": {"type": "object"}}}}},
+                },
+            },
+            "/v1/rules": {
+                "get": {
+                    "summary": "Read the versioned scanner rule catalog",
+                    "responses": {"200": {"description": "Rules and ruleset identity", "content": {"application/json": {"schema": {"type": "object"}}}}},
+                },
+            },
+            "/v1/scans/marketplace": {
+                "post": {
+                    "summary": "Queue a deep scan for one Marketplace extension",
+                    "security": [{"bearerAuth": []}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["extension_id"],
+                                    "properties": {
+                                        "extension_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"},
+                                        "version": {"type": "string"},
+                                        "target_platform": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "responses": {"202": {"description": "Job accepted; it is not an approval result.", "content": {"application/json": {"schema": job}}}, "400": {"description": "Invalid request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "429": {"description": "Queue capacity exhausted; retry later.", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/scans/mcp": {
+                "post": {
+                    "summary": "Assess one MCP server payload synchronously",
+                    "security": [{"bearerAuth": []}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "description": "MCP assessment input. The service enforces a bounded request size."}}}},
+                    "responses": {"200": {"description": "Assessment result", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed or oversized input", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "422": {"description": "Assessment could not complete", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/jobs/{job_id}": {
+                "get": {
+                    "summary": "Poll a Marketplace scan job",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
+                    "responses": {"200": {"description": "Job record", "content": {"application/json": {"schema": job}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Job not found", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/reports/{job_id}": {
+                "get": {
+                    "summary": "Fetch the canonical bundle for a completed job",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
+                    "responses": {"200": {"description": "Versioned canonical report bundle", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": True}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Report not found", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+        },
+        "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "API token"}}},
     }
 
 

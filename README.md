@@ -54,6 +54,9 @@ the same secret when dispatching and reading MCP assessments.
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```
 
+The running service publishes its machine-readable contract at
+`GET /v1/openapi.json`.
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.

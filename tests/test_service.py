@@ -12,6 +12,7 @@ from ide_scanner.service import (
     cleanup_stale_jobs,
     execute_marketplace_job,
     health_payload,
+    openapi_payload,
     serve,
 )
 
@@ -70,6 +71,23 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["providers"]["semgrep"], "optional")
         self.assertEqual(health["providers"]["yara"], "optional")
+
+    def test_openapi_contract_covers_public_and_authenticated_routes(self) -> None:
+        contract = openapi_payload()
+
+        self.assertEqual(contract["openapi"], "3.1.0")
+        paths = contract["paths"]
+        self.assertIn("/health", paths)
+        self.assertIn("/v1/openapi.json", paths)
+        self.assertIn("/v1/rules", paths)
+        self.assertIn("/v1/scans/marketplace", paths)
+        self.assertIn("/v1/scans/mcp", paths)
+        self.assertIn("/v1/jobs/{job_id}", paths)
+        self.assertIn("/v1/reports/{job_id}", paths)
+        self.assertNotIn("security", paths["/health"]["get"])
+        self.assertEqual(paths["/v1/scans/marketplace"]["post"]["security"], [{"bearerAuth": []}])
+        self.assertIn("429", paths["/v1/scans/marketplace"]["post"]["responses"])
+        self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed"])
 
 
 class ScanWorkerPoolTests(unittest.TestCase):
