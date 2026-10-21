@@ -16,7 +16,7 @@ from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmar
 from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
-from .report_bundle import iter_report_events, verify_report_bundle, write_report_bundle
+from .report_bundle import generate_report_signing_keypair, iter_report_events, verify_report_bundle, write_report_bundle
 from .sandbox_runner import run_sandbox, sandbox_preflight
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
@@ -79,6 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     report_verify.add_argument("--public-key", help="Trusted PEM Ed25519 public key for provenance authentication.")
     report_verify.add_argument("--expected-key-id", help="Require this signing key id in the provenance record.")
     report_verify.add_argument("--require-signature", action="store_true", help="Fail unless a trusted public key authenticates signed provenance.")
+
+    keys = subparsers.add_parser("keys", help="Create report-provenance signing key material.")
+    keys_subparsers = keys.add_subparsers(dest="keys_command", required=True)
+    report_key = keys_subparsers.add_parser("generate-report-signing-key", help="Generate a non-overwritable Ed25519 report signing keypair.")
+    report_key.add_argument("--private-key", required=True, help="New private PEM path; written with owner-only permissions.")
+    report_key.add_argument("--public-key", required=True, help="New public PEM path to distribute through the trust channel.")
+    report_key.add_argument("--key-id", help="Optional stable key id recorded in provenance; defaults to the public-key fingerprint.")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -284,6 +291,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except ValueError as exc:
             _emit({"valid": False, "bundle": str(args.bundle), "error": str(exc)}, None)
+            return 2
+    if args.command == "keys":
+        try:
+            _emit(generate_report_signing_keypair(
+                args.private_key,
+                args.public_key,
+                signing_key_id=args.key_id,
+            ), None)
+            return 0
+        except ValueError as exc:
+            _emit({"created": False, "error": str(exc)}, None)
             return 2
     if args.command == "inventory":
         targets: list[dict[str, str]] = []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,7 +11,7 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from ide_scanner.report_bundle import verify_report_bundle, write_report_bundle
+from ide_scanner.report_bundle import generate_report_signing_keypair, verify_report_bundle, write_report_bundle
 
 
 class ReportBundleIntegrityTests(unittest.TestCase):
@@ -117,3 +118,25 @@ class ReportBundleIntegrityTests(unittest.TestCase):
             write_report_bundle({"extensions": []}, signed, signing_key=signing_key_path)
             with self.assertRaisesRegex(ValueError, "does not match"):
                 verify_report_bundle(signed, public_key=trusted_other_key_path, require_signature=True)
+
+    def test_key_generation_writes_a_reusable_owner_only_private_key(self) -> None:
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            private_path = directory / "keys" / "report-signing.pem"
+            public_path = directory / "keys" / "report-signing.pub.pem"
+
+            receipt = generate_report_signing_keypair(
+                private_path,
+                public_path,
+                signing_key_id="guardrails-prod-2026",
+            )
+            bundle = directory / "signed.zip"
+            write_report_bundle({"extensions": []}, bundle, signing_key=private_path, signing_key_id=receipt["signing_key_id"])
+
+            result = verify_report_bundle(bundle, public_key=public_path, expected_key_id="guardrails-prod-2026", require_signature=True)
+            self.assertTrue(result["authenticated"])
+            self.assertEqual(receipt["algorithm"], "ed25519")
+            self.assertEqual(receipt["signing_key_id"], "guardrails-prod-2026")
+            self.assertEqual(os.stat(private_path).st_mode & 0o777, 0o600)
+            with self.assertRaisesRegex(ValueError, "Refusing to overwrite"):
+                generate_report_signing_keypair(private_path, public_path)
