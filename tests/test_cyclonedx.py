@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import unittest
+import json
 
 from ide_scanner.cyclonedx import build_cyclonedx_bom
+from ide_scanner.report_bundle import build_report_bundle, write_report_bundle
+from pathlib import Path
+import tempfile
+import zipfile
 
 class CycloneDxTests(unittest.TestCase):
     def test_cyclonedx_binds_dependencies_to_the_exact_extension_artifact(self) -> None:
@@ -25,3 +30,14 @@ class CycloneDxTests(unittest.TestCase):
         extension = next(component for component in bom["components"] if component["type"] == "application")
         self.assertEqual(extension["hashes"], [])
         self.assertIn("pkg:npm/left-pad@1.3.0", [component["bom-ref"] for component in bom["components"]])
+
+    def test_report_zip_carries_the_same_cyclonedx_evidence(self) -> None:
+        report = {"scan_id": "scan-bundle", "extensions": [{"extension_id": "publisher.extension", "version": "1", "artifact_hash": "a" * 64, "dependencies": {"left-pad": "1.3.0"}}]}
+        bundle = build_report_bundle(report, source="marketplace")
+        self.assertEqual(bundle["cyclonedx"]["bomFormat"], "CycloneDX")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.zip"
+            write_report_bundle(report, output, source="marketplace")
+            with zipfile.ZipFile(output) as archive:
+                exported = json.loads(archive.read("cyclonedx.json"))
+        self.assertEqual(exported["serialNumber"], bundle["cyclonedx"]["serialNumber"])
