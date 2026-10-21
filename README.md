@@ -29,6 +29,10 @@ For repository-level review, use the [workspace extension scan
 workflow](docs/workspace-extension-scan.md) to discover VS Code and Dev
 Container recommendations and inspect their published Marketplace artifacts.
 
+Use the [GitHub workspace extension scan action](docs/github-workspace-scan-action.md)
+to preserve that evidence as a pull-request artifact and optionally gate on the
+highest recorded decision.
+
 Examples:
 
 ```bash

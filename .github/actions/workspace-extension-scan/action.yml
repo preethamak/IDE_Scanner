@@ -1,0 +1,83 @@
+name: GuardRails workspace extension scan
+description: Discover workspace-recommended VS Code extensions and produce published-artifact security evidence.
+inputs:
+  root:
+    description: Workspace root containing VS Code, Dev Container, or .code-workspace configuration.
+    required: false
+    default: .
+  lock:
+    description: Optional reviewed extension lock JSON relative to root.
+    required: false
+    default: .ide-scanner/extensions.lock.json
+  output:
+    description: Workspace scan report written by the action.
+    required: false
+    default: guardrails-workspace.json
+  profile:
+    description: "Scanner profile: standard or deep."
+    required: false
+    default: standard
+  runtime:
+    description: Run the bounded runtime pass. Required for the deep profile.
+    required: false
+    default: "false"
+  fail_on:
+    description: "Optional aggregate policy threshold: never, review, or block."
+    required: false
+    default: never
+outputs:
+  report_file:
+    description: Path to the workspace scan report.
+    value: ${{ steps.scan.outputs.report_file }}
+  extension_count:
+    description: Number of discovered workspace recommendations.
+    value: ${{ steps.scan.outputs.extension_count }}
+  highest_decision:
+    description: Highest decision across all release reports.
+    value: ${{ steps.scan.outputs.highest_decision }}
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_LOCK: ${{ inputs.lock }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_RUNTIME: ${{ inputs.runtime }}
+        INPUT_FAIL_ON: ${{ inputs.fail_on }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_PROFILE" in standard|deep) ;; *) echo "profile must be standard or deep" >&2; exit 2 ;; esac
+        case "$INPUT_RUNTIME" in true|false) ;; *) echo "runtime must be true or false" >&2; exit 2 ;; esac
+        case "$INPUT_FAIL_ON" in never|review|block) ;; *) echo "fail_on must be never, review, or block" >&2; exit 2 ;; esac
+        if [[ "$INPUT_PROFILE" == "deep" && "$INPUT_RUNTIME" != "true" ]]; then echo "deep profile requires runtime: true" >&2; exit 2; fi
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --disable-pip-version-check --no-cache-dir "$action_root"
+        args=(python -m ide_scanner.cli workspace --root "$INPUT_ROOT" --output "$INPUT_OUTPUT" --profile "$INPUT_PROFILE")
+        if [[ -f "$INPUT_ROOT/$INPUT_LOCK" ]]; then args+=(--lock "$INPUT_LOCK"); fi
+        if [[ "$INPUT_RUNTIME" == "true" ]]; then args+=(--runtime); fi
+        "${args[@]}"
+        test -s "$INPUT_OUTPUT"
+        python - "$INPUT_OUTPUT" "$INPUT_FAIL_ON" "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import sys
+
+        report_path, threshold, github_output = sys.argv[1:]
+        report = json.load(open(report_path, encoding="utf-8"))
+        ranks = {"allow": 0, "review": 1, "block": 2, "incomplete": 2}
+        decisions = []
+        for entry in report.get("extensions") or []:
+            scan = entry.get("scan") if isinstance(entry, dict) else None
+            for extension in scan.get("extensions") or [] if isinstance(scan, dict) else []:
+                decisions.append(str(extension.get("decision") or "incomplete").lower())
+        highest = max(decisions or ["allow"], key=lambda value: ranks.get(value, 2))
+        with open(github_output, "a", encoding="utf-8") as output:
+            output.write(f"report_file={report_path}\n")
+            output.write(f"extension_count={int(report.get('recommendation_count') or 0)}\n")
+            output.write(f"highest_decision={highest}\n")
+        limits = {"never": 3, "review": 1, "block": 2}
+        if ranks.get(highest, 2) >= limits[threshold]:
+            raise SystemExit(f"GuardRails workspace decision {highest} reaches fail_on={threshold}.")
+        PY
