@@ -58,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
 
+    mcp = subparsers.add_parser("mcp", help="Assess an MCP server descriptor.")
+    mcp.add_argument("--input", required=True, help="JSON MCP server descriptor to assess.")
+    mcp.add_argument("--out", "--output", dest="output", help="Write the machine-readable assessment report to this file.")
+
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
     inventory.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to inspect.")
@@ -172,6 +176,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "mcp":
+        try:
+            payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"mcp --input must be a readable JSON object: {exc}")
+        if not isinstance(payload, dict):
+            parser.error("mcp --input must contain a JSON object")
+        from .mcp import scan_mcp_payload
+
+        _emit(scan_mcp_payload(payload), args.output)
+        return 0
     if args.command == "scan":
         if args.version and len(args.extension_id) != 1:
             parser.error("scan --version requires exactly one --extension-id")
