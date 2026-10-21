@@ -2045,6 +2045,25 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(report.dependencies["@scope/pkg"], "2.1.5")
 
+    def test_extension_relationship_inventory_records_declared_packages_without_claiming_they_were_scanned(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"bundle","version":"1.0.0",'
+                '"extensionPack":["Publisher.Theme","invalid"],'
+                '"extensionDependencies":["publisher.tool",42,"publisher.tool"]}',
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        self.assertEqual(report.artifact_inventory["extension_relationship_inventory"], {
+            "entries": [
+                {"extension_id": "publisher.tool", "relationship": "extensionDependencies", "declared_in": "extensionDependencies"},
+                {"extension_id": "publisher.theme", "relationship": "extensionPack", "declared_in": "extensionPack"},
+            ],
+            "resolution": [],
+        })
+
     def test_mutable_and_unpinned_dependency_sources_are_low_hardening_notes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
