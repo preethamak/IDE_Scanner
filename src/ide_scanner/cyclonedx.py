@@ -14,12 +14,14 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
     scan_id = _text(report.get("scan_id"), 200) or "unidentified-scan"
     components: dict[str, dict[str, Any]] = {}
     relationships: list[dict[str, Any]] = []
+    vulnerabilities: list[dict[str, Any]] = []
 
     for extension in extensions:
         extension_id = _text(extension.get("extension_id"), 240) or "unknown.extension"
         version = _text(extension.get("version"), 160) or "unknown"
         extension_ref = _extension_ref(extension_id, version)
         components[extension_ref] = _extension_component(extension, extension_id, version, extension_ref)
+        vulnerabilities.extend(_vulnerabilities(extension, extension_id, version, extension_ref))
         dependency_refs: list[str] = []
         for dependency in _dependencies(extension):
             name = _text(dependency.get("name"), 300)
@@ -52,6 +54,7 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
         },
         "components": [components[component_ref] for component_ref in sorted(components)],
         "dependencies": sorted(relationships, key=lambda item: str(item["ref"])),
+        "vulnerabilities": sorted(vulnerabilities, key=lambda item: str(item["id"])),
     }
 
 
@@ -87,6 +90,34 @@ def _dependencies(extension: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"name": name, "version": version, "relationship": "unknown"} for name, version in dependencies.items()] if isinstance(dependencies, dict) else []
 
 
+def _vulnerabilities(extension: dict[str, Any], extension_id: str, version: str, component_ref: str) -> list[dict[str, Any]]:
+    findings = extension.get("findings")
+    if not isinstance(findings, list):
+        return []
+    records: list[dict[str, Any]] = []
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict) or _text(finding.get("actionability"), 32) not in {"review", "block"}:
+            continue
+        rule_id = _text(finding.get("rule_id"), 160) or "unknown-rule"
+        finding_id = _text(finding.get("finding_id"), 160) or f"{rule_id}-{index + 1}"
+        severity = _cyclonedx_severity(_text(finding.get("effective_severity"), 16) or _text(finding.get("severity"), 16))
+        evidence = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+        records.append({
+            "id": f"guardrails:{quote(extension_id, safe='')}@{quote(version, safe='')}:{quote(finding_id, safe='')}",
+            "source": {"name": "GuardRails", "url": "https://abscissa.dev"},
+            "ratings": [{"method": "other", "severity": severity}],
+            "description": _text(finding.get("evidence_summary"), 2_000) or f"GuardRails {rule_id} finding.",
+            "affects": [{"ref": component_ref}],
+            "properties": [
+                _property("guardrails:rule-id", rule_id),
+                _property("guardrails:finding-id", finding_id),
+                _property("guardrails:actionability", _text(finding.get("actionability"), 32)),
+                _property("guardrails:evidence-class", _text(finding.get("evidence_class"), 80) or _text(evidence.get("evidence_class"), 80) or "unknown"),
+            ],
+        })
+    return records
+
+
 def _extension_ref(extension_id: str, version: str) -> str:
     publisher, _, name = extension_id.partition(".")
     return f"pkg:generic/{quote(publisher, safe='')}/{quote(name or extension_id, safe='')}@{quote(version, safe='')}?type=vsix"
@@ -114,6 +145,11 @@ def _timestamp(value: Any) -> str:
 def _sha256(value: Any) -> str | None:
     candidate = _text(value, 64).lower()
     return candidate if len(candidate) == 64 and all(character in "0123456789abcdef" for character in candidate) else None
+
+
+def _cyclonedx_severity(value: str) -> str:
+    normalized = value.lower()
+    return normalized if normalized in {"critical", "high", "medium", "low", "info"} else "unknown"
 
 
 def _text(value: Any, limit: int) -> str:
