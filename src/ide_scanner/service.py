@@ -44,6 +44,8 @@ MAX_SCAN_QUEUE = _bounded_env_int("IDE_SCANNER_MAX_QUEUE", 32, 1, 1024)
 JOB_TIMEOUT_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_TIMEOUT", 600, 30, 3600)
 MCP_REQUEST_MAX_BYTES = _bounded_env_int("IDE_SCANNER_MCP_MAX_BYTES", 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
 WEBHOOK_MAX_TOTAL_ATTEMPTS = 9
+JOB_RETENTION_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_RETENTION_SECONDS", 7 * 24 * 3600, 3600, 90 * 24 * 3600)
+MAINTENANCE_INTERVAL_SECONDS = _bounded_env_int("IDE_SCANNER_MAINTENANCE_INTERVAL_SECONDS", 3600, 60, 24 * 3600)
 
 
 class JobStore:
@@ -372,6 +374,33 @@ def _delivery_attempts(delivery: dict[str, Any]) -> int:
         return 0
 
 
+def maintain_store(store: JobStore, *, retention_seconds: int = JOB_RETENTION_SECONDS) -> dict[str, int]:
+    """Run bounded service maintenance without changing completed scan evidence."""
+    return {
+        "removed": cleanup_stale_jobs(store, max_age_seconds=retention_seconds),
+        "webhooks_retried": retry_failed_webhook_deliveries(store),
+    }
+
+
+def start_maintenance_loop(
+    store: JobStore,
+    *,
+    interval_seconds: int = MAINTENANCE_INTERVAL_SECONDS,
+    retention_seconds: int = JOB_RETENTION_SECONDS,
+    stop_event: threading.Event | None = None,
+) -> threading.Thread:
+    """Maintain local durable state on a daemon interval for long-lived service processes."""
+    stop_event = stop_event or threading.Event()
+
+    def run() -> None:
+        while not stop_event.wait(interval_seconds):
+            maintain_store(store, retention_seconds=retention_seconds)
+
+    thread = threading.Thread(target=run, name="scanner-maintenance", daemon=True)
+    thread.start()
+    return thread
+
+
 class ScannerServiceHandler(BaseHTTPRequestHandler):
     server_version = "IDEScannerService/0.1"
 
@@ -525,6 +554,11 @@ def health_payload() -> dict[str, Any]:
             "yara": "optional",
             "dependency_intelligence": "online",
         },
+        "operations": {
+            "job_retention_seconds": JOB_RETENTION_SECONDS,
+            "maintenance_interval_seconds": MAINTENANCE_INTERVAL_SECONDS,
+            "webhook_max_total_attempts": WEBHOOK_MAX_TOTAL_ATTEMPTS,
+        },
     }
 
 
@@ -649,8 +683,8 @@ def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DA
             file=sys.stderr,
         )
     store = JobStore(data_dir)
-    retry_failed_webhook_deliveries(store)
-    cleanup_stale_jobs(store)
+    maintain_store(store)
+    start_maintenance_loop(store)
     server = ThreadingHTTPServer((host, port), ScannerServiceHandler)
     server.job_store = store  # type: ignore[attr-defined]
     server.scan_pool = ScanWorkerPool(store)  # type: ignore[attr-defined]
