@@ -37,6 +37,9 @@ SARIF export is for code-scanning integrations. It includes only scanner-recorde
 locations and preserves exact artifact identity in each result; a clean SARIF
 log is evidence of completed checks, not a guarantee that an extension is safe.
 
+Use [the GitHub Code Scanning action](docs/github-sarif-action.md) to emit and
+upload that exact-artifact SARIF evidence in a repository workflow.
+
 Website: [abscissa.dev](https://abscissa.dev)
 
 ## MCP assessment service

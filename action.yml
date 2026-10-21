@@ -1,33 +1,46 @@
-name: IDE Scanner extension policy
-description: Scan repository-declared VS Code extensions as exact VSIX artifacts and enforce approvals.
+name: GuardRails extension scan
+description: Scan a VS Code extension artifact or directory and emit exact-artifact SARIF evidence.
 inputs:
-  policy:
-    description: Path to policy JSON relative to the repository root.
+  path:
+    description: Path to one VSIX artifact, extension directory, or installed-extension directory.
+    required: true
+  output:
+    description: SARIF file written by the action.
     required: false
-    default: .ide-scanner/policy.json
-  lock:
-    description: Path to exact-artifact lock JSON relative to the repository root.
+    default: guardrails.sarif.json
+  profile:
+    description: "Scanner profile: quick, standard, smart, deep, or benchmark."
     required: false
-    default: .ide-scanner/extensions.lock.json
-  write-lock:
-    description: Generate or update the lock file instead of enforcing it.
+    default: standard
+  runtime:
+    description: Run the bounded runtime pass. Required for the deep profile.
     required: false
     default: "false"
+outputs:
+  sarif_file:
+    description: Path to the emitted SARIF file.
+    value: ${{ steps.scan.outputs.sarif_file }}
 runs:
   using: composite
   steps:
-    - shell: bash
-      run: python -m pip install -e '${{ github.action_path }}[analysis]'
-    - shell: bash
-      run: >-
-        python '${{ github.action_path }}/scripts/policy_gate.py'
-        --policy '${{ inputs.policy }}'
-        --lock '${{ inputs.lock }}'
-        --output ide-scanner-policy-result.json
-        ${{ inputs.write-lock == 'true' && '--write-lock' || '' }}
-    - shell: bash
-      if: always()
+    - id: scan
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_RUNTIME: ${{ inputs.runtime }}
       run: |
-        if [ -f ide-scanner-policy-result.json ]; then
-          cat ide-scanner-policy-result.json >> "$GITHUB_STEP_SUMMARY"
+        set -euo pipefail
+        case "$INPUT_PROFILE" in quick|standard|smart|deep|benchmark) ;; *) echo "Unsupported GuardRails profile: $INPUT_PROFILE" >&2; exit 2 ;; esac
+        case "$INPUT_RUNTIME" in true|false) ;; *) echo "runtime must be true or false" >&2; exit 2 ;; esac
+        if [[ "$INPUT_PROFILE" == "deep" && "$INPUT_RUNTIME" != "true" ]]; then
+          echo "The deep profile requires runtime: true so provider coverage is enforceable." >&2
+          exit 2
         fi
+        python -m pip install --disable-pip-version-check --no-cache-dir "$GITHUB_ACTION_PATH"
+        args=(python -m ide_scanner.cli scan --path "$INPUT_PATH" --profile "$INPUT_PROFILE" --format sarif --out "$INPUT_OUTPUT")
+        if [[ "$INPUT_RUNTIME" == "true" ]]; then args+=(--runtime); fi
+        "${args[@]}"
+        test -s "$INPUT_OUTPUT"
+        echo "sarif_file=$INPUT_OUTPUT" >> "$GITHUB_OUTPUT"
