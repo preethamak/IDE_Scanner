@@ -20,6 +20,7 @@ from .report_bundle import build_report_bundle
 from .rule_registry import RULESET_VERSION, rules_json
 from .mcp import scan_mcp_payload
 from .scanner import scan_targets
+from .webhooks import configured_webhook, deliver_terminal_webhook
 
 SERVICE_VERSION = "0.1.0"
 DEFAULT_DATA_DIR = Path(os.environ.get("IDE_SCANNER_DATA_DIR", ".ide-scanner-data"))
@@ -216,9 +217,11 @@ def execute_marketplace_job(
         extension_rows = bundle.get("leaderboard", {}).get("extensions", [])
         if not extension_rows:
             raise RuntimeError("Scanner completed without an extension result.")
-        store.try_complete(job["id"], bundle["summary"], bundle)
+        if store.try_complete(job["id"], bundle["summary"], bundle):
+            _notify_terminal_job(store, job["id"])
     except Exception as exc:  # noqa: BLE001 - job records must surface scanner/network failures
-        store.try_fail(job["id"], str(exc))
+        if store.try_fail(job["id"], str(exc)):
+            _notify_terminal_job(store, job["id"])
 
 
 class ScanWorkerPool:
@@ -280,11 +283,12 @@ class ScanWorkerPool:
             # The scan overran its budget. Record the timeout; the orphaned
             # daemon thread cannot be force-killed in CPython, but the bounded
             # pool prevents it from starving new work indefinitely.
-            self.store.try_fail(
+            if self.store.try_fail(
                 job["id"],
                 f"Scan exceeded the {self.job_timeout}s job timeout and was abandoned.",
                 stage="timeout",
-            )
+            ):
+                _notify_terminal_job(self.store, job["id"])
 
 
 def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) -> int:
@@ -311,7 +315,19 @@ def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) ->
             job["stage"] = "interrupted"
             job["error"] = "Service restarted while the job was in progress."
             store.write(job)
+            _notify_terminal_job(store, str(job.get("id") or ""))
     return removed
+
+
+def _notify_terminal_job(store: JobStore, job_id: str) -> None:
+    job = store.get(job_id)
+    if not job:
+        return
+    delivery = deliver_terminal_webhook(job)
+    if delivery is None:
+        return
+    job["webhook_delivery"] = delivery
+    store.write(job)
 
 
 class ScannerServiceHandler(BaseHTTPRequestHandler):
@@ -575,6 +591,7 @@ def openapi_payload() -> dict[str, Any]:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DATA_DIR) -> None:
+    configured_webhook()
     token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
     non_loopback = host not in {"127.0.0.1", "::1", "localhost"}
     if non_loopback and not token:
