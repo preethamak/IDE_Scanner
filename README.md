@@ -51,6 +51,9 @@ duplicate exact-artifact analysis jobs.
 Trusted internal systems can receive signed terminal-job notifications through
 the [scanner service webhook contract](docs/scanner-service-webhooks.md).
 
+See [scanner service operations](docs/scanner-service-operations.md) for local
+job retention, periodic maintenance, and evidence-lifetime controls.
+
 The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
 the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
 providers, and publishes a short-lived encrypted report artifact. Configure

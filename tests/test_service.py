@@ -12,11 +12,14 @@ from http.server import ThreadingHTTPServer
 
 from ide_scanner.service import (
     JobStore,
+    MAINTENANCE_INTERVAL_SECONDS,
+    JOB_RETENTION_SECONDS,
     ScanWorkerPool,
     ScannerServiceHandler,
     cleanup_stale_jobs,
     execute_marketplace_job,
     health_payload,
+    maintain_store,
     openapi_payload,
     retry_failed_webhook_deliveries,
     serve,
@@ -77,6 +80,8 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["providers"]["semgrep"], "optional")
         self.assertEqual(health["providers"]["yara"], "optional")
+        self.assertEqual(health["operations"]["job_retention_seconds"], JOB_RETENTION_SECONDS)
+        self.assertEqual(health["operations"]["maintenance_interval_seconds"], MAINTENANCE_INTERVAL_SECONDS)
 
     def test_openapi_contract_covers_public_and_authenticated_routes(self) -> None:
         contract = openapi_payload()
@@ -285,6 +290,22 @@ class ScanWorkerPoolTests(unittest.TestCase):
                 self.assertEqual(retry_failed_webhook_deliveries(store), 0)
             self.assertEqual(deliver.call_count, 0)
             self.assertEqual(store.get(job["id"])["webhook_delivery"]["status"], "dead_lettered")
+
+    def test_maintenance_expires_old_state_and_recovers_webhooks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            expired = store.create("publisher.expired")
+            expired_path = store.jobs_dir / f"{expired['id']}.json"
+            old = time.time() - 120
+            os.utime(expired_path, (old, old))
+            retry = store.create("publisher.retry")
+            retry.update({"status": "complete", "stage": "complete", "webhook_delivery": {"status": "failed", "attempts": 1, "total_attempts": 1}})
+            store.write(retry)
+            with patch("ide_scanner.service.deliver_terminal_webhook", return_value={"delivery_id": "delivery_recovered", "status": "delivered", "attempts": 1}):
+                result = maintain_store(store, retention_seconds=60)
+            self.assertEqual(result["removed"], 1)
+            self.assertEqual(result["webhooks_retried"], 1)
+            self.assertEqual(store.get(retry["id"])["webhook_delivery"]["status"], "delivered")
 
 
 class ServeSecureDefaultTests(unittest.TestCase):
