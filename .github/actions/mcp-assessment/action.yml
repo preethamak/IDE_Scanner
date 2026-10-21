@@ -1,0 +1,58 @@
+name: GuardRails MCP assessment
+description: Assess a versioned MCP server descriptor and emit a machine-readable GuardRails evidence report.
+inputs:
+  descriptor:
+    description: Path to one JSON MCP server descriptor.
+    required: true
+  output:
+    description: Assessment JSON report written by the action.
+    required: false
+    default: guardrails-mcp-assessment.json
+  fail_on:
+    description: "Optional policy threshold: never, review, or block."
+    required: false
+    default: never
+outputs:
+  report_file:
+    description: Path to the assessment JSON report.
+    value: ${{ steps.assess.outputs.report_file }}
+  decision:
+    description: GuardRails decision recorded in the report.
+    value: ${{ steps.assess.outputs.decision }}
+  coverage_percent:
+    description: Percentage of assessment metrics that had evidence.
+    value: ${{ steps.assess.outputs.coverage_percent }}
+runs:
+  using: composite
+  steps:
+    - id: assess
+      shell: bash
+      env:
+        INPUT_DESCRIPTOR: ${{ inputs.descriptor }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_FAIL_ON: ${{ inputs.fail_on }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_FAIL_ON" in never|review|block) ;; *) echo "fail_on must be never, review, or block" >&2; exit 2 ;; esac
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --disable-pip-version-check --no-cache-dir "$action_root"
+        python -m ide_scanner.cli mcp --input "$INPUT_DESCRIPTOR" --output "$INPUT_OUTPUT"
+        test -s "$INPUT_OUTPUT"
+        python - "$INPUT_OUTPUT" "$INPUT_FAIL_ON" "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import sys
+
+        report_path, threshold, github_output = sys.argv[1:]
+        report = json.load(open(report_path, encoding="utf-8"))
+        decision = str(report.get("decision") or "incomplete").lower()
+        coverage = report.get("coverage") or {}
+        percent = coverage.get("percent")
+        with open(github_output, "a", encoding="utf-8") as output:
+            output.write(f"report_file={report_path}\n")
+            output.write(f"decision={decision}\n")
+            output.write(f"coverage_percent={percent if percent is not None else ''}\n")
+        ranks = {"allow": 0, "review": 1, "block": 2, "incomplete": 2}
+        limits = {"never": 3, "review": 1, "block": 2}
+        if ranks.get(decision, 2) >= limits[threshold]:
+            raise SystemExit(f"GuardRails MCP assessment decision {decision} reaches fail_on={threshold}.")
+        PY

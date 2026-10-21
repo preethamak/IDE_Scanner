@@ -54,6 +54,10 @@ the same secret when dispatching and reading MCP assessments.
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```
 
+For repository-local descriptor reviews, use the [GitHub MCP assessment
+action](docs/github-mcp-assessment-action.md). It produces the same
+machine-readable evidence contract without installing or executing the server.
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.
