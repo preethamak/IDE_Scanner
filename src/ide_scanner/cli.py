@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
-    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -240,6 +240,10 @@ def main(argv: list[str] | None = None) -> int:
         if output_format == "bundle.json":
             from .report_bundle import build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
+            return scan_exit_code
+        if output_format == "sarif":
+            from .sarif import report_to_sarif
+            _emit(report_to_sarif(report), args.output)
             return scan_exit_code
         if output_format == "terminal":
             if args.output:
