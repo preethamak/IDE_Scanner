@@ -56,6 +56,7 @@ MAX_SCAN_WORKERS = _bounded_env_int("IDE_SCANNER_MAX_WORKERS", 2, 1, 16)
 MAX_SCAN_QUEUE = _bounded_env_int("IDE_SCANNER_MAX_QUEUE", 32, 1, 1024)
 JOB_TIMEOUT_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_TIMEOUT", 600, 30, 3600)
 MCP_REQUEST_MAX_BYTES = _bounded_env_int("IDE_SCANNER_MCP_MAX_BYTES", 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
+MCP_BATCH_MAX_ITEMS = 10
 WEBHOOK_MAX_TOTAL_ATTEMPTS = 9
 JOB_RETENTION_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_RETENTION_SECONDS", 7 * 24 * 3600, 3600, 90 * 24 * 3600)
 MAINTENANCE_INTERVAL_SECONDS = _bounded_env_int("IDE_SCANNER_MAINTENANCE_INTERVAL_SECONDS", 3600, 60, 24 * 3600)
@@ -604,6 +605,28 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001 - service returns bounded client-safe errors
                 self._json(422, {"error": str(exc) or "MCP assessment failed."})
             return
+        if path == "/v1/scans/mcp/batch":
+            payload = self._read_json(max_bytes=MCP_REQUEST_MAX_BYTES)
+            servers = payload.get("servers") if isinstance(payload, dict) else None
+            if not isinstance(servers, list) or not servers:
+                self._json(400, {"error": "servers must be a non-empty list of MCP descriptor objects."})
+                return
+            if len(servers) > MCP_BATCH_MAX_ITEMS:
+                self._json(400, {"error": f"servers may contain at most {MCP_BATCH_MAX_ITEMS} descriptors."})
+                return
+            results: list[dict[str, Any]] = []
+            completed = 0
+            for index, descriptor in enumerate(servers):
+                if not isinstance(descriptor, dict):
+                    results.append({"index": index, "status": "failed", "error": "MCP descriptor must be a JSON object."})
+                    continue
+                try:
+                    results.append({"index": index, "status": "complete", "assessment": scan_mcp_payload(descriptor)})
+                    completed += 1
+                except Exception:  # noqa: BLE001 - one malformed descriptor must not hide peer results
+                    results.append({"index": index, "status": "failed", "error": "MCP assessment failed."})
+            self._json(200, {"results": results, "summary": {"total": len(servers), "complete": completed, "failed": len(servers) - completed}})
+            return
         if path != "/v1/scans/marketplace":
             self._json(404, {"error": "Route not found."})
             return
@@ -841,6 +864,15 @@ def openapi_payload() -> dict[str, Any]:
                     "security": [{"bearerAuth": []}],
                     "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "description": "MCP assessment input. The service enforces a bounded request size."}}}},
                     "responses": {"200": {"description": "Assessment result", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed or oversized input", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "422": {"description": "Assessment could not complete", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/scans/mcp/batch": {
+                "post": {
+                    "summary": "Assess a bounded MCP server catalog synchronously",
+                    "description": "Processes up to 10 descriptors in request order. A failed descriptor is reported per item and does not suppress independent results.",
+                    "security": [{"bearerAuth": []}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["servers"], "properties": {"servers": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object"}}}}}}},
+                    "responses": {"200": {"description": "Per-descriptor assessment outcomes", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed, oversized, or over-limit request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
                 },
             },
             "/v1/jobs": {

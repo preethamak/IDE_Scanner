@@ -137,6 +137,7 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertIn("/v1/rules", paths)
         self.assertIn("/v1/scans/marketplace", paths)
         self.assertIn("/v1/scans/mcp", paths)
+        self.assertIn("/v1/scans/mcp/batch", paths)
         self.assertIn("/v1/jobs/{job_id}", paths)
         self.assertIn("/v1/jobs", paths)
         self.assertIn("/v1/reports/{job_id}", paths)
@@ -152,6 +153,35 @@ class ScannerServiceTests(unittest.TestCase):
         report = paths["/v1/reports/{job_id}"]["get"]
         self.assertIn("ETag", report["responses"]["200"]["headers"])
         self.assertIn("304", report["responses"])
+
+    def test_http_mcp_batch_keeps_independent_results_when_one_descriptor_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/scans/mcp/batch"
+            request = Request(
+                endpoint,
+                data=b'{"servers":[{"name":"good"},"not-an-object",{"name":"bad"}]}',
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with patch("ide_scanner.service.scan_mcp_payload", side_effect=[{"decision": "review"}, RuntimeError("provider error")]):
+                    with urlopen(request, timeout=2) as response:
+                        payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["summary"], {"total": 3, "complete": 1, "failed": 2})
+                self.assertEqual(payload["results"][0]["assessment"], {"decision": "review"})
+                self.assertEqual(payload["results"][1]["error"], "MCP descriptor must be a JSON object.")
+                self.assertEqual(payload["results"][2]["error"], "MCP assessment failed.")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
     def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -37,7 +37,8 @@ Website: [abscissa.dev](https://abscissa.dev)
 ## MCP assessment service
 
 The Python service exposes the complete MCP catalog assessment at
-`POST /v1/scans/mcp`. Deploy the service separately from the web Worker and set
+`POST /v1/scans/mcp` and a bounded catalog endpoint at
+`POST /v1/scans/mcp/batch`. Deploy the service separately from the web Worker and set
 the same `IDE_SCANNER_API_TOKEN` on both sides. For a no-downtime credential
 rotation, use the documented `IDE_SCANNER_API_TOKENS` overlap set. The production image must also
 provide the `gitleaks` and `osv-scanner` executables; `owasp-depscan` is installed
