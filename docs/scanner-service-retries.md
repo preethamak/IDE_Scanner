@@ -28,3 +28,16 @@ Wait, then retry with a new key: a rejected request is terminal evidence that
 the service did not accept that job. Poll `/v1/jobs/{job_id}` until the job is
 complete or failed, and fetch the report only from the authenticated report
 endpoint.
+
+## Retained evidence history
+
+`GET /v1/jobs` returns at most 100 newest retained Marketplace job summaries
+for an authenticated service client. Use it to discover a previous job ID or
+confirm retention status, then fetch a completed report with its `report_ref`.
+The history response contains only job metadata; it deliberately omits report
+bodies, idempotency keys, request fingerprints, and webhook secrets.
+
+Retention is operator-configured and expired jobs return `404`. A history entry
+is not a permanent archive or an approval result; copy a reviewed canonical
+report bundle to the team's immutable evidence store before its retention
+window ends.
