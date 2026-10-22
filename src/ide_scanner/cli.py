@@ -262,7 +262,11 @@ def main(argv: list[str] | None = None) -> int:
         )}, None)
         return 0
     if args.command == "provenance":
-        _emit(compare_source_to_vsix(args.source, args.vsix), args.output)
+        try:
+            result = compare_source_to_vsix(args.source, args.vsix)
+        except ValueError as error:
+            parser.error(str(error))
+        _emit(result, args.output)
         return 0
     if args.command == "inventory":
         targets: list[dict[str, str]] = []

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -64,3 +66,11 @@ class SourceVsixProvenanceTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 compare_source_to_vsix(source, vsix)
+
+    def test_cli_reports_invalid_provenance_input_without_a_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            error = StringIO()
+            with redirect_stderr(error), self.assertRaises(SystemExit) as stopped:
+                cli.main(["provenance", "--source", temp, "--vsix", str(Path(temp) / "missing.vsix")])
+            self.assertEqual(stopped.exception.code, 2)
+            self.assertIn("requires a .vsix file", error.getvalue())
