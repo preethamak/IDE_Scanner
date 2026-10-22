@@ -41,3 +41,17 @@ Retention is operator-configured and expired jobs return `404`. A history entry
 is not a permanent archive or an approval result; copy a reviewed canonical
 report bundle to the team's immutable evidence store before its retention
 window ends.
+
+## Exact report identity
+
+Completed jobs include `report_sha256`, the SHA-256 of the exact persisted
+report bytes. `GET /v1/reports/{job_id}` sends the same identity as a quoted
+`ETag` (`"sha256-<hex>"`). Record that value beside a release-review decision
+or CI attestation; it proves which report bytes were reviewed, not that an
+extension is safe.
+
+Clients can send the recorded value in `If-None-Match`. The service responds
+with `304` when the retained report is unchanged, avoiding a needless transfer
+while preserving the authenticated read boundary. The value is an integrity
+identifier, not a report signature or a substitute for preserving the report
+in immutable team storage.

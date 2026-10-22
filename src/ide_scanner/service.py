@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import os
@@ -114,6 +115,7 @@ class JobStore:
                 "updated_at": now,
                 "error": None,
                 "report_ref": None,
+                "report_sha256": None,
                 "idempotency_key": idempotency_key,
                 "request_fingerprint": fingerprint if idempotency_key else None,
             }
@@ -145,7 +147,7 @@ class JobStore:
                 continue
             rows.append({key: item.get(key) for key in (
                 "id", "status", "stage", "extension_id", "version", "target_platform",
-                "created_at", "updated_at", "report_ref", "error",
+                "created_at", "updated_at", "report_ref", "report_sha256", "error",
             )})
         return sorted(rows, key=lambda item: str(item.get("updated_at") or ""), reverse=True)[:max(1, min(limit, 100))]
 
@@ -198,6 +200,13 @@ class JobStore:
         path = self.reports_dir / f"{job_id}.json"
         with self._lock:
             self._write_json_locked(path, report, separators=(",", ":"))
+            job_path = self.jobs_dir / f"{job_id}.json"
+            job = self._read_json_locked(job_path)
+            if isinstance(job, dict):
+                job["report_sha256"] = _sha256_file(path)
+                job["report_ref"] = f"/v1/reports/{job_id}"
+                job["updated_at"] = _now()
+                self._write_json_locked(job_path, job)
         return f"/v1/reports/{job_id}"
 
     def try_complete(self, job_id: str, summary: dict[str, Any], report: dict[str, Any]) -> bool:
@@ -219,6 +228,7 @@ class JobStore:
                 "stage": "complete",
                 "summary": summary,
                 "report_ref": f"/v1/reports/{job_id}",
+                "report_sha256": _sha256_file(report_path),
                 "updated_at": _now(),
             })
             self._write_json_locked(job_path, current)
@@ -252,6 +262,16 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
+    def get_report_sha256(self, job_id: str) -> str | None:
+        """Return the SHA-256 of the exact persisted report bytes."""
+        if not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
+            return None
+        path = self.reports_dir / f"{job_id}.json"
+        try:
+            return _sha256_file(path)
+        except OSError:
+            return None
+
     @staticmethod
     def _read_json_locked(path: Path) -> Any:
         try:
@@ -267,6 +287,10 @@ class JobStore:
             kwargs["separators"] = separators
         temp.write_text(json.dumps(value, indent=None if separators else 2, **kwargs) + ("" if separators else "\n"), encoding="utf-8")
         temp.replace(path)
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def execute_marketplace_job(
@@ -547,8 +571,21 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(200, job) if job else self._json(404, {"error": "Scan job not found."})
             return
         if path.startswith("/v1/reports/"):
-            report = self.store.get_report(path.rsplit("/", 1)[-1])
-            self._json(200, report) if report else self._json(404, {"error": "Scan report not found."})
+            job_id = path.rsplit("/", 1)[-1]
+            report = self.store.get_report(job_id)
+            digest = self.store.get_report_sha256(job_id)
+            if not report or not digest:
+                self._json(404, {"error": "Scan report not found."})
+                return
+            etag = f'"sha256-{digest}"'
+            if self.headers.get("if-none-match", "") == etag:
+                self.send_response(304)
+                self._cors_headers()
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self._json(200, report, headers={"ETag": etag})
             return
         self._json(404, {"error": "Route not found."})
 
@@ -736,6 +773,7 @@ def openapi_payload() -> dict[str, Any]:
             "created_at": {"type": "string", "format": "date-time"},
             "updated_at": {"type": "string", "format": "date-time"},
             "report_ref": {"type": ["string", "null"], "description": "Present only after a complete job; fetch with the same bearer token."},
+            "report_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of the exact persisted report bytes when a report is available."},
             "error": {"type": ["string", "null"]},
             "webhook_delivery": {"type": "object", "description": "Bounded webhook delivery receipt when configured; it contains no webhook secret."},
         },
@@ -836,9 +874,10 @@ def openapi_payload() -> dict[str, Any]:
             "/v1/reports/{job_id}": {
                 "get": {
                     "summary": "Fetch the canonical bundle for a completed job",
+                    "description": "The ETag is the SHA-256 identity of the exact returned report bytes. Record it with any review decision; a matching If-None-Match returns 304.",
                     "security": [{"bearerAuth": []}],
                     "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
-                    "responses": {"200": {"description": "Versioned canonical report bundle", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": True}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Report not found", "content": {"application/json": {"schema": error}}}},
+                    "responses": {"200": {"description": "Versioned canonical report bundle", "headers": {"ETag": {"schema": {"type": "string"}, "description": "Quoted sha256 identity of exact response bytes."}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": True}}}}, "304": {"description": "The supplied ETag still identifies the current report."}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Report not found", "content": {"application/json": {"schema": error}}}},
                 },
             },
         },

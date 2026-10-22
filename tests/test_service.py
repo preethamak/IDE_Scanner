@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 import tempfile
 import threading
 import time
@@ -46,6 +47,9 @@ class ScannerServiceTests(unittest.TestCase):
             self.assertEqual(store.get(job["id"])["extension_id"], "publisher.extension")
             self.assertEqual(report_ref, f"/v1/reports/{job['id']}")
             self.assertEqual(store.get_report(job["id"])["metadata"]["scan_id"], "scan-1")
+            expected = hashlib.sha256(b'{"metadata":{"scan_id":"scan-1"}}').hexdigest()
+            self.assertEqual(store.get(job["id"])["report_sha256"], expected)
+            self.assertEqual(store.get_report_sha256(job["id"]), expected)
 
     def test_job_store_persists_exact_marketplace_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -145,6 +149,9 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed", "cancelled"])
         self.assertEqual(paths["/v1/jobs/{job_id}"]["delete"]["security"], [{"bearerAuth": []}])
         self.assertIn("409", paths["/v1/jobs/{job_id}"]["delete"]["responses"])
+        report = paths["/v1/reports/{job_id}"]["get"]
+        self.assertIn("ETag", report["responses"]["200"]["headers"])
+        self.assertIn("304", report["responses"])
 
     def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -189,6 +196,31 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(payload["jobs"][0]["id"], job["id"])
                 self.assertNotIn("idempotency_key", payload["jobs"][0])
                 self.assertNotIn("request_fingerprint", payload["jobs"][0])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_http_report_exposes_a_stable_exact_byte_etag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            store.write_report(job["id"], {"metadata": {"scan_id": "scan-1"}})
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/reports/{job['id']}"
+            try:
+                with urlopen(endpoint, timeout=2) as response:
+                    body = response.read()
+                    etag = response.headers["ETag"]
+                self.assertEqual(etag, f'"sha256-{hashlib.sha256(body).hexdigest()}"')
+                with self.assertRaises(HTTPError) as unchanged:
+                    urlopen(Request(endpoint, headers={"If-None-Match": etag}), timeout=2)
+                self.assertEqual(unchanged.exception.code, 304)
+                self.assertEqual(unchanged.exception.headers["ETag"], etag)
             finally:
                 server.shutdown()
                 server.server_close()
