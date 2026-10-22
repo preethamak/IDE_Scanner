@@ -17,6 +17,7 @@ from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
 from .report_bundle import iter_report_events, write_report_bundle
+from .source_provenance import compare_source_to_vsix
 from .sandbox_runner import run_sandbox, sandbox_preflight
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
 
@@ -69,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     artifacts.add_argument("--registry")
     artifacts.add_argument("--target-platform")
     artifacts.add_argument("--sha256")
+
+    provenance = subparsers.add_parser("provenance", help="Compare a source tree to the payload of an exact VSIX artifact.")
+    provenance.add_argument("--source", required=True, help="Source snapshot directory to compare.")
+    provenance.add_argument("--vsix", required=True, help="Exact published VSIX artifact to compare.")
+    provenance.add_argument("--out", "--output", dest="output", help="Write the comparison JSON to this file.")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -254,6 +260,13 @@ def main(argv: list[str] | None = None) -> int:
             extension_id=args.extension_id, version=args.version, registry=args.registry,
             target_platform=args.target_platform, sha256=args.sha256,
         )}, None)
+        return 0
+    if args.command == "provenance":
+        try:
+            result = compare_source_to_vsix(args.source, args.vsix)
+        except ValueError as error:
+            parser.error(str(error))
+        _emit(result, args.output)
         return 0
     if args.command == "inventory":
         targets: list[dict[str, str]] = []
