@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -38,7 +39,7 @@ def _service_base(value: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-def _request_json(url: str, token: str, *, method: str = "GET", payload: dict[str, Any] | None = None, idempotency_key: str | None = None) -> tuple[int, dict[str, Any]]:
+def _request_json(url: str, token: str, *, method: str = "GET", payload: dict[str, Any] | None = None, idempotency_key: str | None = None) -> tuple[int, dict[str, Any], dict[str, str], bytes]:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8") if payload is not None else None
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     if body is not None:
@@ -50,9 +51,11 @@ def _request_json(url: str, token: str, *, method: str = "GET", payload: dict[st
         with urlopen(request, timeout=30) as response:
             raw = response.read()
             status = response.status
+            headers = dict(response.headers.items())
     except HTTPError as error:
         raw = error.read()
         status = error.code
+        headers = dict(error.headers.items())
     except URLError as error:
         raise RuntimeError(f"GuardRails service request failed: {error.reason}") from error
     try:
@@ -61,7 +64,7 @@ def _request_json(url: str, token: str, *, method: str = "GET", payload: dict[st
         raise RuntimeError(f"GuardRails service returned non-JSON HTTP {status}") from error
     if not isinstance(value, dict):
         raise RuntimeError(f"GuardRails service returned invalid JSON HTTP {status}")
-    return status, value
+    return status, value, headers, raw
 
 
 def _job_url(base: str, job_id: str) -> str:
@@ -88,7 +91,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         payload["version"] = args.version
     if args.target_platform:
         payload["target_platform"] = args.target_platform
-    status, job = _request_json(
+    status, job, _headers, _raw = _request_json(
         urljoin(base + "/", "v1/scans/marketplace"),
         args.token,
         method="POST",
@@ -104,7 +107,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if time.monotonic() >= deadline:
             raise RuntimeError(f"GuardRails job {job_id} did not finish within {args.timeout:g} seconds")
         time.sleep(args.poll_interval)
-        status, job = _request_json(job_endpoint, args.token)
+        status, job, _headers, _raw = _request_json(job_endpoint, args.token)
         if status != 200:
             raise RuntimeError(str(job.get("error") or f"Could not poll GuardRails job {job_id}"))
 
@@ -113,12 +116,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     report_ref = str(job.get("report_ref") or "")
     if not report_ref.startswith("/v1/reports/"):
         raise RuntimeError(f"GuardRails job {job_id} did not return an authenticated report reference")
-    status, report = _request_json(urljoin(base + "/", report_ref.lstrip("/")), args.token)
+    status, report, headers, raw_report = _request_json(urljoin(base + "/", report_ref.lstrip("/")), args.token)
     if status != 200:
         raise RuntimeError(str(report.get("error") or f"Could not retrieve GuardRails report for {job_id}"))
+    report_sha256 = hashlib.sha256(raw_report).hexdigest()
+    etag = headers.get("ETag") or headers.get("Etag")
+    expected_etag = f'"sha256-{report_sha256}"'
+    if etag and etag != expected_etag:
+        raise RuntimeError("GuardRails report ETag does not match the retrieved report bytes")
+    job_digest = str(job.get("report_sha256") or "")
+    if job_digest and job_digest != report_sha256:
+        raise RuntimeError("GuardRails job report_sha256 does not match the retrieved report bytes")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"job_id": job_id, "report_file": str(args.out)}
+    return {"job_id": job_id, "report_file": str(args.out), "report_sha256": report_sha256}
 
 
 def main(argv: list[str] | None = None) -> int:
