@@ -57,6 +57,8 @@ PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 878
 For repository-local descriptor reviews, use the [GitHub MCP assessment
 action](docs/github-mcp-assessment-action.md). It produces the same
 machine-readable evidence contract without installing or executing the server.
+For assistant-safe review patterns in Codex- and Claude-style workflows, use
+the [MCP assistant workflow guide](docs/mcp-assistant-workflows.md).
 
 ## License
 
