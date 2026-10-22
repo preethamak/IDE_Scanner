@@ -51,6 +51,9 @@ duplicate exact-artifact analysis jobs.
 Trusted internal systems can receive signed terminal-job notifications through
 the [scanner service webhook contract](docs/scanner-service-webhooks.md).
 
+GitHub repositories can submit and enforce a pinned Marketplace release with
+the [Marketplace service action](docs/github-marketplace-service-action.md).
+
 See [scanner service operations](docs/scanner-service-operations.md) for local
 job retention, periodic maintenance, and evidence-lifetime controls.
 
