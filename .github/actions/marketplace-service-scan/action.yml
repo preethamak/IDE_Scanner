@@ -1,0 +1,106 @@
+name: GuardRails Marketplace service scan
+description: Submit an exact VS Marketplace release to GuardRails and enforce its completed evidence decision.
+inputs:
+  service-url:
+    description: HTTPS origin of the private GuardRails scanner service.
+    required: true
+  token:
+    description: Scanner service API token.
+    required: true
+  extension-id:
+    description: Exact VS Marketplace extension ID in publisher.extension form.
+    required: true
+  version:
+    description: Exact Marketplace version to scan.
+    required: true
+  target-platform:
+    description: Exact Marketplace target platform, such as linux-x64.
+    required: false
+  idempotency-key:
+    description: Stable key for retries of this exact submission.
+    required: false
+    default: guardrails-${{ github.run_id }}-${{ github.job }}
+  poll-interval-seconds:
+    description: Poll interval from 1 through 60 seconds.
+    required: false
+    default: "5"
+  timeout-seconds:
+    description: End-to-end wait timeout from 1 through 3600 seconds.
+    required: false
+    default: "900"
+  report-file:
+    description: Local output path for the canonical report bundle.
+    required: false
+    default: guardrails-marketplace-report.json
+  fail-on:
+    description: Failure threshold: never, review, or block.
+    required: false
+    default: review
+outputs:
+  job-id:
+    description: GuardRails service job identifier.
+    value: ${{ steps.submit.outputs.job_id }}
+  report-file:
+    description: Path of the authenticated canonical report bundle.
+    value: ${{ steps.submit.outputs.report_file }}
+  decision:
+    description: Exact artifact decision from the report: allow, review, block, or incomplete.
+    value: ${{ steps.policy.outputs.decision }}
+runs:
+  using: composite
+  steps:
+    - id: submit
+      shell: bash
+      env:
+        SERVICE_URL: ${{ inputs.service-url }}
+        SERVICE_TOKEN: ${{ inputs.token }}
+        EXTENSION_ID: ${{ inputs.extension-id }}
+        VERSION: ${{ inputs.version }}
+        TARGET_PLATFORM: ${{ inputs.target-platform }}
+        IDEMPOTENCY_KEY: ${{ inputs.idempotency-key }}
+        POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+        TIMEOUT: ${{ inputs.timeout-seconds }}
+        REPORT_FILE: ${{ inputs.report-file }}
+      run: |
+        set -euo pipefail
+        python "$GITHUB_ACTION_PATH/scan.py" \
+          --service-url "$SERVICE_URL" \
+          --token "$SERVICE_TOKEN" \
+          --extension-id "$EXTENSION_ID" \
+          --version "$VERSION" \
+          --target-platform "$TARGET_PLATFORM" \
+          --idempotency-key "$IDEMPOTENCY_KEY" \
+          --poll-interval "$POLL_INTERVAL" \
+          --timeout "$TIMEOUT" \
+          --out "$REPORT_FILE"
+    - id: policy
+      shell: bash
+      env:
+        REPORT_FILE: ${{ steps.submit.outputs.report_file }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        python - "$REPORT_FILE" "$FAIL_ON" <<'PY'
+        import json
+        import os
+        import sys
+
+        report_path, fail_on = sys.argv[1:]
+        if fail_on not in {"never", "review", "block"}:
+            raise SystemExit("fail-on must be never, review, or block")
+        report = json.load(open(report_path, encoding="utf-8"))
+        rows = ((report.get("leaderboard") or {}).get("extensions") or [])
+        if len(rows) != 1 or not isinstance(rows[0], dict):
+            raise SystemExit("report did not contain exactly one Marketplace extension decision")
+        decision = str(rows[0].get("decision") or "incomplete")
+        if decision not in {"allow", "review", "block", "incomplete"}:
+            raise SystemExit("report contained an unknown decision")
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"decision={decision}\n")
+        if decision == "incomplete" and fail_on != "never":
+            raise SystemExit("GuardRails report is incomplete; do not treat missing evidence as approval")
+        order = {"allow": 0, "review": 1, "block": 3}
+        threshold = {"never": 4, "review": 1, "block": 3}[fail_on]
+        if order[decision] >= threshold:
+            raise SystemExit(f"GuardRails decision {decision} meets fail-on={fail_on}")
+        PY
