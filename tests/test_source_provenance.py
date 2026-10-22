@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import warnings
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -62,7 +63,9 @@ class SourceVsixProvenanceTests(unittest.TestCase):
             vsix = root / "example.vsix"
             with ZipFile(vsix, "w") as archive:
                 archive.writestr("extension/package.json", "first")
-                archive.writestr("extension/package.json", "second")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    archive.writestr("extension/package.json", "second")
 
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 compare_source_to_vsix(source, vsix)
