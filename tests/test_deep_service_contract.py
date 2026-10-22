@@ -21,6 +21,7 @@ def test_marketplace_service_uses_exact_version_and_deep_provider_contract() -> 
         job = store.create("publisher.extension")
         job["version"] = "1.2.3"
         job["target_platform"] = "linux-x64"
+        store.write(job)
         execute_marketplace_job(store, job, scan=fake_scan)
 
     assert observed["marketplace_version"] == "1.2.3"

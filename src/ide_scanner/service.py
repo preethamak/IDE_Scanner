@@ -120,6 +120,45 @@ class JobStore:
         with self._lock:
             self._write_json_locked(path, job)
 
+    def try_start(self, job_id: str) -> dict[str, Any] | None:
+        """Atomically claim a queued job for a worker.
+
+        A queued job may be cancelled after it has entered the worker queue.
+        Claiming it through the store, rather than mutating the stale queue
+        copy, keeps cancellation authoritative.
+        """
+        path = self.jobs_dir / f"{job_id}.json"
+        with self._lock:
+            current = self._read_json_locked(path)
+            if not isinstance(current, dict) or current.get("status") != "queued":
+                return None
+            current.update({"status": "running", "stage": "downloading", "updated_at": _now()})
+            self._write_json_locked(path, current)
+            return current
+
+    def cancel(self, job_id: str) -> tuple[dict[str, Any] | None, bool]:
+        """Cancel a queued or running job without deleting its audit record.
+
+        The scanner thread cannot be forcibly stopped safely. A cancellation
+        therefore prevents report publication and terminal webhooks even when
+        a running scan finishes after the request.
+        """
+        path = self.jobs_dir / f"{job_id}.json"
+        with self._lock:
+            current = self._read_json_locked(path)
+            if not isinstance(current, dict):
+                return None, False
+            if current.get("status") not in {"queued", "running"}:
+                return current, False
+            current.update({
+                "status": "cancelled",
+                "stage": "cancelled",
+                "error": "Cancelled by an authorized client.",
+                "updated_at": _now(),
+            })
+            self._write_json_locked(path, current)
+            return current, True
+
     def write_report(self, job_id: str, report: dict[str, Any]) -> str:
         path = self.reports_dir / f"{job_id}.json"
         with self._lock:
@@ -202,14 +241,14 @@ def execute_marketplace_job(
 ) -> None:
     from .scanner import DEEP_REQUIRED_PROVIDERS
 
-    job["status"] = "running"
-    job["stage"] = "downloading"
-    store.write(job)
+    claimed = store.try_start(str(job.get("id") or ""))
+    if not claimed:
+        return
     try:
         report = scan(
-            marketplace_scan_ids=[job["extension_id"]],
-            marketplace_version=job.get("version"),
-            marketplace_target_platform=job.get("target_platform"),
+            marketplace_scan_ids=[claimed["extension_id"]],
+            marketplace_version=claimed.get("version"),
+            marketplace_target_platform=claimed.get("target_platform"),
             online=True,
             include_posture=False,
             required_providers=DEEP_REQUIRED_PROVIDERS,
@@ -220,11 +259,11 @@ def execute_marketplace_job(
         extension_rows = bundle.get("leaderboard", {}).get("extensions", [])
         if not extension_rows:
             raise RuntimeError("Scanner completed without an extension result.")
-        if store.try_complete(job["id"], bundle["summary"], bundle):
-            _notify_terminal_job(store, job["id"])
+        if store.try_complete(claimed["id"], bundle["summary"], bundle):
+            _notify_terminal_job(store, claimed["id"])
     except Exception as exc:  # noqa: BLE001 - job records must surface scanner/network failures
-        if store.try_fail(job["id"], str(exc)):
-            _notify_terminal_job(store, job["id"])
+        if store.try_fail(claimed["id"], str(exc)):
+            _notify_terminal_job(store, claimed["id"])
 
 
 class ScanWorkerPool:
@@ -501,6 +540,23 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             return
         self._json(202, job)
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._authorized():
+            self._json(401, {"error": "Scanner service authorization failed."})
+            return
+        path = self.path.split("?", 1)[0]
+        if not path.startswith("/v1/jobs/"):
+            self._json(404, {"error": "Route not found."})
+            return
+        job, cancelled = self.store.cancel(path.rsplit("/", 1)[-1])
+        if not job:
+            self._json(404, {"error": "Scan job not found."})
+            return
+        if not cancelled:
+            self._json(409, {"error": "Only queued or running scan jobs can be cancelled.", "job": job})
+            return
+        self._json(200, job)
+
     def log_message(self, format: str, *args: object) -> None:
         if os.environ.get("IDE_SCANNER_QUIET") != "1":
             super().log_message(format, *args)
@@ -539,7 +595,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         origin = os.environ.get("IDE_SCANNER_ALLOWED_ORIGIN", "http://127.0.0.1:8765")
         self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Headers", "content-type, authorization, idempotency-key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 
 
 def health_payload() -> dict[str, Any]:
@@ -575,7 +631,7 @@ def openapi_payload() -> dict[str, Any]:
         "required": ["id", "status", "extension_id", "created_at", "updated_at"],
         "properties": {
             "id": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"},
-            "status": {"type": "string", "enum": ["queued", "running", "complete", "failed"]},
+            "status": {"type": "string", "enum": ["queued", "running", "complete", "failed", "cancelled"]},
             "stage": {"type": "string", "description": "Terminal failures use rejected, timeout, or interrupted when applicable."},
             "extension_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"},
             "version": {"type": ["string", "null"]},
@@ -652,6 +708,13 @@ def openapi_payload() -> dict[str, Any]:
                     "security": [{"bearerAuth": []}],
                     "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
                     "responses": {"200": {"description": "Job record", "content": {"application/json": {"schema": job}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Job not found", "content": {"application/json": {"schema": error}}}},
+                },
+                "delete": {
+                    "summary": "Cancel a queued or running Marketplace scan job",
+                    "description": "Cancellation preserves the job audit record and prevents a late worker from publishing a report or terminal webhook.",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
+                    "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": job}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Job not found", "content": {"application/json": {"schema": error}}}, "409": {"description": "Job is already terminal", "content": {"application/json": {"schema": error}}}},
                 },
             },
             "/v1/reports/{job_id}": {
