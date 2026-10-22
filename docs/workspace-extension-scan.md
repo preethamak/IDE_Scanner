@@ -28,6 +28,21 @@ python -m ide_scanner.cli workspace --root . --lock .ide-scanner/extensions.lock
 lacks a version pin. It does not fail merely because a lock has an unused entry;
 the report records that drift for cleanup and review.
 
+## Generate a candidate reviewed lock
+
+After reviewing a completed workspace evidence report, generate pins from the
+exact artifact coordinates that were assessed:
+
+```bash
+python -m ide_scanner.cli workspace-lock \
+  --report guardrails-workspace.json \
+  --output .ide-scanner/extensions.lock.json
+```
+
+The command refuses incomplete, failed, missing-version, or ambiguous scan
+evidence. Review the generated diff before committing it; generation preserves
+the assessed version and target platform, but it is not an automatic approval.
+
 For publication-grade evidence on a hardened runner, opt into the complete
 provider and bounded runtime path explicitly:
 

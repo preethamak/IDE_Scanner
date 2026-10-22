@@ -71,6 +71,58 @@ def workspace_lock_coverage(discovery: dict[str, Any], locked: dict[str, dict[st
     }
 
 
+def build_workspace_lock(report: dict[str, Any]) -> dict[str, Any]:
+    """Create reviewed version pins from completed workspace scan evidence.
+
+    A lock is an approval input, so it must never be generated from failed or
+    incomplete analysis. The lock deliberately pins only coordinates the
+    workspace scanner currently enforces: exact version and target platform.
+    """
+    if report.get("schema_version") != "guardrails.workspace-extension-scan.v1":
+        raise ValueError("Workspace lock generation requires a guardrails.workspace-extension-scan.v1 report")
+    entries = report.get("extensions")
+    if not isinstance(entries, list):
+        raise ValueError("Workspace report must contain an extensions list")
+    lock_entries: dict[str, dict[str, str]] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            raise ValueError("Workspace report contains an invalid extension entry")
+        extension_id = str(item.get("extension_id") or "").strip()
+        if not EXTENSION_ID.fullmatch(extension_id):
+            raise ValueError("Workspace report contains an invalid extension identifier")
+        scan = item.get("scan")
+        scanned_extensions = scan.get("extensions") if isinstance(scan, dict) else None
+        if not isinstance(scanned_extensions, list):
+            raise ValueError(f"Workspace report has no scanner evidence for {extension_id}")
+        matches = [candidate for candidate in scanned_extensions if isinstance(candidate, dict) and candidate.get("extension_id") == extension_id]
+        if len(matches) != 1:
+            raise ValueError(f"Workspace report must contain exactly one scanner result for {extension_id}")
+        evidence = matches[0]
+        if evidence.get("analysis_status") != "complete" or evidence.get("decision") == "incomplete":
+            raise ValueError(f"Workspace report evidence is incomplete for {extension_id}; refusing to generate a lock")
+        version = str(evidence.get("version") or "").strip()
+        if not version:
+            raise ValueError(f"Workspace report has no exact version for {extension_id}")
+        pin = {"version": version}
+        artifact_identity = evidence.get("artifact_identity")
+        target_platform = str(artifact_identity.get("target_platform") or "").strip().lower() if isinstance(artifact_identity, dict) else ""
+        if target_platform:
+            pin["target_platform"] = target_platform
+        lock_entries[extension_id] = pin
+    return {
+        "schema_version": "guardrails.workspace-extension-lock.v1",
+        "source_report_schema": report["schema_version"],
+        "extensions": {extension_id: lock_entries[extension_id] for extension_id in sorted(lock_entries)},
+    }
+
+
+def write_workspace_lock(report: dict[str, Any], path: Path) -> dict[str, Any]:
+    lock = build_workspace_lock(report)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return lock
+
+
 def scan_workspace_extensions(
     root: Path,
     *,
