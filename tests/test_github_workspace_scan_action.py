@@ -13,10 +13,13 @@ class GitHubWorkspaceScanActionTests(unittest.TestCase):
 
         self.assertEqual(action["name"], "GuardRails workspace extension scan")
         self.assertEqual(action["inputs"]["profile"]["default"], "standard")
+        self.assertEqual(action["inputs"]["require_lock"]["default"], "false")
         self.assertEqual(action["outputs"]["highest_decision"]["value"], "${{ steps.scan.outputs.highest_decision }}")
         script = action["runs"]["steps"][0]["run"]
         self.assertIn("ide_scanner.cli workspace", script)
         self.assertIn("--lock", script)
+        self.assertIn("--require-lock", script)
+        self.assertIn("INPUT_REQUIRE_LOCK", script)
         self.assertIn("highest_decision", script)
         self.assertIn("fail_on", script)
         self.assertIn('"${args[@]}"', script)

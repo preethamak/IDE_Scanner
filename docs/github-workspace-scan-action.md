@@ -28,6 +28,7 @@ jobs:
         uses: preethamak/IDE_Scanner/.github/actions/workspace-extension-scan@main
         with:
           lock: .ide-scanner/extensions.lock.json
+          require_lock: "true"
           fail_on: review
       - uses: actions/upload-artifact@v4
         with:
@@ -39,3 +40,9 @@ The action reports `extension_count` and `highest_decision`. `fail_on: review`
 rejects `review`, `block`, and `incomplete`; `fail_on: block` rejects `block`
 and `incomplete`. Use `profile: deep` and `runtime: "true"` only on a hardened
 runner where the bounded runtime requirements are available.
+
+Set `require_lock: "true"` for a governed workspace. The action then fails
+before any Marketplace download if a declared extension has no reviewed version
+pin. The resulting report records lock coverage and unused lock entries, so
+teams can distinguish a reproducible reviewed set from current-release
+discovery.

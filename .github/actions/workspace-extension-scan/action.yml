@@ -9,6 +9,10 @@ inputs:
     description: Optional reviewed extension lock JSON relative to root.
     required: false
     default: .ide-scanner/extensions.lock.json
+  require_lock:
+    description: Require every declared workspace extension to have a reviewed version pin in the lock.
+    required: false
+    default: "false"
   output:
     description: Workspace scan report written by the action.
     required: false
@@ -43,6 +47,7 @@ runs:
       env:
         INPUT_ROOT: ${{ inputs.root }}
         INPUT_LOCK: ${{ inputs.lock }}
+        INPUT_REQUIRE_LOCK: ${{ inputs.require_lock }}
         INPUT_OUTPUT: ${{ inputs.output }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_RUNTIME: ${{ inputs.runtime }}
@@ -51,12 +56,14 @@ runs:
         set -euo pipefail
         case "$INPUT_PROFILE" in standard|deep) ;; *) echo "profile must be standard or deep" >&2; exit 2 ;; esac
         case "$INPUT_RUNTIME" in true|false) ;; *) echo "runtime must be true or false" >&2; exit 2 ;; esac
+        case "$INPUT_REQUIRE_LOCK" in true|false) ;; *) echo "require_lock must be true or false" >&2; exit 2 ;; esac
         case "$INPUT_FAIL_ON" in never|review|block) ;; *) echo "fail_on must be never, review, or block" >&2; exit 2 ;; esac
         if [[ "$INPUT_PROFILE" == "deep" && "$INPUT_RUNTIME" != "true" ]]; then echo "deep profile requires runtime: true" >&2; exit 2; fi
         action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
         python -m pip install --disable-pip-version-check --no-cache-dir "$action_root"
         args=(python -m ide_scanner.cli workspace --root "$INPUT_ROOT" --output "$INPUT_OUTPUT" --profile "$INPUT_PROFILE")
         if [[ -f "$INPUT_ROOT/$INPUT_LOCK" ]]; then args+=(--lock "$INPUT_LOCK"); fi
+        if [[ "$INPUT_REQUIRE_LOCK" == "true" ]]; then args+=(--require-lock); fi
         if [[ "$INPUT_RUNTIME" == "true" ]]; then args+=(--runtime); fi
         "${args[@]}"
         test -s "$INPUT_OUTPUT"
