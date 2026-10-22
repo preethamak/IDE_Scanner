@@ -231,6 +231,40 @@ class ScannerServiceTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_authenticated_requests_write_retained_privacy_minimized_audit_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs"
+            try:
+                with patch.dict(os.environ, {"IDE_SCANNER_API_TOKEN": "service-token"}):
+                    request = Request(endpoint, headers={"Authorization": "Bearer service-token", "X-Request-ID": "support-case-42"})
+                    with urlopen(request, timeout=2) as response:
+                        self.assertEqual(response.headers["X-Request-ID"], "support-case-42")
+                entries = [json.loads(line) for path in store.audit_dir.glob("*.jsonl") for line in path.read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(entries, [{"method": "GET", "path": "/v1/jobs", "request_id": "support-case-42", "status": 200, "timestamp": entries[0]["timestamp"]}])
+                self.assertNotIn("service-token", json.dumps(entries))
+                self.assertNotIn("authorization", json.dumps(entries).lower())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_audit_receipts_follow_the_same_retention_lifecycle_as_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            self.assertTrue(store.write_audit({"request_id": "support-case-42", "method": "GET", "path": "/v1/jobs", "status": 200}))
+            receipt = next(store.audit_dir.glob("*.jsonl"))
+            old = time.time() - 120
+            os.utime(receipt, (old, old))
+
+            self.assertEqual(cleanup_stale_jobs(store, max_age_seconds=60), 1)
+            self.assertFalse(receipt.exists())
+
     def test_http_report_exposes_a_stable_exact_byte_etag(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))

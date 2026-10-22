@@ -34,6 +34,20 @@ For longer retention, copy immutable report bundles to an encrypted external
 artifact store before expiry. Do not use a service-local job ID as a permanent
 evidence archive.
 
+## API audit receipts
+
+Private service API requests append one JSON Lines receipt under the local
+`audit/` data directory. A receipt records only timestamp, request ID, method,
+path, and HTTP outcome. It never records bearer tokens, request bodies, query
+strings, client IP addresses, report bodies, or webhook configuration.
+
+Callers can send a 1-128 character `X-Request-ID` containing letters, digits,
+periods, underscores, colons, or hyphens. The service returns that value (or a
+generated `req_...` value) in its response header, allowing support and release
+reviews to correlate a request with a private operator receipt. Audit files use
+the same retention lifecycle as local jobs and reports; preserve required audit
+records in the team's approved archival system before expiry.
+
 ## API token rotation
 
 The scanner service authenticates private API routes with bearer tokens. Set
