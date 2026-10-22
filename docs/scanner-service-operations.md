@@ -1,5 +1,19 @@
 # Scanner service operations
 
+## Health and readiness
+
+`GET /health` is a liveness response: a `200` means the HTTP process is
+running. `GET /readyz` is the admission signal for a load balancer or
+orchestrator. It returns `200` only when the durable jobs/reports directories
+are available, every configured worker thread is alive, and the bounded queue
+has capacity. A `503` readiness response means an instance should not receive
+another new scan; the Marketplace API still returns its documented `429` to a
+caller that reaches an at-capacity instance.
+
+The readiness payload includes configured/alive worker counts and aggregate
+queue depth only. It intentionally contains no job identities, report data,
+tokens, or webhook configuration.
+
 The private scanner service persists asynchronous job records and canonical
 reports locally. Configure these environment variables deliberately:
 

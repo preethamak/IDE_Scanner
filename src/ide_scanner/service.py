@@ -57,6 +57,12 @@ class JobStore:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
+    def readiness(self) -> dict[str, Any]:
+        """Return a non-mutating check of durable local state availability."""
+        directories = {"jobs": self.jobs_dir, "reports": self.reports_dir}
+        available = all(path.is_dir() and os.access(path, os.R_OK | os.W_OK) for path in directories.values())
+        return {"ready": available, "storage": "available" if available else "unavailable"}
+
     def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
         job, _, _ = self.create_or_reuse(extension_id, version=version, target_platform=target_platform)
         return job
@@ -300,6 +306,17 @@ class ScanWorkerPool:
         except queue.Full:
             return False
 
+    def readiness(self) -> dict[str, Any]:
+        """Describe capacity without exposing queued job identities."""
+        workers_alive = sum(thread.is_alive() for thread in self._threads)
+        queued = self._queue.qsize()
+        capacity = self._queue.maxsize
+        return {
+            "ready": workers_alive == len(self._threads) and queued < capacity,
+            "workers": {"configured": len(self._threads), "alive": workers_alive},
+            "queue": {"queued": queued, "capacity": capacity},
+        }
+
     def _worker(self) -> None:
         while True:
             job = self._queue.get()
@@ -461,6 +478,10 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if path == "/health":
             self._json(200, health_payload())
             return
+        if path == "/readyz":
+            payload = readiness_payload(self.store, self.pool)
+            self._json(200 if payload["status"] == "ready" else 503, payload)
+            return
         if path == "/v1/openapi.json":
             self._json(200, openapi_payload())
             return
@@ -618,6 +639,25 @@ def health_payload() -> dict[str, Any]:
     }
 
 
+def readiness_payload(store: JobStore, pool: ScanWorkerPool) -> dict[str, Any]:
+    """Return safe admission readiness, separate from process liveness.
+
+    Readiness is intentionally false when the bounded queue is full. This
+    allows a platform to stop sending more requests to an overloaded instance;
+    callers that already reach it still receive the explicit `429` contract.
+    """
+    storage = store.readiness()
+    workers = pool.readiness()
+    ready = bool(storage["ready"] and workers["ready"])
+    return {
+        "status": "ready" if ready else "not_ready",
+        "service_version": SERVICE_VERSION,
+        "storage": storage["storage"],
+        "workers": workers["workers"],
+        "queue": workers["queue"],
+    }
+
+
 def openapi_payload() -> dict[str, Any]:
     """Return the stable public contract for the local scanner service.
 
@@ -656,6 +696,13 @@ def openapi_payload() -> dict[str, Any]:
                 "get": {
                     "summary": "Read service health and provider availability",
                     "responses": {"200": {"description": "Service health", "content": {"application/json": {"schema": {"type": "object"}}}}},
+                },
+            },
+            "/readyz": {
+                "get": {
+                    "summary": "Read scanner service admission readiness",
+                    "description": "Returns 503 when durable state or bounded worker capacity cannot accept another scan. It exposes no job identities or secrets.",
+                    "responses": {"200": {"description": "Service can accept work", "content": {"application/json": {"schema": {"type": "object"}}}}, "503": {"description": "Service is alive but cannot accept work", "content": {"application/json": {"schema": {"type": "object"}}}}},
                 },
             },
             "/v1/openapi.json": {
