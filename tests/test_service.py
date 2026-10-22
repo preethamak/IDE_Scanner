@@ -151,6 +151,35 @@ class ScannerServiceTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_http_job_history_requires_authentication_and_redacts_request_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job.update({"idempotency_key": "private-key", "request_fingerprint": "private-request"})
+            store.write(job)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs"
+            try:
+                with patch.dict(os.environ, {"IDE_SCANNER_API_TOKEN": "service-token"}):
+                    with self.assertRaises(HTTPError) as rejected:
+                        urlopen(endpoint, timeout=2)
+                    self.assertEqual(rejected.exception.code, 401)
+                    request = Request(endpoint, headers={"Authorization": "Bearer service-token"})
+                    with urlopen(request, timeout=2) as response:
+                        payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["jobs"][0]["id"], job["id"])
+                self.assertNotIn("idempotency_key", payload["jobs"][0])
+                self.assertNotIn("request_fingerprint", payload["jobs"][0])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_readiness_is_served_without_a_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))
