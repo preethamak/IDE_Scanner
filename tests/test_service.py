@@ -46,6 +46,23 @@ class ScannerServiceTests(unittest.TestCase):
             self.assertEqual(persisted["version"], "1.2.3")
             self.assertEqual(persisted["target_platform"], "linux-x64")
 
+    def test_job_history_is_bounded_and_excludes_request_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job["idempotency_key"] = "not-for-history"
+            job["request_fingerprint"] = "not-for-history"
+            store.write(job)
+            other = store.create("other.extension")
+            self.assertTrue(store.try_fail(other["id"], "failed scan"))
+            history = store.list_summaries()
+            publisher_history = store.list_summaries(extension_id="publisher.extension")
+            self.assertEqual(publisher_history[0]["id"], job["id"])
+            self.assertNotIn("idempotency_key", publisher_history[0])
+            self.assertNotIn("request_fingerprint", publisher_history[0])
+            self.assertEqual(len(publisher_history), 1)
+            self.assertEqual(store.list_summaries(status="failed")[0]["id"], other["id"])
+
     def test_marketplace_job_writes_canonical_bundle(self) -> None:
         fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
         observed = {}
@@ -108,6 +125,7 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertIn("/v1/scans/marketplace", paths)
         self.assertIn("/v1/scans/mcp", paths)
         self.assertIn("/v1/jobs/{job_id}", paths)
+        self.assertIn("/v1/jobs", paths)
         self.assertIn("/v1/reports/{job_id}", paths)
         self.assertNotIn("security", paths["/health"]["get"])
         self.assertIn("503", paths["/readyz"]["get"]["responses"])
@@ -133,6 +151,35 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["openapi"], "3.1.0")
                 self.assertIn("/v1/scans/marketplace", payload["paths"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_http_job_history_requires_authentication_and_redacts_request_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job.update({"idempotency_key": "private-key", "request_fingerprint": "private-request"})
+            store.write(job)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs"
+            try:
+                with patch.dict(os.environ, {"IDE_SCANNER_API_TOKEN": "service-token"}):
+                    with self.assertRaises(HTTPError) as rejected:
+                        urlopen(endpoint, timeout=2)
+                    self.assertEqual(rejected.exception.code, 401)
+                    request = Request(endpoint + "?extension_id=publisher.extension&limit=1", headers={"Authorization": "Bearer service-token"})
+                    with urlopen(request, timeout=2) as response:
+                        payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["jobs"][0]["id"], job["id"])
+                self.assertNotIn("idempotency_key", payload["jobs"][0])
+                self.assertNotIn("request_fingerprint", payload["jobs"][0])
             finally:
                 server.shutdown()
                 server.server_close()
