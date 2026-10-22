@@ -19,6 +19,7 @@ from ide_scanner.service import (
     cleanup_stale_jobs,
     execute_marketplace_job,
     health_payload,
+    readiness_payload,
     maintain_store,
     openapi_payload,
     retry_failed_webhook_deliveries,
@@ -84,6 +85,17 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(health["operations"]["job_retention_seconds"], JOB_RETENTION_SECONDS)
         self.assertEqual(health["operations"]["maintenance_interval_seconds"], MAINTENANCE_INTERVAL_SECONDS)
 
+    def test_readiness_requires_storage_workers_and_queue_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            pool = ScanWorkerPool(store, max_workers=1, max_queue=1)
+            ready = readiness_payload(store, pool)
+
+            self.assertEqual(ready["status"], "ready")
+            self.assertEqual(ready["storage"], "available")
+            self.assertEqual(ready["workers"], {"configured": 1, "alive": 1})
+            self.assertEqual(ready["queue"], {"queued": 0, "capacity": 1})
+
     def test_openapi_contract_covers_public_and_authenticated_routes(self) -> None:
         contract = openapi_payload()
 
@@ -91,12 +103,14 @@ class ScannerServiceTests(unittest.TestCase):
         paths = contract["paths"]
         self.assertIn("/health", paths)
         self.assertIn("/v1/openapi.json", paths)
+        self.assertIn("/readyz", paths)
         self.assertIn("/v1/rules", paths)
         self.assertIn("/v1/scans/marketplace", paths)
         self.assertIn("/v1/scans/mcp", paths)
         self.assertIn("/v1/jobs/{job_id}", paths)
         self.assertIn("/v1/reports/{job_id}", paths)
         self.assertNotIn("security", paths["/health"]["get"])
+        self.assertIn("503", paths["/readyz"]["get"]["responses"])
         self.assertEqual(paths["/v1/scans/marketplace"]["post"]["security"], [{"bearerAuth": []}])
         self.assertIn("429", paths["/v1/scans/marketplace"]["post"]["responses"])
         self.assertIn("409", paths["/v1/scans/marketplace"]["post"]["responses"])
@@ -119,6 +133,25 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["openapi"], "3.1.0")
                 self.assertIn("/v1/scans/marketplace", payload["paths"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_readiness_is_served_without_a_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/readyz", timeout=2) as response:
+                    payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["status"], "ready")
+                self.assertNotIn("job", json.dumps(payload))
             finally:
                 server.shutdown()
                 server.server_close()
