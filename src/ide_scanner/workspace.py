@@ -55,11 +55,28 @@ def load_workspace_lock(path: Path | None) -> dict[str, dict[str, str]]:
     return locked
 
 
+def workspace_lock_coverage(discovery: dict[str, Any], locked: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """Describe whether declared workspace extensions have reviewed pins."""
+    declared = set(discovery.get("extensions") or [])
+    pinned = sorted(extension_id for extension_id in declared if extension_id in locked)
+    unpinned = sorted(declared.difference(pinned))
+    unused = sorted(set(locked).difference(declared))
+    return {
+        "status": "complete" if not unpinned else "incomplete",
+        "declared_count": len(declared),
+        "pinned_count": len(pinned),
+        "pinned_extensions": pinned,
+        "unpinned_extensions": unpinned,
+        "unused_lock_extensions": unused,
+    }
+
+
 def scan_workspace_extensions(
     root: Path,
     *,
     lock_path: Path | None = None,
     profile: str = "standard",
+    require_lock: bool = False,
     dynamic_runtime: bool = False,
     runtime_timeout_seconds: int = 15,
     scanner: Callable[..., dict[str, Any]] = scan_targets,
@@ -70,6 +87,10 @@ def scan_workspace_extensions(
         raise ValueError("Workspace deep profile requires runtime execution")
     discovery = discover_workspace_extensions(root)
     locked = load_workspace_lock(lock_path)
+    lock_coverage = workspace_lock_coverage(discovery, locked)
+    if require_lock and lock_coverage["unpinned_extensions"]:
+        missing = ", ".join(lock_coverage["unpinned_extensions"])
+        raise ValueError(f"Workspace lock is incomplete; missing pinned version for: {missing}")
     records: list[dict[str, Any]] = []
     for extension_id in discovery["extensions"]:
         pin = locked.get(extension_id, {})
@@ -84,7 +105,15 @@ def scan_workspace_extensions(
             runtime_timeout_seconds=runtime_timeout_seconds,
         )
         records.append({"extension_id": extension_id, "declared_in": discovery["sources"][extension_id], "requested_version": pin.get("version") or None, "requested_target_platform": pin.get("target_platform") or None, "scan": report})
-    return {"schema_version": "guardrails.workspace-extension-scan.v1", "workspace": discovery["workspace"], "lock_path": str(lock_path) if lock_path else None, "profile": profile, "recommendation_count": len(records), "extensions": records}
+    return {
+        "schema_version": "guardrails.workspace-extension-scan.v1",
+        "workspace": discovery["workspace"],
+        "lock_path": str(lock_path) if lock_path else None,
+        "lock_coverage": lock_coverage,
+        "profile": profile,
+        "recommendation_count": len(records),
+        "extensions": records,
+    }
 
 
 def _extension_values(value: Any) -> set[str]:

@@ -15,6 +15,19 @@ declaration files, requested release coordinates, and full scanner evidence.
 Use the GitHub extension policy action for version-and-hash approval enforcement
 in pull requests.
 
+Every workspace report includes `lock_coverage`: declared and pinned counts,
+unpinned recommendations, and lock entries that no longer match the workspace.
+For an approval or release workflow, require a complete reviewed set instead of
+silently scanning whichever current release the Marketplace returns:
+
+```bash
+python -m ide_scanner.cli workspace --root . --lock .ide-scanner/extensions.lock.json --require-lock --output guardrails-workspace.json
+```
+
+`--require-lock` fails before any Marketplace download if a declared extension
+lacks a version pin. It does not fail merely because a lock has an unused entry;
+the report records that drift for cleanup and review.
+
 For publication-grade evidence on a hardened runner, opt into the complete
 provider and bounded runtime path explicitly:
 
