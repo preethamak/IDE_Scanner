@@ -33,7 +33,7 @@ inputs:
     required: false
     default: guardrails-marketplace-report.json
   fail-on:
-    description: Failure threshold: never, review, or block.
+    description: "Failure threshold: never, review, or block."
     required: false
     default: review
 outputs:
@@ -44,7 +44,7 @@ outputs:
     description: Path of the authenticated canonical report bundle.
     value: ${{ steps.submit.outputs.report_file }}
   decision:
-    description: Exact artifact decision from the report: allow, review, block, or incomplete.
+    description: "Exact artifact decision from the report: allow, review, block, or incomplete."
     value: ${{ steps.policy.outputs.decision }}
 runs:
   using: composite
