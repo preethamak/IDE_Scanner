@@ -6,6 +6,7 @@ on:
       - ".github/actions/workspace-extension-scan/**"
       - ".github/workflows/github-workspace-scan-smoke.yml"
       - "fixtures/workspace-empty/**"
+      - "fixtures/workspace-unpinned/**"
       - "src/ide_scanner/workspace.py"
       - "src/ide_scanner/cli.py"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - ".github/actions/workspace-extension-scan/**"
       - ".github/workflows/github-workspace-scan-smoke.yml"
       - "fixtures/workspace-empty/**"
+      - "fixtures/workspace-unpinned/**"
       - "src/ide_scanner/workspace.py"
       - "src/ide_scanner/cli.py"
 
@@ -46,3 +48,20 @@ jobs:
           assert os.environ["EXTENSION_COUNT"] == "0"
           assert os.environ["HIGHEST_DECISION"] == "allow"
           PY
+  rejects-unpinned-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: guardrails
+        continue-on-error: true
+        uses: ./.github/actions/workspace-extension-scan
+        with:
+          root: fixtures/workspace-unpinned
+          require_lock: "true"
+          output: guardrails-unpinned-workspace.json
+      - name: Verify reviewed-lock enforcement stopped before scanning
+        env:
+          OUTCOME: ${{ steps.guardrails.outcome }}
+        run: |
+          test "$OUTCOME" = "failure"
+          test ! -e guardrails-unpinned-workspace.json
