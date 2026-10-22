@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from ide_scanner.cli import main
-from ide_scanner.workspace import discover_workspace_extensions, load_workspace_lock, scan_workspace_extensions, workspace_lock_coverage
+from ide_scanner.workspace import build_workspace_lock, discover_workspace_extensions, load_workspace_lock, scan_workspace_extensions, workspace_lock_coverage
 
 
 class WorkspaceExtensionScanTests(unittest.TestCase):
@@ -56,6 +56,52 @@ class WorkspaceExtensionScanTests(unittest.TestCase):
         self.assertEqual(coverage["pinned_extensions"], ["ms-python.python"])
         self.assertEqual(coverage["unpinned_extensions"], ["redhat.java"])
         self.assertEqual(coverage["unused_lock_extensions"], ["unused.publisher"])
+
+    def test_build_lock_uses_only_completed_exact_workspace_evidence(self) -> None:
+        report = {
+            "schema_version": "guardrails.workspace-extension-scan.v1",
+            "extensions": [{
+                "extension_id": "ms-python.python",
+                "scan": {"extensions": [{
+                    "extension_id": "ms-python.python",
+                    "version": "2026.1.0",
+                    "analysis_status": "complete",
+                    "decision": "review",
+                    "artifact_identity": {"target_platform": "linux-x64"},
+                }]},
+            }],
+        }
+        lock = build_workspace_lock(report)
+        self.assertEqual(lock["schema_version"], "guardrails.workspace-extension-lock.v1")
+        self.assertEqual(lock["extensions"], {"ms-python.python": {"version": "2026.1.0", "target_platform": "linux-x64"}})
+
+    def test_build_lock_rejects_incomplete_evidence(self) -> None:
+        report = {
+            "schema_version": "guardrails.workspace-extension-scan.v1",
+            "extensions": [{
+                "extension_id": "ms-python.python",
+                "scan": {"extensions": [{
+                    "extension_id": "ms-python.python",
+                    "version": "2026.1.0",
+                    "analysis_status": "incomplete",
+                    "decision": "incomplete",
+                }]},
+            }],
+        }
+        with self.assertRaisesRegex(ValueError, "evidence is incomplete"):
+            build_workspace_lock(report)
+
+    def test_cli_writes_lock_from_completed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report_path = root / "workspace.json"
+            output = root / "extensions.lock.json"
+            report_path.write_text(json.dumps({
+                "schema_version": "guardrails.workspace-extension-scan.v1",
+                "extensions": [{"extension_id": "ms-python.python", "scan": {"extensions": [{"extension_id": "ms-python.python", "version": "2026.1.0", "analysis_status": "complete", "decision": "allow", "artifact_identity": {}}]}}],
+            }))
+            self.assertEqual(main(["workspace-lock", "--report", str(report_path), "--output", str(output)]), 0)
+            self.assertEqual(json.loads(output.read_text())["extensions"]["ms-python.python"]["version"], "2026.1.0")
 
     def test_require_lock_rejects_unreviewed_workspace_extensions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     workspace.add_argument("--runtime-timeout", type=int, default=15, help="Maximum seconds per controlled runtime action (1-300).")
     workspace.add_argument("--out", "--output", dest="output", help="Write the workspace scan report to this file.")
 
+    workspace_lock = subparsers.add_parser("workspace-lock", help="Generate a reviewed workspace lock from completed workspace scan evidence.")
+    workspace_lock.add_argument("--report", required=True, help="Workspace scan JSON produced by the workspace command.")
+    workspace_lock.add_argument("--out", "--output", dest="output", required=True, help="Write the reviewed workspace lock JSON.")
+
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
     inventory.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to inspect.")
@@ -181,6 +185,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "workspace-lock":
+        from .workspace import write_workspace_lock
+
+        try:
+            report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("Workspace report must be a JSON object")
+            write_workspace_lock(report, Path(args.output))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        return 0
     if args.command == "workspace":
         from .workspace import scan_workspace_extensions
 
