@@ -120,6 +120,19 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
+    def list_summaries(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """List bounded, non-secret job metadata for evidence discovery."""
+        rows: list[dict[str, Any]] = []
+        for path in self.jobs_dir.glob("job_*.json"):
+            item = self._read_json_locked(path)
+            if not isinstance(item, dict):
+                continue
+            rows.append({key: item.get(key) for key in (
+                "id", "status", "stage", "extension_id", "version", "target_platform",
+                "created_at", "updated_at", "report_ref", "error",
+            )})
+        return sorted(rows, key=lambda item: str(item.get("updated_at") or ""), reverse=True)[:max(1, min(limit, 100))]
+
     def write(self, job: dict[str, Any]) -> None:
         job["updated_at"] = _now()
         path = self.jobs_dir / f"{job['id']}.json"
@@ -491,6 +504,9 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"error": "Scanner service authorization failed."})
             return
+        if path == "/v1/jobs":
+            self._json(200, {"jobs": self.store.list_summaries()})
+            return
         if path.startswith("/v1/jobs/"):
             job = self.store.get(path.rsplit("/", 1)[-1])
             self._json(200, job) if job else self._json(404, {"error": "Scan job not found."})
@@ -747,6 +763,14 @@ def openapi_payload() -> dict[str, Any]:
                     "security": [{"bearerAuth": []}],
                     "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "description": "MCP assessment input. The service enforces a bounded request size."}}}},
                     "responses": {"200": {"description": "Assessment result", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed or oversized input", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "422": {"description": "Assessment could not complete", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/jobs": {
+                "get": {
+                    "summary": "List retained Marketplace scan job metadata",
+                    "description": "Returns at most 100 newest job summaries. Report bodies and request idempotency data are not included.",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {"200": {"description": "Bounded job history", "content": {"application/json": {"schema": {"type": "object"}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
                 },
             },
             "/v1/jobs/{job_id}": {

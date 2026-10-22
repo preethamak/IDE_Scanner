@@ -46,6 +46,18 @@ class ScannerServiceTests(unittest.TestCase):
             self.assertEqual(persisted["version"], "1.2.3")
             self.assertEqual(persisted["target_platform"], "linux-x64")
 
+    def test_job_history_is_bounded_and_excludes_request_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            job = store.create("publisher.extension")
+            job["idempotency_key"] = "not-for-history"
+            job["request_fingerprint"] = "not-for-history"
+            store.write(job)
+            history = store.list_summaries()
+            self.assertEqual(history[0]["id"], job["id"])
+            self.assertNotIn("idempotency_key", history[0])
+            self.assertNotIn("request_fingerprint", history[0])
+
     def test_marketplace_job_writes_canonical_bundle(self) -> None:
         fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
         observed = {}
@@ -108,6 +120,7 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertIn("/v1/scans/marketplace", paths)
         self.assertIn("/v1/scans/mcp", paths)
         self.assertIn("/v1/jobs/{job_id}", paths)
+        self.assertIn("/v1/jobs", paths)
         self.assertIn("/v1/reports/{job_id}", paths)
         self.assertNotIn("security", paths["/health"]["get"])
         self.assertIn("503", paths["/readyz"]["get"]["responses"])
