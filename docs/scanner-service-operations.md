@@ -33,3 +33,20 @@ settings under `operations`.
 For longer retention, copy immutable report bundles to an encrypted external
 artifact store before expiry. Do not use a service-local job ID as a permanent
 evidence archive.
+
+## API token rotation
+
+The scanner service authenticates private API routes with bearer tokens. Set
+`IDE_SCANNER_API_TOKEN` for the backwards-compatible single-token setup. For a
+rotation, set `IDE_SCANNER_API_TOKENS` to a comma-separated set of active
+tokens; the service accepts the union of the two variables. It never returns
+the configured values in health, readiness, job, or error responses.
+
+1. Mint a new high-entropy secret in the deployment secret manager.
+2. Deploy the service with the old and new values in `IDE_SCANNER_API_TOKENS`.
+3. Move each trusted caller to the new token and verify authenticated requests.
+4. Remove the old value, then deploy once more.
+
+Do not send more than a short overlap set and do not place tokens in source,
+workflow logs, job idempotency keys, or webhook configuration. A non-loopback
+bind still refuses to start unless either variable yields at least one token.
