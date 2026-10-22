@@ -41,7 +41,11 @@ jobs:
 - `review`: fail for `review`, `block`, or `incomplete`.
 - `block`: fail for `block` or `incomplete`.
 
-The action outputs `job-id`, `report-file`, and `decision`. Supply a stable
+The action outputs `job-id`, `report-file`, `decision`, and `report-sha256`.
+When the scanner service exposes report evidence identities, the action verifies
+the returned `ETag` and job digest against the exact report bytes before it
+returns a decision. Record `report-sha256` with the release review or downstream
+attestation. Supply a stable
 `idempotency-key` when a workflow may retry the same release; otherwise the
 default key is scoped to the GitHub run and job. The scanner service controls
 the webhook destination and report retention. This action never supplies a

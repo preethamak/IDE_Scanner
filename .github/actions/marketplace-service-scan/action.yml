@@ -46,6 +46,9 @@ outputs:
   decision:
     description: "Exact artifact decision from the report: allow, review, block, or incomplete."
     value: ${{ steps.policy.outputs.decision }}
+  report-sha256:
+    description: SHA-256 identity of the exact report bytes retrieved from GuardRails when the service provides it.
+    value: ${{ steps.submit.outputs.report_sha256 }}
 runs:
   using: composite
   steps:

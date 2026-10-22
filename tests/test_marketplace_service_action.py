@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import importlib.util
 import json
 import tempfile
@@ -17,6 +18,7 @@ SPEC.loader.exec_module(marketplace_service_scan)
 
 class _ServiceHandler(BaseHTTPRequestHandler):
     requests = []
+    mismatched_etag = False
 
     def do_POST(self):  # noqa: N802
         self.__class__.requests.append((
@@ -29,21 +31,26 @@ class _ServiceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if self.path == "/v1/jobs/job_" + "a" * 32:
-            self._json(200, {"id": "job_" + "a" * 32, "status": "complete", "report_ref": "/v1/reports/job_" + "a" * 32})
+            report = {"leaderboard": {"extensions": [{"decision": "review"}]}}
+            body = json.dumps(report).encode("utf-8")
+            self._json(200, {"id": "job_" + "a" * 32, "status": "complete", "report_ref": "/v1/reports/job_" + "a" * 32, "report_sha256": hashlib.sha256(body).hexdigest()})
             return
         if self.path == "/v1/reports/job_" + "a" * 32:
-            self._json(200, {"leaderboard": {"extensions": [{"decision": "review"}]}})
+            self._json(200, {"leaderboard": {"extensions": [{"decision": "review"}]}}, etag=True, mismatch_etag=self.__class__.mismatched_etag)
             return
         self._json(404, {"error": "not found"})
 
     def log_message(self, *_args):
         return
 
-    def _json(self, status, value):
+    def _json(self, status, value, *, etag=False, mismatch_etag=False):
         body = json.dumps(value).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if etag:
+            digest = "0" * 64 if mismatch_etag else hashlib.sha256(body).hexdigest()
+            self.send_header("ETag", f'"sha256-{digest}"')
         self.end_headers()
         self.wfile.write(body)
 
@@ -51,6 +58,7 @@ class _ServiceHandler(BaseHTTPRequestHandler):
 class MarketplaceServiceActionTests(unittest.TestCase):
     def setUp(self):
         _ServiceHandler.requests = []
+        _ServiceHandler.mismatched_etag = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _ServiceHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -77,6 +85,7 @@ class MarketplaceServiceActionTests(unittest.TestCase):
             result = marketplace_service_scan.run(args)
 
             self.assertEqual(result["job_id"], "job_" + "a" * 32)
+            self.assertEqual(result["report_sha256"], hashlib.sha256(json.dumps({"leaderboard": {"extensions": [{"decision": "review"}]}}).encode("utf-8")).hexdigest())
             self.assertEqual(json.loads(out.read_text())["leaderboard"]["extensions"][0]["decision"], "review")
             path, authorization, key, payload = _ServiceHandler.requests[0]
             self.assertEqual(path, "/v1/scans/marketplace")
@@ -89,3 +98,20 @@ class MarketplaceServiceActionTests(unittest.TestCase):
             marketplace_service_scan._service_base("https://token@example.com")
         with self.assertRaises(ValueError):
             marketplace_service_scan._service_base("https://scanner.example/v1")
+
+    def test_rejects_a_report_with_an_invalid_evidence_etag(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _ServiceHandler.mismatched_etag = True
+            args = argparse.Namespace(
+                service_url=f"http://127.0.0.1:{self.server.server_port}",
+                token="test-token",
+                extension_id="publisher.extension",
+                version="1.2.3",
+                target_platform="",
+                idempotency_key="release-1",
+                poll_interval=0.01,
+                timeout=1,
+                out=Path(temp) / "report.json",
+            )
+            with self.assertRaisesRegex(RuntimeError, "ETag"):
+                marketplace_service_scan.run(args)
