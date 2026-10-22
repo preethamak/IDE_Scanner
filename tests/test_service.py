@@ -17,6 +17,7 @@ from ide_scanner.service import (
     ScanWorkerPool,
     ScannerServiceHandler,
     cleanup_stale_jobs,
+    configured_api_tokens,
     execute_marketplace_job,
     health_payload,
     readiness_payload,
@@ -28,6 +29,14 @@ from ide_scanner.service import (
 
 
 class ScannerServiceTests(unittest.TestCase):
+    def test_configured_api_tokens_combines_compatible_and_rotation_settings(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"IDE_SCANNER_API_TOKEN": "current", "IDE_SCANNER_API_TOKENS": " previous , current, , next "},
+            clear=True,
+        ):
+            self.assertEqual(configured_api_tokens(), ("current", "previous", "next"))
+
     def test_job_store_persists_jobs_and_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))
@@ -180,6 +189,28 @@ class ScannerServiceTests(unittest.TestCase):
                 self.assertEqual(payload["jobs"][0]["id"], job["id"])
                 self.assertNotIn("idempotency_key", payload["jobs"][0])
                 self.assertNotIn("request_fingerprint", payload["jobs"][0])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_http_accepts_each_configured_rotation_token_and_rejects_other_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs"
+            try:
+                with patch.dict(os.environ, {"IDE_SCANNER_API_TOKENS": "previous,current"}, clear=True):
+                    for token in ("previous", "current"):
+                        with urlopen(Request(endpoint, headers={"Authorization": f"Bearer {token}"}), timeout=2) as response:
+                            self.assertEqual(response.status, 200)
+                    with self.assertRaises(HTTPError) as rejected:
+                        urlopen(Request(endpoint, headers={"Authorization": "Bearer invalid"}), timeout=2)
+                    self.assertEqual(rejected.exception.code, 401)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -473,7 +504,7 @@ class ScanWorkerPoolTests(unittest.TestCase):
 class ServeSecureDefaultTests(unittest.TestCase):
     def test_refuses_public_bind_without_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            env = {k: v for k, v in os.environ.items() if k not in {"IDE_SCANNER_API_TOKEN", "IDE_SCANNER_ALLOW_INSECURE_BIND"}}
+            env = {k: v for k, v in os.environ.items() if k not in {"IDE_SCANNER_API_TOKEN", "IDE_SCANNER_API_TOKENS", "IDE_SCANNER_ALLOW_INSECURE_BIND"}}
             with patch.dict(os.environ, env, clear=True):
                 with self.assertRaises(SystemExit):
                     serve(host="0.0.0.0", port=8790, data_dir=Path(temp))

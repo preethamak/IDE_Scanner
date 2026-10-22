@@ -29,6 +29,17 @@ MARKETPLACE_ID = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$")
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
+def configured_api_tokens() -> tuple[str, ...]:
+    """Return active bearer credentials without exposing their values.
+
+    ``IDE_SCANNER_API_TOKEN`` remains the backwards-compatible single-token
+    setting. ``IDE_SCANNER_API_TOKENS`` is a comma-separated overlap set for a
+    controlled rotation. Empty entries, whitespace, and duplicates are ignored.
+    """
+    values = (os.environ.get("IDE_SCANNER_API_TOKEN", ""), *os.environ.get("IDE_SCANNER_API_TOKENS", "").split(","))
+    return tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
@@ -634,11 +645,16 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         return value if isinstance(value, dict) else {}
 
     def _authorized(self) -> bool:
-        token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
-        if not token:
+        tokens = configured_api_tokens()
+        if not tokens:
             return True
         supplied = self.headers.get("authorization", "")
-        return hmac.compare_digest(supplied, f"Bearer {token}")
+        # Evaluate every candidate to avoid revealing a matching token's
+        # position within a short rotation-overlap set.
+        matched = False
+        for token in tokens:
+            matched = hmac.compare_digest(supplied, f"Bearer {token}") or matched
+        return matched
 
     def _json(self, status: int, payload: Any, *, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -832,12 +848,12 @@ def openapi_payload() -> dict[str, Any]:
 
 def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DATA_DIR) -> None:
     configured_webhook()
-    token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
+    tokens = configured_api_tokens()
     non_loopback = host not in {"127.0.0.1", "::1", "localhost"}
-    if non_loopback and not token:
+    if non_loopback and not tokens:
         if os.environ.get("IDE_SCANNER_ALLOW_INSECURE_BIND") != "1":
             raise SystemExit(
-                f"Refusing to bind {host}:{port} without IDE_SCANNER_API_TOKEN. "
+                f"Refusing to bind {host}:{port} without IDE_SCANNER_API_TOKEN or IDE_SCANNER_API_TOKENS. "
                 "Set a token, bind to 127.0.0.1, or explicitly set "
                 "IDE_SCANNER_ALLOW_INSECURE_BIND=1 for a trusted local network only."
             )
