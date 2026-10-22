@@ -4,10 +4,20 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.24-policy-v3-calibration.43-runtime-local-ipc"
+RULESET_VERSION = "2026.10.22-policy-v3-extension-relationships"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
+    "declared-extension-relationships": {
+        "title": "Declared extension installation relationships",
+        "category": "supply-chain",
+        "evidence_class": "capability",
+        "default_severity": "INFO",
+        "description": "The published manifest declares extension packs or dependencies that the IDE can install alongside the reviewed artifact.",
+        "recommendation": "Review each declared related extension as its own release. Manifest references are identifiers, not version-pinned evidence of a reviewed artifact.",
+        "false_positive_notes": "A declared relationship does not establish malicious behavior or a vulnerability; it identifies an install-time trust boundary that needs separate release evidence.",
+        "benchmark_tags": ["supply-chain", "extension-pack", "manifest"],
+    },
     "untrusted-workspace-input-to-process": {
         "title": "Workspace input reaches process execution",
         "category": "execution",
