@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlsplit
 
 from .artifact_store import TARGET_PLATFORM_RE
 from .report_bundle import build_report_bundle
@@ -120,12 +121,16 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
-    def list_summaries(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_summaries(self, *, extension_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """List bounded, non-secret job metadata for evidence discovery."""
         rows: list[dict[str, Any]] = []
         for path in self.jobs_dir.glob("job_*.json"):
             item = self._read_json_locked(path)
             if not isinstance(item, dict):
+                continue
+            if extension_id and item.get("extension_id") != extension_id:
+                continue
+            if status and item.get("status") != status:
                 continue
             rows.append({key: item.get(key) for key in (
                 "id", "status", "stage", "extension_id", "version", "target_platform",
@@ -487,7 +492,8 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
+        parsed = urlsplit(self.path)
+        path = parsed.path
         if path == "/health":
             self._json(200, health_payload())
             return
@@ -505,7 +511,25 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Scanner service authorization failed."})
             return
         if path == "/v1/jobs":
-            self._json(200, {"jobs": self.store.list_summaries()})
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            extension_id = _one_query_value(query, "extension_id")
+            status = _one_query_value(query, "status")
+            limit_value = _one_query_value(query, "limit")
+            if extension_id and not MARKETPLACE_ID.fullmatch(extension_id):
+                self._json(400, {"error": "extension_id must use publisher.extension format."})
+                return
+            if status and status not in {"queued", "running", "complete", "failed", "cancelled"}:
+                self._json(400, {"error": "status is invalid."})
+                return
+            try:
+                limit = int(limit_value or "100")
+            except ValueError:
+                self._json(400, {"error": "limit must be an integer from 1 through 100."})
+                return
+            if not 1 <= limit <= 100:
+                self._json(400, {"error": "limit must be an integer from 1 through 100."})
+                return
+            self._json(200, {"jobs": self.store.list_summaries(extension_id=extension_id or None, status=status or None, limit=limit)})
             return
         if path.startswith("/v1/jobs/"):
             job = self.store.get(path.rsplit("/", 1)[-1])
@@ -770,6 +794,11 @@ def openapi_payload() -> dict[str, Any]:
                     "summary": "List retained Marketplace scan job metadata",
                     "description": "Returns at most 100 newest job summaries. Report bodies and request idempotency data are not included.",
                     "security": [{"bearerAuth": []}],
+                    "parameters": [
+                        {"in": "query", "name": "extension_id", "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"}},
+                        {"in": "query", "name": "status", "schema": {"type": "string", "enum": ["queued", "running", "complete", "failed", "cancelled"]}},
+                        {"in": "query", "name": "limit", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100}},
+                    ],
                     "responses": {"200": {"description": "Bounded job history", "content": {"application/json": {"schema": {"type": "object"}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
                 },
             },
@@ -837,6 +866,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _one_query_value(query: dict[str, list[str]], name: str) -> str:
+    values = query.get(name) or []
+    return values[0].strip() if len(values) == 1 else ""
 
 
 def _request_fingerprint(extension_id: str, version: str | None, target_platform: str | None) -> str:

@@ -53,10 +53,15 @@ class ScannerServiceTests(unittest.TestCase):
             job["idempotency_key"] = "not-for-history"
             job["request_fingerprint"] = "not-for-history"
             store.write(job)
+            other = store.create("other.extension")
+            self.assertTrue(store.try_fail(other["id"], "failed scan"))
             history = store.list_summaries()
-            self.assertEqual(history[0]["id"], job["id"])
-            self.assertNotIn("idempotency_key", history[0])
-            self.assertNotIn("request_fingerprint", history[0])
+            publisher_history = store.list_summaries(extension_id="publisher.extension")
+            self.assertEqual(publisher_history[0]["id"], job["id"])
+            self.assertNotIn("idempotency_key", publisher_history[0])
+            self.assertNotIn("request_fingerprint", publisher_history[0])
+            self.assertEqual(len(publisher_history), 1)
+            self.assertEqual(store.list_summaries(status="failed")[0]["id"], other["id"])
 
     def test_marketplace_job_writes_canonical_bundle(self) -> None:
         fixture = Path(__file__).resolve().parents[1] / "fixtures" / "benign-formatter"
@@ -168,7 +173,7 @@ class ScannerServiceTests(unittest.TestCase):
                     with self.assertRaises(HTTPError) as rejected:
                         urlopen(endpoint, timeout=2)
                     self.assertEqual(rejected.exception.code, 401)
-                    request = Request(endpoint, headers={"Authorization": "Bearer service-token"})
+                    request = Request(endpoint + "?extension_id=publisher.extension&limit=1", headers={"Authorization": "Bearer service-token"})
                     with urlopen(request, timeout=2) as response:
                         payload = json.loads(response.read())
                 self.assertEqual(response.status, 200)
