@@ -1,0 +1,57 @@
+name: GuardRails Marketplace service action smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/marketplace-service-scan/**"
+      - ".github/test-support/marketplace_service_stub.py"
+      - ".github/workflows/marketplace-service-action-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start authenticated deterministic service fixture
+        run: |
+          python .github/test-support/marketplace_service_stub.py --port 8877 > "$RUNNER_TEMP/marketplace-service.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/marketplace-service.pid"
+          for _ in $(seq 1 20); do
+            if curl --silent --output /dev/null http://127.0.0.1:8877/health; then
+              exit 0
+            fi
+            sleep 0.1
+          done
+          cat "$RUNNER_TEMP/marketplace-service.log"
+          exit 1
+      - id: scan
+        uses: ./.github/actions/marketplace-service-scan
+        with:
+          service-url: http://127.0.0.1:8877
+          token: test-token
+          extension-id: publisher.extension
+          version: 1.2.3
+          target-platform: linux-x64
+          idempotency-key: marketplace-action-smoke
+          poll-interval-seconds: "1"
+          timeout-seconds: "30"
+          report-file: ${{ runner.temp }}/marketplace-service-report.json
+          fail-on: block
+      - name: Verify action outputs and report bundle
+        env:
+          JOB_ID: ${{ steps.scan.outputs.job-id }}
+          DECISION: ${{ steps.scan.outputs.decision }}
+          REPORT_FILE: ${{ steps.scan.outputs.report-file }}
+        run: |
+          test "$JOB_ID" = "job_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          test "$DECISION" = "review"
+          test -s "$REPORT_FILE"
+          python -c 'import json, os; assert json.load(open(os.environ["REPORT_FILE"]))["leaderboard"]["extensions"][0]["decision"] == "review"'
