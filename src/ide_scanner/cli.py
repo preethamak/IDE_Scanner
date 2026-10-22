@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace = subparsers.add_parser("workspace", help="Scan extensions recommended by a VS Code workspace.")
     workspace.add_argument("--root", default=".", help="Workspace root containing VS Code, Dev Container, or .code-workspace configuration.")
     workspace.add_argument("--lock", help="Optional reviewed extension lock JSON; pins Marketplace version and target platform per extension.")
+    workspace.add_argument("--require-lock", action="store_true", help="Fail when any declared workspace extension lacks a reviewed version pin in --lock.")
     workspace.add_argument("--profile", choices=["standard", "deep"], default="standard", help="standard performs static analysis; deep requires --runtime and complete required providers.")
     workspace.add_argument("--runtime", action="store_true", help="Run each eligible extension in the bounded runtime pass. Required for --profile deep.")
     workspace.add_argument("--runtime-timeout", type=int, default=15, help="Maximum seconds per controlled runtime action (1-300).")
@@ -187,16 +188,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("workspace --profile deep requires --runtime")
         if not 1 <= args.runtime_timeout <= 300:
             parser.error("workspace --runtime-timeout must be between 1 and 300 seconds")
-        _emit(
-            scan_workspace_extensions(
+        try:
+            report = scan_workspace_extensions(
                 Path(args.root),
                 lock_path=Path(args.lock) if args.lock else None,
                 profile=args.profile,
+                require_lock=args.require_lock,
                 dynamic_runtime=args.runtime,
                 runtime_timeout_seconds=args.runtime_timeout,
-            ),
-            args.output,
-        )
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        _emit(report, args.output)
         return 0
     if args.command == "scan":
         if args.version and len(args.extension_id) != 1:

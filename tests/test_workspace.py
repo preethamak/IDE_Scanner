@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ide_scanner.workspace import discover_workspace_extensions, load_workspace_lock, scan_workspace_extensions
+from ide_scanner.cli import main
+from ide_scanner.workspace import discover_workspace_extensions, load_workspace_lock, scan_workspace_extensions, workspace_lock_coverage
 
 
 class WorkspaceExtensionScanTests(unittest.TestCase):
@@ -39,6 +40,39 @@ class WorkspaceExtensionScanTests(unittest.TestCase):
             self.assertIsNone(calls[1]["marketplace_version"])
             self.assertIsNone(calls[0]["required_providers"])
             self.assertEqual(report["extensions"][0]["declared_in"], [".vscode/extensions.json"])
+            self.assertEqual(report["lock_coverage"]["status"], "incomplete")
+            self.assertEqual(report["lock_coverage"]["unpinned_extensions"], ["redhat.java"])
+
+    def test_lock_coverage_makes_missing_and_unused_pins_explicit(self) -> None:
+        discovery = {"extensions": ["ms-python.python", "redhat.java"]}
+        coverage = workspace_lock_coverage(
+            discovery,
+            {
+                "ms-python.python": {"version": "2026.1.0"},
+                "unused.publisher": {"version": "1.0.0"},
+            },
+        )
+        self.assertEqual(coverage["status"], "incomplete")
+        self.assertEqual(coverage["pinned_extensions"], ["ms-python.python"])
+        self.assertEqual(coverage["unpinned_extensions"], ["redhat.java"])
+        self.assertEqual(coverage["unused_lock_extensions"], ["unused.publisher"])
+
+    def test_require_lock_rejects_unreviewed_workspace_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".vscode").mkdir()
+            (root / ".vscode" / "extensions.json").write_text('{"recommendations":["ms-python.python"]}')
+            with self.assertRaisesRegex(ValueError, "missing pinned version"):
+                scan_workspace_extensions(root, require_lock=True)
+
+    def test_cli_require_lock_fails_before_any_marketplace_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".vscode").mkdir()
+            (root / ".vscode" / "extensions.json").write_text('{"recommendations":["ms-python.python"]}')
+            with self.assertRaises(SystemExit) as failure:
+                main(["workspace", "--root", str(root), "--require-lock"])
+            self.assertEqual(failure.exception.code, 2)
 
     def test_deep_workspace_profile_requires_runtime_and_all_required_providers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
