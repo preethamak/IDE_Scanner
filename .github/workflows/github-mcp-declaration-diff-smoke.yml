@@ -1,0 +1,52 @@
+name: GuardRails MCP declaration-diff action smoke
+
+on:
+  push:
+    paths:
+      - ".github/actions/mcp-declaration-diff/**"
+      - ".github/workflows/github-mcp-declaration-diff-smoke.yml"
+      - "fixtures/mcp-declaration-*.json"
+      - "src/ide_scanner/cli.py"
+      - "src/ide_scanner/mcp/declaration_diff.py"
+      - "tests/test_mcp_declaration_diff*.py"
+  pull_request:
+    paths:
+      - ".github/actions/mcp-declaration-diff/**"
+      - ".github/workflows/github-mcp-declaration-diff-smoke.yml"
+      - "fixtures/mcp-declaration-*.json"
+      - "src/ide_scanner/cli.py"
+      - "src/ide_scanner/mcp/declaration_diff.py"
+      - "tests/test_mcp_declaration_diff*.py"
+
+permissions:
+  contents: read
+
+jobs:
+  compare-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: guardrails
+        uses: ./.github/actions/mcp-declaration-diff
+        with:
+          before: fixtures/mcp-declaration-before.json
+          after: fixtures/mcp-declaration-after.json
+          output: guardrails-mcp-declaration-diff.json
+          fail-on-drift: "false"
+      - name: Verify drift artifact and action outputs
+        env:
+          CHANGED_TOOL_COUNT: ${{ steps.guardrails.outputs.changed_tool_count }}
+          DRIFT_DETECTED: ${{ steps.guardrails.outputs.drift_detected }}
+          REPORT_FILE: ${{ steps.guardrails.outputs.report_file }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          report = json.load(open(os.environ["REPORT_FILE"], encoding="utf-8"))
+          assert report["schema_version"] == "guardrails.mcp-declaration-diff.v1"
+          assert report["drift_detected"] is True
+          assert os.environ["DRIFT_DETECTED"] == "true"
+          assert os.environ["CHANGED_TOOL_COUNT"] == "1"
+          assert report["changed"][0]["name"] == "lookup_customer"
+          PY

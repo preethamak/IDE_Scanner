@@ -1,0 +1,11 @@
+{
+  "schema_version": "guardrails.mcp-risk-report.v1",
+  "tools": [
+    {
+      "name": "lookup_customer",
+      "declaration": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ]
+}
