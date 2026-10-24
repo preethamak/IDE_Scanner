@@ -7,6 +7,7 @@ import re
 import zipfile
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 from .build_identity import scanner_build
@@ -18,6 +19,9 @@ from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommen
 from .rule_registry import rules_json
 
 SCHEMA_VERSION = "2.3"
+MAX_REPORT_BUNDLE_MEMBERS = 20_000
+MAX_REPORT_BUNDLE_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_REPORT_BUNDLE_TOTAL_BYTES = 256 * 1024 * 1024
 
 
 def build_report_bundle(
@@ -71,19 +75,64 @@ def write_report_bundle(
     )
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    members = _bundle_members(bundle)
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        _write_json(archive, "metadata.json", bundle["metadata"])
-        _write_json(archive, "summary.json", bundle["summary"])
-        _write_json(archive, "leaderboard.json", bundle["leaderboard"])
-        _write_json(archive, "posture.json", bundle["posture"])
-        _write_json(archive, "rules.json", bundle["rules"])
-        _write_json(archive, "cyclonedx.json", bundle["cyclonedx"])
-        for ref, detail in sorted(bundle["extensions"].items()):
-            _write_json(archive, ref, detail)
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+        archive.writestr("integrity.json", _json_bytes(_integrity_manifest(members)))
     return {
         "output": str(output_path),
         "metadata": bundle["metadata"],
         "summary": bundle["summary"]["summary"],
+    }
+
+
+def verify_report_bundle(path: Path | str) -> dict[str, Any]:
+    """Verify report ZIP member hashes without claiming publisher identity."""
+    bundle_path = Path(path)
+    try:
+        with zipfile.ZipFile(bundle_path) as archive:
+            infos = archive.infolist()
+            if len(infos) > MAX_REPORT_BUNDLE_MEMBERS:
+                raise ValueError("Report bundle exceeds the member limit.")
+            if any(info.file_size > MAX_REPORT_BUNDLE_MEMBER_BYTES for info in infos):
+                raise ValueError("Report bundle exceeds the per-member size limit.")
+            if sum(info.file_size for info in infos) > MAX_REPORT_BUNDLE_TOTAL_BYTES:
+                raise ValueError("Report bundle exceeds the total uncompressed size limit.")
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise ValueError("Report bundle contains duplicate member names.")
+            if "integrity.json" not in names:
+                raise ValueError("Report bundle has no integrity manifest.")
+            if any(not _safe_report_member(name) for name in names):
+                raise ValueError("Report bundle contains an unsafe member name.")
+            try:
+                manifest = json.loads(archive.read("integrity.json"))
+            except (KeyError, json.JSONDecodeError) as exc:
+                raise ValueError("Report bundle integrity manifest is invalid.") from exc
+            if not isinstance(manifest, dict) or manifest.get("schema_version") != "guardrails.report-integrity.v1":
+                raise ValueError("Report bundle integrity schema is unsupported.")
+            files = manifest.get("files")
+            if not isinstance(files, dict) or not files:
+                raise ValueError("Report bundle integrity manifest has no files.")
+            expected = set(files)
+            actual = set(names) - {"integrity.json"}
+            if actual != expected:
+                raise ValueError("Report bundle members do not match its integrity manifest.")
+            for name, claim in files.items():
+                if not isinstance(name, str) or not _safe_report_member(name) or not isinstance(claim, dict):
+                    raise ValueError("Report bundle integrity entry is invalid.")
+                payload = archive.read(name)
+                if claim.get("sha256") != hashlib.sha256(payload).hexdigest() or claim.get("size_bytes") != len(payload):
+                    raise ValueError(f"Report bundle integrity check failed for {name}.")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"Report bundle could not be read: {exc}") from exc
+    return {
+        "valid": True,
+        "bundle": str(bundle_path),
+        "integrity_schema": "guardrails.report-integrity.v1",
+        "authenticated": False,
+        "note": "Internal member hashes match. This is not a publisher signature.",
     }
 
 
@@ -710,3 +759,38 @@ def _scanner_build() -> str:
 
 def _write_json(archive: zipfile.ZipFile, name: str, data: Any) -> None:
     archive.writestr(name, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def _bundle_members(bundle: dict[str, Any]) -> dict[str, bytes]:
+    members = {
+        "metadata.json": _json_bytes(bundle["metadata"]),
+        "summary.json": _json_bytes(bundle["summary"]),
+        "leaderboard.json": _json_bytes(bundle["leaderboard"]),
+        "posture.json": _json_bytes(bundle["posture"]),
+        "rules.json": _json_bytes(bundle["rules"]),
+        "cyclonedx.json": _json_bytes(bundle["cyclonedx"]),
+    }
+    members.update({ref: _json_bytes(detail) for ref, detail in sorted(bundle["extensions"].items())})
+    return members
+
+
+def _integrity_manifest(members: dict[str, bytes]) -> dict[str, Any]:
+    return {
+        "schema_version": "guardrails.report-integrity.v1",
+        "algorithm": "sha256",
+        "files": {
+            name: {"sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload)}
+            for name, payload in sorted(members.items())
+        },
+        "authentication": "none",
+        "note": "Hashes detect altered bundle members but do not authenticate the publisher.",
+    }
+
+
+def _safe_report_member(name: str) -> bool:
+    path = PurePosixPath(name)
+    return bool(name) and not path.is_absolute() and ".." not in path.parts and not name.endswith("/")
+
+
+def _json_bytes(data: Any) -> bytes:
+    return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
