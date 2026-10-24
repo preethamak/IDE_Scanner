@@ -11,6 +11,7 @@ from typing import Any
 
 from .build_identity import scanner_build
 from .classification_policy import effective_finding_severity, finding_actionability, finding_evidence_class
+from .cyclonedx import build_cyclonedx_bom
 from .evidence import location_from_finding
 from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
@@ -46,6 +47,7 @@ def build_report_bundle(
             "posture": report.get("posture") or [],
         },
         "rules": rules_json(),
+        "cyclonedx": build_cyclonedx_bom(report, profile=profile, source=source),
         "extensions": {
             summary.detail_ref: detail.to_dict()
             for summary, detail in zip(summaries, details, strict=True)
@@ -75,6 +77,7 @@ def write_report_bundle(
         _write_json(archive, "leaderboard.json", bundle["leaderboard"])
         _write_json(archive, "posture.json", bundle["posture"])
         _write_json(archive, "rules.json", bundle["rules"])
+        _write_json(archive, "cyclonedx.json", bundle["cyclonedx"])
         for ref, detail in sorted(bundle["extensions"].items()):
             _write_json(archive, ref, detail)
     return {

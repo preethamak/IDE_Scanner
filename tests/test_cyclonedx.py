@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+import zipfile
+from pathlib import Path
 
 from ide_scanner.cyclonedx import build_cyclonedx_bom
+from ide_scanner.report_bundle import build_report_bundle, write_report_bundle
 
 class CycloneDxTests(unittest.TestCase):
     def test_cyclonedx_binds_dependencies_to_the_exact_extension_artifact(self) -> None:
