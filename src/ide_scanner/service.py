@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import hmac
 import json
@@ -135,7 +136,14 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
-    def list_summaries(self, *, extension_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_summaries(
+        self,
+        *,
+        extension_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        cursor: tuple[str, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """List bounded, non-secret job metadata for evidence discovery."""
         rows: list[dict[str, Any]] = []
         for path in self.jobs_dir.glob("job_*.json"):
@@ -150,7 +158,14 @@ class JobStore:
                 "id", "status", "stage", "extension_id", "version", "target_platform",
                 "created_at", "updated_at", "report_ref", "report_sha256", "error",
             )})
-        return sorted(rows, key=lambda item: str(item.get("updated_at") or ""), reverse=True)[:max(1, min(limit, 100))]
+        rows.sort(key=lambda item: (str(item.get("updated_at") or ""), str(item.get("id") or "")), reverse=True)
+        if cursor is not None:
+            rows = [item for item in rows if (str(item.get("updated_at") or ""), str(item.get("id") or "")) < cursor]
+        page = rows[:max(1, min(limit, 100))]
+        next_cursor = None
+        if len(rows) > len(page) and page:
+            next_cursor = _encode_job_cursor(str(page[-1]["updated_at"]), str(page[-1]["id"]))
+        return page, next_cursor
 
     def write(self, job: dict[str, Any]) -> None:
         job["updated_at"] = _now()
@@ -551,6 +566,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             extension_id = _one_query_value(query, "extension_id")
             status = _one_query_value(query, "status")
             limit_value = _one_query_value(query, "limit")
+            cursor_value = _one_query_value(query, "cursor")
             if extension_id and not MARKETPLACE_ID.fullmatch(extension_id):
                 self._json(400, {"error": "extension_id must use publisher.extension format."})
                 return
@@ -565,7 +581,18 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             if not 1 <= limit <= 100:
                 self._json(400, {"error": "limit must be an integer from 1 through 100."})
                 return
-            self._json(200, {"jobs": self.store.list_summaries(extension_id=extension_id or None, status=status or None, limit=limit)})
+            try:
+                cursor = _decode_job_cursor(cursor_value) if cursor_value else None
+            except ValueError:
+                self._json(400, {"error": "cursor is invalid."})
+                return
+            jobs, next_cursor = self.store.list_summaries(
+                extension_id=extension_id or None,
+                status=status or None,
+                limit=limit,
+                cursor=cursor,
+            )
+            self._json(200, {"jobs": jobs, "next_cursor": next_cursor})
             return
         if path.startswith("/v1/jobs/"):
             job = self.store.get(path.rsplit("/", 1)[-1])
@@ -884,6 +911,7 @@ def openapi_payload() -> dict[str, Any]:
                         {"in": "query", "name": "extension_id", "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"}},
                         {"in": "query", "name": "status", "schema": {"type": "string", "enum": ["queued", "running", "complete", "failed", "cancelled"]}},
                         {"in": "query", "name": "limit", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100}},
+                        {"in": "query", "name": "cursor", "schema": {"type": "string", "maxLength": 256}, "description": "Opaque cursor from a prior job-history response."},
                     ],
                     "responses": {"200": {"description": "Bounded job history", "content": {"application/json": {"schema": {"type": "object"}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
                 },
@@ -953,6 +981,28 @@ def main(argv: list[str] | None = None) -> int:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _encode_job_cursor(updated_at: str, job_id: str) -> str:
+    payload = json.dumps({"updated_at": updated_at, "id": job_id}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_job_cursor(value: str) -> tuple[str, str]:
+    if not value or len(value) > 256:
+        raise ValueError("invalid cursor")
+    try:
+        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        payload = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("invalid cursor")
+    updated_at = payload.get("updated_at")
+    job_id = payload.get("id")
+    if not isinstance(updated_at, str) or not updated_at or len(updated_at) > 64 or not isinstance(job_id, str) or not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
+        raise ValueError("invalid cursor")
+    return updated_at, job_id
 
 
 def _one_query_value(query: dict[str, list[str]], name: str) -> str:

@@ -24,6 +24,7 @@ from ide_scanner.service import (
     readiness_payload,
     maintain_store,
     openapi_payload,
+    _decode_job_cursor,
     retry_failed_webhook_deliveries,
     serve,
 )
@@ -58,6 +59,24 @@ class ScannerServiceTests(unittest.TestCase):
             persisted = store.get(job["id"])
             self.assertEqual(persisted["version"], "1.2.3")
             self.assertEqual(persisted["target_platform"], "linux-x64")
+
+    def test_job_history_cursor_pages_without_repeating_a_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            for index in range(3):
+                job = store.create(f"publisher.extension{index}")
+                job["updated_at"] = f"2026-10-24T00:00:0{index}Z"
+                store._write_json_locked(store.jobs_dir / f"{job['id']}.json", job)
+
+            first, cursor = store.list_summaries(limit=1)
+            self.assertIsNotNone(cursor)
+            second, next_cursor = store.list_summaries(limit=1, cursor=_decode_job_cursor(cursor or ""))
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertNotEqual(first[0]["id"], second[0]["id"])
+        self.assertIsNotNone(cursor)
+        self.assertIsNotNone(next_cursor)
 
     def test_job_history_is_bounded_and_excludes_request_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -150,6 +169,7 @@ class ScannerServiceTests(unittest.TestCase):
         self.assertEqual(paths["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["status"]["enum"], ["queued", "running", "complete", "failed", "cancelled"])
         self.assertEqual(paths["/v1/jobs/{job_id}"]["delete"]["security"], [{"bearerAuth": []}])
         self.assertIn("409", paths["/v1/jobs/{job_id}"]["delete"]["responses"])
+        self.assertEqual(paths["/v1/jobs"]["get"]["parameters"][-1]["name"], "cursor")
         report = paths["/v1/reports/{job_id}"]["get"]
         self.assertIn("ETag", report["responses"]["200"]["headers"])
         self.assertIn("304", report["responses"])
