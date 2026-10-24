@@ -68,9 +68,12 @@ class ScannerServiceTests(unittest.TestCase):
                 job["updated_at"] = f"2026-10-24T00:00:0{index}Z"
                 store._write_json_locked(store.jobs_dir / f"{job['id']}.json", job)
 
-            first, cursor = store.list_summaries(limit=1)
+            first, cursor = store.list_summary_page(limit=1)
             self.assertIsNotNone(cursor)
-            second, next_cursor = store.list_summaries(limit=1, cursor=_decode_job_cursor(cursor or ""))
+            second, next_cursor = store.list_summary_page(
+                limit=1,
+                cursor=_decode_job_cursor(cursor or ""),
+            )
 
         self.assertEqual(len(first), 1)
         self.assertEqual(len(second), 1)

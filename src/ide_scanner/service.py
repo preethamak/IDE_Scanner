@@ -142,9 +142,24 @@ class JobStore:
         extension_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List bounded, non-secret job metadata for evidence discovery."""
+        rows, _ = self.list_summary_page(
+            extension_id=extension_id,
+            status=status,
+            limit=limit,
+        )
+        return rows
+
+    def list_summary_page(
+        self,
+        *,
+        extension_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
         cursor: tuple[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """List bounded, non-secret job metadata for evidence discovery."""
+        """List one cursor-addressable page of non-secret job metadata."""
         rows: list[dict[str, Any]] = []
         for path in self.jobs_dir.glob("job_*.json"):
             item = self._read_json_locked(path)
@@ -586,7 +601,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._json(400, {"error": "cursor is invalid."})
                 return
-            jobs, next_cursor = self.store.list_summaries(
+            jobs, next_cursor = self.store.list_summary_page(
                 extension_id=extension_id or None,
                 status=status or None,
                 limit=limit,
