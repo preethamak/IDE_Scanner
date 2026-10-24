@@ -57,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
     scan.add_argument("--skip-posture", action="store_true", help="Skip local IDE/client posture checks; useful for portable extension corpus scans.")
     scan.add_argument("--out", "--output", dest="output", help="Write report to this file.")
+    scan.add_argument("--signing-key", help="Ed25519 private PEM used only when writing a report ZIP.")
+    scan.add_argument("--signing-key-id", help="Stable signer id recorded in report provenance.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
 
@@ -76,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
     report_subparsers = report.add_subparsers(dest="report_command", required=True)
     report_verify = report_subparsers.add_parser("verify", help="Verify report ZIP member hashes.")
     report_verify.add_argument("--bundle", required=True, help="Report ZIP produced by ide-scanner scan --format report.zip.")
+    report_verify.add_argument("--public-key", help="Trusted Ed25519 public PEM for provenance verification.")
+    report_verify.add_argument("--expected-key-id", help="Require this signer id in provenance.")
+    report_verify.add_argument("--require-signature", action="store_true", help="Fail unless trusted signed provenance is valid.")
 
     provenance = subparsers.add_parser("provenance", help="Compare a source tree to the payload of an exact VSIX artifact.")
     provenance.add_argument("--source", required=True, help="Source snapshot directory to compare.")
@@ -195,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
         if args.profile == "deep" and not args.runtime:
             parser.error("scan --profile deep requires --runtime; use standard for static-only scans")
+        if args.signing_key and (args.stream or _scan_output_format(args.output, args.format) != "report.zip"):
+            parser.error("--signing-key requires a non-stream report.zip output")
         report = scan_targets(
             paths=[Path(item) for item in args.path],
             marketplace_scan_ids=args.extension_id,
@@ -233,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
                     profile=args.profile,
                     source=source,
                     include_raw_evidence=args.include_raw_evidence,
+                    signing_key=args.signing_key,
+                    signing_key_id=args.signing_key_id,
                 )
                 output = str(receipt["output"])
             _emit_ndjson(iter_report_events(report, profile=args.profile, source=source, output=output))
@@ -246,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
                 profile=args.profile,
                 source=source,
                 include_raw_evidence=args.include_raw_evidence,
+                signing_key=args.signing_key,
+                signing_key_id=args.signing_key_id,
             )
             _emit(receipt, None)
             return scan_exit_code
@@ -279,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "report":
         try:
-            _emit(verify_report_bundle(args.bundle), None)
+            _emit(verify_report_bundle(args.bundle, public_key=args.public_key, expected_key_id=args.expected_key_id, require_signature=args.require_signature), None)
             return 0
         except ValueError as error:
             _emit({"valid": False, "bundle": str(args.bundle), "error": str(error)}, None)
