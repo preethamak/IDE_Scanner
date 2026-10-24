@@ -71,6 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     workspace_lock.add_argument("--report", required=True, help="Workspace scan JSON produced by the workspace command.")
     workspace_lock.add_argument("--out", "--output", dest="output", required=True, help="Write the reviewed workspace lock JSON.")
 
+    workspace_lock_diff = subparsers.add_parser("workspace-lock-diff", help="Compare two reviewed workspace extension locks.")
+    workspace_lock_diff.add_argument("--before", required=True)
+    workspace_lock_diff.add_argument("--after", required=True)
+    workspace_lock_diff.add_argument("--out", "--output", dest="output")
+    workspace_lock_diff.add_argument("--fail-on-drift", action="store_true")
+
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
     inventory.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to inspect.")
@@ -196,6 +202,14 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             parser.error(str(exc))
         return 0
+    if args.command == "workspace-lock-diff":
+        from .workspace_lock_diff import compare_workspace_locks
+        try:
+            result = compare_workspace_locks(args.before, args.after)
+        except ValueError as exc:
+            parser.error(str(exc))
+        _emit(result, args.output)
+        return 1 if args.fail_on_drift and result["drift_detected"] else 0
     if args.command == "workspace":
         from .workspace import scan_workspace_extensions
 
