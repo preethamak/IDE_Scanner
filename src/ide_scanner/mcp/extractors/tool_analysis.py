@@ -27,6 +27,30 @@ def _coerce_tool_model(value: dict[str, Any]) -> ToolModel:
     return ToolModel(**data)
 
 
+def _tool_declaration_evidence(tool: Any) -> "ToolDeclarationEvidence":
+    """Preserve MCP declarations without treating them as behavioral proof."""
+    raw_annotations = getattr(tool, "annotations", None)
+    if isinstance(raw_annotations, BaseModel):
+        raw_annotations = raw_annotations.model_dump()
+    annotations = ToolAnnotationsObject.model_validate(raw_annotations) if isinstance(raw_annotations, dict) else None
+    raw_output_schema = getattr(tool, "outputSchema", None)
+    if isinstance(raw_output_schema, BaseModel):
+        raw_output_schema = raw_output_schema.model_dump()
+    output_schema = dict(raw_output_schema) if isinstance(raw_output_schema, dict) else None
+    issues: list[ToolDeclarationIssue] = []
+    if annotations and annotations.readOnlyHint is True and annotations.destructiveHint is True:
+        issues.append(ToolDeclarationIssue(
+            code="conflicting-safety-hints",
+            message="The tool declares both readOnlyHint and destructiveHint as true.",
+        ))
+    return ToolDeclarationEvidence(
+        title=getattr(tool, "title", None) or (annotations.title if annotations else None),
+        annotations=annotations,
+        output_schema=output_schema,
+        issues=issues,
+    )
+
+
 # --- Metadata security enums ---
 
 class ToolPoisoningCategory(str, Enum):
@@ -424,15 +448,30 @@ class SourceConstructedToolModel(ToolSrcCodeTagLLMResponseFormat):
         description="JSON Schema object for the tool's input parameters",
     )
 
-# TODO: uncomment this when okay
-# class ToolAnnotationsObject(BaseModel):
-#     """Tool annotation hints exposed to clients."""
-#
-#     title: Optional[str] = None
-#     readOnlyHint: Optional[bool] = None
-#     destructiveHint: Optional[bool] = None
-#     idempotentHint: Optional[bool] = None
-#     openWorldHint: Optional[bool] = None
+class ToolAnnotationsObject(BaseModel):
+    """MCP tool annotations, retained as untrusted server declarations."""
+
+    title: Optional[str] = None
+    readOnlyHint: Optional[bool] = None
+    destructiveHint: Optional[bool] = None
+    idempotentHint: Optional[bool] = None
+    openWorldHint: Optional[bool] = None
+
+
+class ToolDeclarationIssue(BaseModel):
+    """An objectively inconsistent declaration, not a behavioral verdict."""
+
+    code: str
+    message: str
+
+
+class ToolDeclarationEvidence(BaseModel):
+    """Exact tool declarations retained for review alongside scan evidence."""
+
+    title: Optional[str] = None
+    annotations: Optional[ToolAnnotationsObject] = None
+    output_schema: Optional[dict[str, Any]] = None
+    issues: list[ToolDeclarationIssue] = Field(default_factory=list)
 
 
 # class IconObject(BaseModel):
@@ -453,6 +492,10 @@ class DeepToolModel(ExtraToolDetailsLLMResponseFormat, ToolSrcCodeTagLLMResponse
     description: Optional[str] = Field(default=None)
     inputSchema: JSONSchemaObject = Field(
         description="JSON Schema object for the tool's input parameters",
+    )
+    declaration: ToolDeclarationEvidence = Field(
+        default_factory=ToolDeclarationEvidence,
+        description="Server-declared metadata retained as non-authoritative review evidence.",
     )
     # outputSchema: Optional[JSONSchemaObject] = Field(
     #     default=None,
@@ -1003,6 +1046,7 @@ class ToolAnalysisExtractor(BaseExtractor):
                     properties=raw_schema.get("properties", {}),
                     required=raw_schema.get("required"),
                 ),
+                declaration=_tool_declaration_evidence(tool),
                 # icons=[
                 #     IconObject(
                 #         src=getattr(icon, "src", None),

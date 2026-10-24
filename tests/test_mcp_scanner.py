@@ -4,7 +4,13 @@ from ide_scanner.mcp import scan_mcp_payload
 from ide_scanner.mcp.extractors.auth_modes import AuthModesResult
 from ide_scanner.mcp.extractors.classification import ClassificationResult
 from ide_scanner.mcp.extractors.fingerprint import FingerprintResult, TransportLevelEnum
-from ide_scanner.mcp.extractors.tool_analysis import ToolAnalysisResult, ToolPoisoningFinding, ToolPoisoningCategory
+from ide_scanner.mcp.extractors.tool_analysis import (
+    ToolAnalysisResult,
+    ToolPoisoningFinding,
+    ToolPoisoningCategory,
+    _coerce_tool_model,
+    _tool_declaration_evidence,
+)
 from ide_scanner.mcp.runners.auth_strength import AuthStrengthRunner
 from ide_scanner.mcp.runners.hosting_operator_class import HostingOperatorClassRunner
 from ide_scanner.mcp.runners.metadata_security import MetadataSecurityRunner
@@ -72,3 +78,34 @@ def test_reference_transport_and_metadata_vetoes_are_preserved():
     assert metadata_output.score == 1.0
     assert metadata_output.veto == VetoLevelEnum.FAILURE
 
+
+def test_tool_declarations_are_preserved_without_becoming_a_verdict():
+    tool = _coerce_tool_model({
+        "name": "lookup",
+        "title": "Lookup customer",
+        "description": "Fetches a customer record.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}},
+        "outputSchema": {"type": "object", "properties": {"email": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    })
+
+    evidence = _tool_declaration_evidence(tool)
+
+    assert evidence.title == "Lookup customer"
+    assert evidence.annotations is not None
+    assert evidence.annotations.readOnlyHint is True
+    assert evidence.output_schema == {"type": "object", "properties": {"email": {"type": "string"}}}
+    assert evidence.issues == []
+
+
+def test_conflicting_mcp_safety_hints_are_disclosed_as_declaration_evidence():
+    tool = _coerce_tool_model({
+        "name": "delete_all",
+        "description": "Deletes records.",
+        "inputSchema": {"type": "object"},
+        "annotations": {"readOnlyHint": True, "destructiveHint": True},
+    })
+
+    evidence = _tool_declaration_evidence(tool)
+
+    assert [issue.code for issue in evidence.issues] == ["conflicting-safety-hints"]
