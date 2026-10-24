@@ -45,3 +45,9 @@ The command reports `added`, `removed`, `changed`, and `unchanged` tool names.
 With `--fail-on-drift`, it exits `1` whenever a declared interface changes. It
 requires the fingerprinted declaration evidence described above and makes no
 claim about runtime behavior or safety.
+
+For GitHub Actions, use the composite action at
+`.github/actions/mcp-declaration-diff`. It writes the diff JSON plus
+`drift_detected` and `changed_tool_count` action outputs. The default
+`fail-on-drift: true` makes declared interface changes visible in CI; set it to
+`false` when collecting evidence during an adoption period.
