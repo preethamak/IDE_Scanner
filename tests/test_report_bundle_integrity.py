@@ -7,6 +7,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from ide_scanner.cli import main
 from ide_scanner.report_bundle import verify_report_bundle, write_report_bundle
 
@@ -61,3 +64,24 @@ class ReportBundleIntegrityTests(unittest.TestCase):
             with patch("ide_scanner.report_bundle.MAX_REPORT_BUNDLE_MEMBER_BYTES", 1):
                 with self.assertRaisesRegex(ValueError, "per-member size limit"):
                     verify_report_bundle(bundle)
+
+    def test_signed_provenance_requires_the_matching_trusted_key(self) -> None:
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            private = Ed25519PrivateKey.generate()
+            private_path = directory / "signer.pem"
+            public_path = directory / "signer.pub.pem"
+            private_path.write_bytes(private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+            public_path.write_bytes(private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+            bundle = directory / "signed.zip"
+            write_report_bundle({"extensions": []}, bundle, signing_key=private_path, signing_key_id="guardrails-prod")
+            self.assertTrue(verify_report_bundle(bundle, public_key=public_path, expected_key_id="guardrails-prod", require_signature=True)["authenticated"])
+            other = Ed25519PrivateKey.generate().public_key()
+            other_path = directory / "other.pub.pem"
+            other_path.write_bytes(other.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                verify_report_bundle(bundle, public_key=other_path, require_signature=True)
+            unsigned = directory / "unsigned.zip"
+            write_report_bundle({"extensions": []}, unsigned)
+            with self.assertRaisesRegex(ValueError, "no signed provenance"):
+                verify_report_bundle(unsigned, public_key=public_path, require_signature=True)
