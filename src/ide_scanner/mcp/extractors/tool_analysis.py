@@ -1,5 +1,6 @@
 """ToolAnalysisExtractor — tool metadata security + source code taint flow analysis."""
 
+import hashlib
 import json
 import logging
 from enum import Enum
@@ -43,12 +44,30 @@ def _tool_declaration_evidence(tool: Any) -> "ToolDeclarationEvidence":
             code="conflicting-safety-hints",
             message="The tool declares both readOnlyHint and destructiveHint as true.",
         ))
-    return ToolDeclarationEvidence(
+    evidence = ToolDeclarationEvidence(
         title=getattr(tool, "title", None) or (annotations.title if annotations else None),
         annotations=annotations,
         output_schema=output_schema,
         issues=issues,
     )
+    fingerprint_payload = {
+        "annotations": annotations.model_dump(exclude_none=True) if annotations else None,
+        "description": getattr(tool, "description", None),
+        "input_schema": _schema_as_dict(getattr(tool, "inputSchema", None)),
+        "name": getattr(tool, "name", None),
+        "output_schema": output_schema,
+        "title": evidence.title,
+    }
+    evidence.sha256 = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8"),
+    ).hexdigest()
+    return evidence
+
+
+def _schema_as_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, BaseModel):
+        value = value.model_dump()
+    return dict(value) if isinstance(value, dict) else None
 
 
 # --- Metadata security enums ---
@@ -471,6 +490,7 @@ class ToolDeclarationEvidence(BaseModel):
     title: Optional[str] = None
     annotations: Optional[ToolAnnotationsObject] = None
     output_schema: Optional[dict[str, Any]] = None
+    sha256: Optional[str] = None
     issues: list[ToolDeclarationIssue] = Field(default_factory=list)
 
 

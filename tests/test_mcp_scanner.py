@@ -95,6 +95,8 @@ def test_tool_declarations_are_preserved_without_becoming_a_verdict():
     assert evidence.annotations is not None
     assert evidence.annotations.readOnlyHint is True
     assert evidence.output_schema == {"type": "object", "properties": {"email": {"type": "string"}}}
+    assert evidence.sha256 is not None
+    assert len(evidence.sha256) == 64
     assert evidence.issues == []
 
 
@@ -109,3 +111,26 @@ def test_conflicting_mcp_safety_hints_are_disclosed_as_declaration_evidence():
     evidence = _tool_declaration_evidence(tool)
 
     assert [issue.code for issue in evidence.issues] == ["conflicting-safety-hints"]
+
+
+def test_tool_declaration_fingerprint_is_order_independent_and_detects_interface_drift():
+    base = {
+        "name": "lookup",
+        "description": "Fetches a customer record.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "region": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
+    }
+    reordered = {
+        "annotations": {"idempotentHint": True, "readOnlyHint": True},
+        "inputSchema": {"properties": {"region": {"type": "string"}, "id": {"type": "string"}}, "type": "object"},
+        "description": "Fetches a customer record.",
+        "name": "lookup",
+    }
+    changed = {**base, "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}}}
+
+    base_fingerprint = _tool_declaration_evidence(_coerce_tool_model(base)).sha256
+    reordered_fingerprint = _tool_declaration_evidence(_coerce_tool_model(reordered)).sha256
+    changed_fingerprint = _tool_declaration_evidence(_coerce_tool_model(changed)).sha256
+
+    assert base_fingerprint == reordered_fingerprint
+    assert base_fingerprint != changed_fingerprint
