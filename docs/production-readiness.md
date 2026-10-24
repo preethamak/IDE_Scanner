@@ -244,6 +244,15 @@ make the corresponding dynamic provider incomplete, so the artifact cannot
 be published as a complete result. The same cache contract is used by the
 canonical scanner, the vendored CLI engine, and the website deep-scan worker.
 
+The disposable runtime workspace records the fixture it seeded from the
+extension's declared language contributions. Rust, Node/TypeScript, Python,
+Go, Java, and .NET fixtures are minimal local project markers only: they carry
+no credentials, dependencies, remote URLs, or executable setup commands. A
+fixture gives language-aware activation a deterministic project shape; it does
+not claim that every client-specific language-server or uninstall path has
+been executed. Those runtime observations remain bounded by the existing
+Bubblewrap and sidecar coverage contract.
+
 WASM is treated as executable capability rather than malware evidence. A
 `wasm-loader` finding is emitted only when executable text visibly loads or
 instantiates a packaged module; the module itself still requires the controlled

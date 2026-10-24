@@ -34,6 +34,7 @@ from ide_scanner.sandbox_runner import (
     _run_bounded_capture,
     _run_isolated,
     _prepare_target,
+    _seed_runtime_workspace,
     _verified_runtime_events,
     _write_entrypoint_runner,
     run_sandbox,
@@ -71,6 +72,30 @@ from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_runtime_workspace_seeds_only_declared_language_fixtures(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            fixture = _seed_runtime_workspace(workspace, {
+                "contributes": {"languages": [
+                    {"id": "typescript"}, {"id": "python"}, {"id": "go"}, {"id": "rust"},
+                ]},
+            })
+
+            self.assertEqual(fixture["status"], "seeded")
+            self.assertEqual([item["ecosystem"] for item in fixture["fixtures"]], ["rust", "node", "python", "go"])
+            self.assertTrue((workspace / "Cargo.toml").exists())
+            self.assertTrue((workspace / "package.json").exists())
+            self.assertTrue((workspace / "pyproject.toml").exists())
+            self.assertTrue((workspace / "go.mod").exists())
+            self.assertFalse((workspace / "pom.xml").exists())
+
+    def test_runtime_workspace_fixture_is_not_applicable_without_languages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            fixture = _seed_runtime_workspace(Path(tmp), {"contributes": {}})
+
+        self.assertEqual(fixture["status"], "not-applicable")
+        self.assertEqual(fixture["fixtures"], [])
+
     def test_repeated_contextual_capability_notes_are_aggregated_with_paths(self) -> None:
         def finding(path: str) -> Finding:
             return Finding(
@@ -3654,7 +3679,22 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations["mode"], "plan-only")
         self.assertEqual(observations["plan"]["extension_id"], "example.sandboxed")
         self.assertEqual(len(observations["plan"]["commands"]), 1)
+        self.assertEqual(observations["plan"]["workspace_fixture"]["status"], "not-applicable")
         self.assertEqual(observations["extensions"]["example.sandboxed"], [])
+
+    def test_sandbox_plan_records_declared_language_workspace_fixture(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"language-aware","version":"1.0.0",'
+                '"contributes":{"languages":[{"id":"python"},{"id":"typescript"}]}}',
+                encoding="utf-8",
+            )
+            observations = run_sandbox(root)
+
+        fixture = observations["plan"]["workspace_fixture"]
+        self.assertEqual(fixture["declared_language_ids"], ["python", "typescript"])
+        self.assertEqual([item["ecosystem"] for item in fixture["fixtures"]], ["node", "python"])
 
     def test_sandbox_preflight_requires_the_same_isolation_boundary_as_runtime(self) -> None:
         completed = MagicMock(returncode=0, stdout="", stderr="")
