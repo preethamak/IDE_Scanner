@@ -12,6 +12,7 @@ from .artifact_store import FilesystemArtifactStore
 
 from .agent import build_agent_report, upload_agent_report
 from .cyclonedx import build_cyclonedx_bom
+from .mcp.declaration_diff import compare_declaration_reports
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
@@ -81,6 +82,15 @@ def main(argv: list[str] | None = None) -> int:
     report_verify.add_argument("--public-key", help="Trusted Ed25519 public PEM for provenance verification.")
     report_verify.add_argument("--expected-key-id", help="Require this signer id in provenance.")
     report_verify.add_argument("--require-signature", action="store_true", help="Fail unless trusted signed provenance is valid.")
+
+    mcp_declarations = subparsers.add_parser(
+        "mcp-declarations",
+        help="Compare MCP tool declarations from two completed assessments.",
+    )
+    mcp_declarations.add_argument("--before", required=True, help="Earlier MCP assessment JSON with declaration fingerprints.")
+    mcp_declarations.add_argument("--after", required=True, help="Later MCP assessment JSON with declaration fingerprints.")
+    mcp_declarations.add_argument("--out", "--output", dest="output", help="Write the machine-readable diff JSON to this file.")
+    mcp_declarations.add_argument("--fail-on-drift", action="store_true", help="Exit non-zero when a tool is added, removed, or its declaration changes.")
 
     provenance = subparsers.add_parser("provenance", help="Compare a source tree to the payload of an exact VSIX artifact.")
     provenance.add_argument("--source", required=True, help="Source snapshot directory to compare.")
@@ -295,6 +305,13 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as error:
             _emit({"valid": False, "bundle": str(args.bundle), "error": str(error)}, None)
             return 2
+    if args.command == "mcp-declarations":
+        try:
+            result = compare_declaration_reports(args.before, args.after)
+        except ValueError as error:
+            parser.error(str(error))
+        _emit(result, args.output)
+        return 1 if args.fail_on_drift and result["drift_detected"] else 0
     if args.command == "inventory":
         targets: list[dict[str, str]] = []
         for item in args.path:
