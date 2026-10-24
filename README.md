@@ -76,6 +76,12 @@ PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 878
 The running service publishes its machine-readable contract at
 `GET /v1/openapi.json`.
 
+MCP results retain the server's declared tool title, annotations, and output
+schema as review evidence. Hints such as `readOnlyHint` and `destructiveHint`
+are not treated as proof of runtime behavior or as a way to lower a GuardRails
+decision. Objectively contradictory declarations are disclosed in the tool's
+`declaration.issues` field.
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.
