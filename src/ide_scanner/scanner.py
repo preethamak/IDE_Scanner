@@ -113,6 +113,7 @@ DEEP_REQUIRED_PROVIDERS = frozenset({"semgrep", "yara", "dependency_intelligence
 ARTIFACT_ORIGINS = frozenset({"user_uploaded_vsix", "installed_directory", "local_directory", "archive_artifact", "source_snapshot"})
 SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
+MAX_RELATED_MARKETPLACE_EXTENSIONS = 50
 # A local extension can contain generated language-server/runtime payloads that
 # are valid artifacts but are not a safe unit for an all-local inventory scan.
 # Enforce a hard budget before hashing, Semgrep, or AST work. Exceeding it is
@@ -304,6 +305,7 @@ def scan_targets(
     marketplace_scan_ids: list[str] | None = None,
     marketplace_version: str | None = None,
     marketplace_target_platform: str | None = None,
+    scan_related_marketplace_extensions: bool = False,
     include_fixtures: bool = False,
     all_local: bool = False,
     online: bool = False,
@@ -333,6 +335,7 @@ def scan_targets(
         marketplace_scan_ids=marketplace_scan_ids,
         marketplace_version=marketplace_version,
         marketplace_target_platform=marketplace_target_platform,
+        scan_related_marketplace_extensions=scan_related_marketplace_extensions,
         include_fixtures=include_fixtures,
         all_local=all_local,
         online=online,
@@ -422,6 +425,15 @@ def _scan_request(
             identifier,
             version=request.marketplace_version,
             target_platform=request.marketplace_target_platform,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=marketplace_artifact_store,
+            dynamic_runtime=request.dynamic_runtime,
+            runtime_timeout_seconds=request.runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle if request.dynamic_runtime else None,
+        ))
+    if request.scan_related_marketplace_extensions:
+        extensions.extend(_scan_declared_marketplace_relationships(
+            extensions,
             known_bad_hashes=known_bad_hashes,
             artifact_store=marketplace_artifact_store,
             dynamic_runtime=request.dynamic_runtime,
@@ -1545,6 +1557,107 @@ def scan_marketplace_extension(
         report.artifact_identity["storage"] = storage
         report.artifact_inventory["artifact_storage"] = storage
     return report
+
+
+def _scan_declared_marketplace_relationships(
+    extensions: list[ExtensionReport],
+    *,
+    known_bad_hashes: dict[str, dict[str, Any]] | None,
+    artifact_store: ArtifactStore | None,
+    dynamic_runtime: bool,
+    runtime_timeout_seconds: int,
+    runtime_bundle: dict[str, Any] | None,
+) -> list[ExtensionReport]:
+    """Acquire one declared Marketplace relationship hop as separate evidence.
+
+    Manifest relationships do not carry a version or artifact hash. This mode
+    therefore records the parent declaration and scans the Marketplace artifact
+    resolved at scan time; it never makes that result part of the parent
+    artifact's own coverage or recursively follows another package's graph.
+    """
+    existing_marketplace_ids = {
+        extension.extension_id.casefold()
+        for extension in extensions
+        if extension.source in {"vs-marketplace", "openvsx"}
+    }
+    targets: dict[str, list[tuple[ExtensionReport, dict[str, Any]]]] = {}
+    for parent in list(extensions):
+        inventory = parent.artifact_inventory
+        relationships = inventory.get("extension_relationship_inventory")
+        if not isinstance(relationships, dict):
+            continue
+        entries = relationships.get("entries")
+        if not isinstance(entries, list):
+            continue
+        resolution = relationships.setdefault("resolution", [])
+        if not isinstance(resolution, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            related_id = str(entry.get("extension_id") or "").casefold()
+            relationship = str(entry.get("relationship") or "")
+            if not related_id or not relationship:
+                continue
+            record = {
+                "extension_id": related_id,
+                "relationship": relationship,
+                "declared_in": str(entry.get("declared_in") or ""),
+            }
+            if related_id == parent.extension_id.casefold():
+                resolution.append({**record, "status": "skipped_self_reference"})
+                continue
+            if related_id in existing_marketplace_ids:
+                resolution.append({**record, "status": "already_scanned_as_requested_target"})
+                continue
+            targets.setdefault(related_id, []).append((parent, record))
+
+    resolved: list[ExtensionReport] = []
+    for index, related_id in enumerate(sorted(targets)):
+        parents = targets[related_id]
+        if index >= MAX_RELATED_MARKETPLACE_EXTENSIONS:
+            for parent, record in parents:
+                relationships = parent.artifact_inventory["extension_relationship_inventory"]
+                relationships["resolution"].append({
+                    **record,
+                    "status": "not_scanned_limit_reached",
+                    "limit": MAX_RELATED_MARKETPLACE_EXTENSIONS,
+                })
+            continue
+        child = scan_marketplace_extension(
+            related_id,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=artifact_store,
+            dynamic_runtime=dynamic_runtime,
+            runtime_timeout_seconds=runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle,
+        )
+        resolved.append(child)
+        parent_references = []
+        status = "acquisition_failed" if child.source == "marketplace-error" else "scanned"
+        for parent, record in parents:
+            parent_reference = {
+                "extension_id": parent.extension_id,
+                "version": parent.version,
+                "artifact_sha256": parent.artifact_hash,
+                "relationship": record["relationship"],
+                "declared_in": record["declared_in"],
+            }
+            parent_references.append(parent_reference)
+            relationships = parent.artifact_inventory["extension_relationship_inventory"]
+            relationships["resolution"].append({
+                **record,
+                "status": status,
+                "resolved_extension_id": child.extension_id,
+                "resolved_version": child.version,
+                "resolved_artifact_sha256": child.artifact_hash,
+            })
+        child.artifact_inventory["relationship_scan"] = {
+            "mode": "one_hop_marketplace",
+            "parent_references": parent_references,
+            "recursion": "disabled",
+        }
+    return resolved
 
 
 def scan_remote_artifact(

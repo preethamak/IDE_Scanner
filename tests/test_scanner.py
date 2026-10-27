@@ -63,6 +63,7 @@ from ide_scanner.scanner import (
     _runtime_execution_failure,
     _merge_dynamic_runtime_bundle,
     _runtime_unexpected_capability_finding,
+    _scan_declared_marketplace_relationships,
     scan_extension,
     scan_marketplace_extension,
     scan_targets,
@@ -71,6 +72,85 @@ from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_related_marketplace_scan_deduplicates_children_and_records_exact_parent_links(self) -> None:
+        def report(extension_id: str, entries: list[dict[str, str]], *, source: str = "vs-marketplace") -> MagicMock:
+            item = MagicMock()
+            item.extension_id = extension_id
+            item.version = "1.2.3"
+            item.artifact_hash = "a" * 64
+            item.source = source
+            item.artifact_inventory = {"extension_relationship_inventory": {"entries": entries, "invalid_entries": []}}
+            return item
+
+        first = report("publisher.first", [
+            {"extension_id": "vendor.shared", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+            {"extension_id": "publisher.first", "relationship": "extension_pack", "declared_in": "extensionPack"},
+        ])
+        second = report("publisher.second", [
+            {"extension_id": "vendor.shared", "relationship": "extension_pack", "declared_in": "extensionPack"},
+        ])
+        child = report("vendor.shared", [], source="vs-marketplace")
+        child.version = "4.5.6"
+        child.artifact_hash = "b" * 64
+
+        with patch("ide_scanner.scanner.scan_marketplace_extension", return_value=child) as scan:
+            resolved = _scan_declared_marketplace_relationships(
+                [first, second],
+                known_bad_hashes=None,
+                artifact_store=None,
+                dynamic_runtime=False,
+                runtime_timeout_seconds=15,
+                runtime_bundle=None,
+            )
+
+        scan.assert_called_once_with(
+            "vendor.shared",
+            known_bad_hashes=None,
+            artifact_store=None,
+            dynamic_runtime=False,
+            runtime_timeout_seconds=15,
+            runtime_bundle=None,
+        )
+        self.assertEqual(resolved, [child])
+        self.assertEqual(
+            first.artifact_inventory["extension_relationship_inventory"]["resolution"],
+            [
+                {"extension_id": "publisher.first", "relationship": "extension_pack", "declared_in": "extensionPack", "status": "skipped_self_reference"},
+                {"extension_id": "vendor.shared", "relationship": "extension_dependency", "declared_in": "extensionDependencies", "status": "scanned", "resolved_extension_id": "vendor.shared", "resolved_version": "4.5.6", "resolved_artifact_sha256": "b" * 64},
+            ],
+        )
+        self.assertEqual(len(child.artifact_inventory["relationship_scan"]["parent_references"]), 2)
+        self.assertEqual(child.artifact_inventory["relationship_scan"]["recursion"], "disabled")
+
+    def test_related_marketplace_scan_discloses_when_the_bounded_fanout_limit_is_reached(self) -> None:
+        parent = MagicMock()
+        parent.extension_id = "publisher.parent"
+        parent.version = "1.0.0"
+        parent.artifact_hash = "a" * 64
+        parent.source = "vs-marketplace"
+        parent.artifact_inventory = {"extension_relationship_inventory": {"entries": [
+            {"extension_id": "vendor.first", "relationship": "extension_pack", "declared_in": "extensionPack"},
+            {"extension_id": "vendor.second", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+        ], "invalid_entries": []}}
+        child = MagicMock()
+        child.extension_id = "vendor.first"
+        child.version = "1.0.0"
+        child.artifact_hash = "b" * 64
+        child.source = "vs-marketplace"
+        child.artifact_inventory = {}
+
+        with patch("ide_scanner.scanner.MAX_RELATED_MARKETPLACE_EXTENSIONS", 1), patch(
+            "ide_scanner.scanner.scan_marketplace_extension", return_value=child
+        ) as scan:
+            _scan_declared_marketplace_relationships(
+                [parent], known_bad_hashes=None, artifact_store=None,
+                dynamic_runtime=False, runtime_timeout_seconds=15, runtime_bundle=None,
+            )
+
+        scan.assert_called_once_with("vendor.first", known_bad_hashes=None, artifact_store=None, dynamic_runtime=False, runtime_timeout_seconds=15, runtime_bundle=None)
+        resolution = parent.artifact_inventory["extension_relationship_inventory"]["resolution"]
+        self.assertIn({"extension_id": "vendor.second", "relationship": "extension_dependency", "declared_in": "extensionDependencies", "status": "not_scanned_limit_reached", "limit": 1}, resolution)
+
     def test_repeated_contextual_capability_notes_are_aggregated_with_paths(self) -> None:
         def finding(path: str) -> Finding:
             return Finding(

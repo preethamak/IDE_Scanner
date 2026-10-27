@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         request = ScanRequest(
             paths=[Path(item) for item in paths],
             marketplace_scan_ids=marketplace_ids,
+            scan_related_marketplace_extensions=bool(payload.get("scan_related_marketplace_extensions", False)),
             online=bool(payload.get("online", False)),
             sandbox_observations_file=sandbox_observations_file or payload.get("sandbox_observations_file"),
             previous_report_file=_write_previous_report(payload.get("previous_report")),

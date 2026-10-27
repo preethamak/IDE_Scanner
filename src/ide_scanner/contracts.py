@@ -15,6 +15,7 @@ class ScanRequest:
     marketplace_scan_ids: tuple[str, ...] = ()
     marketplace_version: str | None = None
     marketplace_target_platform: str | None = None
+    scan_related_marketplace_extensions: bool = False
     include_fixtures: bool = False
     all_local: bool = False
     online: bool = False
@@ -41,6 +42,7 @@ class ScanRequest:
         marketplace_scan_ids: list[str] | None = None,
         marketplace_version: str | None = None,
         marketplace_target_platform: str | None = None,
+        scan_related_marketplace_extensions: bool = False,
         include_fixtures: bool = False,
         all_local: bool = False,
         online: bool = False,
@@ -64,6 +66,7 @@ class ScanRequest:
             marketplace_scan_ids=tuple(marketplace_scan_ids or ()),
             marketplace_version=marketplace_version,
             marketplace_target_platform=marketplace_target_platform,
+            scan_related_marketplace_extensions=scan_related_marketplace_extensions,
             include_fixtures=include_fixtures,
             all_local=all_local,
             online=online,
