@@ -164,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     agent.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks (on by default).")
     agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
+    agent.add_argument("--scan-related", action="store_true", help="Also scan one declared extensionPack or extensionDependencies hop before uploading the workspace report.")
     agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
     agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
     agent.add_argument(
@@ -332,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             online=not args.offline,
             previous_report_file=args.previous_report,
             include_source=args.include_source,
+            scan_related_marketplace_extensions=args.scan_related,
         )
         if args.out:
             _emit(payload, args.out)

@@ -24,3 +24,14 @@ at scan time, not proof of what a future Marketplace installation will fetch.
 Entries skipped due to a self-reference, direct requested target, acquisition
 failure, or fan-out limit remain explicit in the root artifact's relationship
 resolution data.
+
+For an installed extension inventory, the local agent can preserve the same
+one-hop relationship evidence in the uploaded workspace report:
+
+```sh
+python -m ide_scanner agent --all --scan-related --server https://abscissa.dev
+```
+
+The agent still redacts source preview content before upload. Related packages
+remain separate report entries with their own exact artifact identity; they are
+not folded into the parent extension's decision or coverage.
