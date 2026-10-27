@@ -81,7 +81,13 @@ def evaluate(root: Path, policy: dict[str, Any], lock: dict[str, Any], write_loc
         resolved_version = str(detail.get("version") or version or "")
         decision = str(detail.get("decision") or "incomplete")
         generated[extension_id] = {"version": resolved_version, "sha256": artifact, "decision": decision, "ruleset_version": report.get("ruleset_version", "recorded-in-report")}
-        outcome, reason = _policy_outcome(extension_id, artifact, resolved_version, decision, approvals, exceptions)
+        lock_outcome, lock_reason = _lock_outcome(existing, artifact, resolved_version)
+        if write_lock:
+            outcome, reason = _policy_outcome(extension_id, artifact, resolved_version, decision, approvals, exceptions)
+        elif lock_outcome == "fail":
+            outcome, reason = lock_outcome, lock_reason
+        else:
+            outcome, reason = _policy_outcome(extension_id, artifact, resolved_version, decision, approvals, exceptions)
         rows.append({"extension_id": extension_id, "version": resolved_version, "sha256": artifact, "decision": decision, "outcome": outcome, "reason": reason})
     if write_lock:
         lock["schema_version"] = 1
@@ -101,11 +107,33 @@ def _policy_outcome(extension_id: str, sha256: str, version: str, decision: str,
     if str(entry.get("sha256") or "") != sha256 or str(entry.get("version") or "") != version:
         return "fail", "Approval does not match this exact version and SHA-256."
     expiry = str(entry.get("expires_at") or "")
-    if expiry and datetime.fromisoformat(expiry.replace("Z", "+00:00")) <= datetime.now(UTC):
+    if not expiry:
+        return "fail", "Approval or exception requires an expiry timestamp."
+    try:
+        expiry_time = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+        expired = expiry_time.tzinfo is None or expiry_time <= datetime.now(UTC)
+    except ValueError:
+        return "fail", "Approval or exception has an invalid expiry timestamp."
+    if expiry_time.tzinfo is None:
+        return "fail", "Approval or exception expiry timestamp must include a timezone."
+    if expired:
         return "fail", "Approval or exception has expired."
+    if not str(entry.get("reason") or "").strip():
+        return "fail", "Approval or exception requires a review reason."
     if decision == "block" and not bool(entry.get("allow_block_override")):
         return "fail", "BLOCK is non-overridable unless allow_block_override is explicit."
     return "pass", f"Exact artifact {decision.upper()} exception is active."
+
+
+def _lock_outcome(entry: dict[str, Any], sha256: str, version: str) -> tuple[str, str]:
+    """Require the artifact under evaluation to match a reviewed release lock."""
+    if not entry:
+        return "fail", "No reviewed release lock exists for this extension."
+    if str(entry.get("version") or "") != version:
+        return "fail", "Release lock does not match the resolved extension version."
+    if str(entry.get("sha256") or "") != sha256:
+        return "fail", "Release lock does not match the resolved artifact SHA-256."
+    return "pass", "Reviewed release lock matches the resolved artifact."
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, int]:
