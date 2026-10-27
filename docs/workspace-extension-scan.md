@@ -14,3 +14,14 @@ extension's `version` and optional `target_platform`. The output records the
 declaration files, requested release coordinates, and full scanner evidence.
 Use the GitHub extension policy action for version-and-hash approval enforcement
 in pull requests.
+
+For publication-grade evidence on a hardened runner, opt into the complete
+provider and bounded runtime path explicitly:
+
+```bash
+python -m ide_scanner.cli workspace --root . --lock .ide-scanner/extensions.lock.json --profile deep --runtime --runtime-timeout 30 --output guardrails-workspace-deep.json
+```
+
+`--profile deep` rejects incomplete required-provider coverage and requires
+`--runtime`; it is not a label for a static-only scan. The runtime pass executes
+only eligible extension paths in the scanner's bounded environment.

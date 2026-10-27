@@ -37,7 +37,22 @@ class WorkspaceExtensionScanTests(unittest.TestCase):
             self.assertEqual(calls[0]["marketplace_version"], "2026.1.0")
             self.assertEqual(calls[0]["marketplace_target_platform"], "linux-x64")
             self.assertIsNone(calls[1]["marketplace_version"])
+            self.assertIsNone(calls[0]["required_providers"])
             self.assertEqual(report["extensions"][0]["declared_in"], [".vscode/extensions.json"])
+
+    def test_deep_workspace_profile_requires_runtime_and_all_required_providers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".vscode").mkdir()
+            (root / ".vscode" / "extensions.json").write_text('{"recommendations":["ms-python.python"]}')
+            with self.assertRaisesRegex(ValueError, "requires runtime"):
+                scan_workspace_extensions(root, profile="deep")
+            calls = []
+            report = scan_workspace_extensions(root, profile="deep", dynamic_runtime=True, runtime_timeout_seconds=23, scanner=lambda **kwargs: calls.append(kwargs) or {})
+            self.assertEqual(report["profile"], "deep")
+            self.assertTrue(calls[0]["dynamic_runtime"])
+            self.assertEqual(calls[0]["runtime_timeout_seconds"], 23)
+            self.assertEqual(calls[0]["required_providers"], frozenset({"semgrep", "yara", "dependency_intelligence"}))
 
     def test_lock_rejects_invalid_entries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
