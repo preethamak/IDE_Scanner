@@ -59,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
 
+    workspace = subparsers.add_parser("workspace", help="Scan extensions recommended by a VS Code workspace.")
+    workspace.add_argument("--root", default=".", help="Workspace root containing VS Code, Dev Container, or .code-workspace configuration.")
+    workspace.add_argument("--lock", help="Optional reviewed extension lock JSON; pins Marketplace version and target platform per extension.")
+    workspace.add_argument("--out", "--output", dest="output", help="Write the workspace scan report to this file.")
+
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
     inventory.add_argument("--path", action="append", default=[], help="Extension folder, extensions directory, or VSIX file to inspect.")
@@ -174,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "workspace":
+        from .workspace import scan_workspace_extensions
+
+        _emit(scan_workspace_extensions(Path(args.root), lock_path=Path(args.lock) if args.lock else None), args.output)
+        return 0
     if args.command == "scan":
         if args.version and len(args.extension_id) != 1:
             parser.error("scan --version requires exactly one --extension-id")
