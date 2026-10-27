@@ -30,7 +30,12 @@ Examples:
 ```bash
 guardrails scan --file extension.vsix --runtime --format json --output report.json
 guardrails scan --file extension.vsix --profile deep --runtime --format zip --output report.zip
+guardrails scan --file extension.vsix --format sarif --output guardrails.sarif.json
 ```
+
+SARIF export is for code-scanning integrations. It includes only scanner-recorded
+locations and preserves exact artifact identity in each result; a clean SARIF
+log is evidence of completed checks, not a guarantee that an extension is safe.
 
 Website: [abscissa.dev](https://abscissa.dev)
 
