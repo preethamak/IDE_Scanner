@@ -60,6 +60,9 @@ the same secret when dispatching and reading MCP assessments.
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```
 
+For the authenticated service contract, polling workflow, exact-artifact
+checks, and production limits, see [the scanner service API guide](docs/scanner-service-api.md).
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.
