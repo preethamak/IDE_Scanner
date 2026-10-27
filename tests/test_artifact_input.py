@@ -44,6 +44,28 @@ class ArtifactInputTests(unittest.TestCase):
             )
             self.assertEqual(path.read_bytes(), member)
 
+    def test_archive_member_digest_failure_removes_streamed_output(self) -> None:
+        import zipfile
+
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("tools/extension.vsix", b"trusted")
+        content = output.getvalue()
+        opener = type("Opener", (), {"open": lambda self, request, timeout: _Response(content)})()
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "ide_scanner.artifact_input.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ), patch("ide_scanner.artifact_input.urllib.request.build_opener", return_value=opener):
+            with self.assertRaisesRegex(ArtifactInputError, "does not match"):
+                acquire_https_archive_member(
+                    "https://example.com/package.nupkg",
+                    hashlib.sha256(content).hexdigest(),
+                    "tools/extension.vsix",
+                    "0" * 64,
+                    Path(tmp),
+                )
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_hash_pinned_public_https_artifact_is_acquired(self) -> None:
         content = b"PK\x03\x04vsix"
         digest = hashlib.sha256(content).hexdigest()
