@@ -86,6 +86,22 @@ class JobStore:
         with self._lock:
             self._write_json_locked(path, job)
 
+    def ready(self) -> tuple[bool, str | None]:
+        """Confirm the persistent job store can accept an atomic write.
+
+        A service can be alive while an attached volume is read-only or has
+        disappeared. Readiness checks this dependency without inspecting or
+        modifying any job or report data.
+        """
+        probe = self.root / f".readiness-{uuid.uuid4().hex}.tmp"
+        try:
+            with self._lock:
+                probe.write_text("ready\n", encoding="utf-8")
+                probe.unlink()
+        except OSError as exc:
+            return False, f"job_store_unavailable: {exc.__class__.__name__}"
+        return True, None
+
     def write_report(self, job_id: str, report: dict[str, Any]) -> str:
         path = self.reports_dir / f"{job_id}.json"
         with self._lock:
@@ -225,6 +241,17 @@ class ScanWorkerPool:
         except queue.Full:
             return False
 
+    def readiness(self) -> dict[str, int | bool]:
+        """Return bounded capacity state without exposing queued job data."""
+        workers_alive = sum(thread.is_alive() for thread in self._threads)
+        return {
+            "workers_alive": workers_alive,
+            "workers_expected": len(self._threads),
+            "queue_depth": self._queue.qsize(),
+            "queue_capacity": self._queue.maxsize,
+            "workers_healthy": workers_alive == len(self._threads),
+        }
+
     def _worker(self) -> None:
         while True:
             job = self._queue.get()
@@ -304,6 +331,10 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/health":
             self._json(200, health_payload())
+            return
+        if path == "/readyz":
+            ready, payload = readiness_payload(self.store, self.pool)
+            self._json(200 if ready else 503, payload)
             return
         if path == "/v1/rules":
             self._json(200, rules_json())
@@ -411,6 +442,25 @@ def health_payload() -> dict[str, Any]:
             "dependency_intelligence": "online",
         },
     }
+
+
+def readiness_payload(store: JobStore, pool: ScanWorkerPool) -> tuple[bool, dict[str, Any]]:
+    """Build the authenticated-scan service readiness contract for probes."""
+    store_ready, store_error = store.ready()
+    capacity = pool.readiness()
+    ready = store_ready and bool(capacity["workers_healthy"])
+    payload: dict[str, Any] = {
+        "status": "ready" if ready else "not_ready",
+        "service_version": SERVICE_VERSION,
+        "ruleset_version": RULESET_VERSION,
+        "storage": "ready" if store_ready else "unavailable",
+        "workers": capacity,
+    }
+    if store_error:
+        payload["reason"] = store_error
+    elif not capacity["workers_healthy"]:
+        payload["reason"] = "worker_pool_unavailable"
+    return ready, payload
 
 
 def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DATA_DIR) -> None:
