@@ -113,6 +113,7 @@ DEEP_REQUIRED_PROVIDERS = frozenset({"semgrep", "yara", "dependency_intelligence
 ARTIFACT_ORIGINS = frozenset({"user_uploaded_vsix", "installed_directory", "local_directory", "archive_artifact", "source_snapshot"})
 SKIP_DIRS = {".git", ".hg", ".svn"}
 MAX_TEXT_BYTES = 64 * 1024 * 1024
+MAX_RELATED_MARKETPLACE_EXTENSIONS = 50
 # A local extension can contain generated language-server/runtime payloads that
 # are valid artifacts but are not a safe unit for an all-local inventory scan.
 # Enforce a hard budget before hashing, Semgrep, or AST work. Exceeding it is
@@ -218,6 +219,7 @@ CAPABILITY_RULES = {
     "credential-global-state-storage",
     "credential-inputbox-prompt",
     "dynamic-shell-execution",
+    "extension-install-surface",
     "lifecycle-script",
     "mcp-server-command",
     "native-or-packed-artifact",
@@ -237,6 +239,7 @@ POSTURE_RULES = {
     "workflow-token-permissions-broad",
     "entrypoint-ast-unparsed",
     "executable-heavy-obfuscation",
+    "malformed-extension-relationship",
 }
 REPUTATION_RULES = {
     "marketplace-extension-not-found",
@@ -302,6 +305,7 @@ def scan_targets(
     marketplace_scan_ids: list[str] | None = None,
     marketplace_version: str | None = None,
     marketplace_target_platform: str | None = None,
+    scan_related_marketplace_extensions: bool = False,
     include_fixtures: bool = False,
     all_local: bool = False,
     online: bool = False,
@@ -331,6 +335,7 @@ def scan_targets(
         marketplace_scan_ids=marketplace_scan_ids,
         marketplace_version=marketplace_version,
         marketplace_target_platform=marketplace_target_platform,
+        scan_related_marketplace_extensions=scan_related_marketplace_extensions,
         include_fixtures=include_fixtures,
         all_local=all_local,
         online=online,
@@ -420,6 +425,15 @@ def _scan_request(
             identifier,
             version=request.marketplace_version,
             target_platform=request.marketplace_target_platform,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=marketplace_artifact_store,
+            dynamic_runtime=request.dynamic_runtime,
+            runtime_timeout_seconds=request.runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle if request.dynamic_runtime else None,
+        ))
+    if request.scan_related_marketplace_extensions:
+        extensions.extend(_scan_declared_marketplace_relationships(
+            extensions,
             known_bad_hashes=known_bad_hashes,
             artifact_store=marketplace_artifact_store,
             dynamic_runtime=request.dynamic_runtime,
@@ -639,6 +653,14 @@ def scan_extension(
     ast_unparsed_entrypoints: list[str] = []
 
     _add_manifest_findings(extension_id, version, manifest, findings, capabilities)
+    extension_relationships = _extension_relationship_inventory(manifest, extension_id)
+    _add_extension_relationship_findings(
+        extension_id,
+        version,
+        extension_relationships,
+        findings,
+        capabilities,
+    )
     _add_dependency_source_findings(extension_id, version, manifest, findings)
 
     files = _walk_extension_files(path)
@@ -646,6 +668,7 @@ def scan_extension(
     artifact_inventory = _artifact_inventory(path, files)
     artifact_inventory["package_format"] = manifest_format
     artifact_inventory["package_manifest_path"] = manifest_path
+    artifact_inventory["extension_relationship_inventory"] = extension_relationships
     analysis_coverage = _new_analysis_coverage(
         files,
         entrypoints,
@@ -1536,6 +1559,107 @@ def scan_marketplace_extension(
     return report
 
 
+def _scan_declared_marketplace_relationships(
+    extensions: list[ExtensionReport],
+    *,
+    known_bad_hashes: dict[str, dict[str, Any]] | None,
+    artifact_store: ArtifactStore | None,
+    dynamic_runtime: bool,
+    runtime_timeout_seconds: int,
+    runtime_bundle: dict[str, Any] | None,
+) -> list[ExtensionReport]:
+    """Acquire one declared Marketplace relationship hop as separate evidence.
+
+    Manifest relationships do not carry a version or artifact hash. This mode
+    therefore records the parent declaration and scans the Marketplace artifact
+    resolved at scan time; it never makes that result part of the parent
+    artifact's own coverage or recursively follows another package's graph.
+    """
+    existing_marketplace_ids = {
+        extension.extension_id.casefold()
+        for extension in extensions
+        if extension.source in {"vs-marketplace", "openvsx"}
+    }
+    targets: dict[str, list[tuple[ExtensionReport, dict[str, Any]]]] = {}
+    for parent in list(extensions):
+        inventory = parent.artifact_inventory
+        relationships = inventory.get("extension_relationship_inventory")
+        if not isinstance(relationships, dict):
+            continue
+        entries = relationships.get("entries")
+        if not isinstance(entries, list):
+            continue
+        resolution = relationships.setdefault("resolution", [])
+        if not isinstance(resolution, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            related_id = str(entry.get("extension_id") or "").casefold()
+            relationship = str(entry.get("relationship") or "")
+            if not related_id or not relationship:
+                continue
+            record = {
+                "extension_id": related_id,
+                "relationship": relationship,
+                "declared_in": str(entry.get("declared_in") or ""),
+            }
+            if related_id == parent.extension_id.casefold():
+                resolution.append({**record, "status": "skipped_self_reference"})
+                continue
+            if related_id in existing_marketplace_ids:
+                resolution.append({**record, "status": "already_scanned_as_requested_target"})
+                continue
+            targets.setdefault(related_id, []).append((parent, record))
+
+    resolved: list[ExtensionReport] = []
+    for index, related_id in enumerate(sorted(targets)):
+        parents = targets[related_id]
+        if index >= MAX_RELATED_MARKETPLACE_EXTENSIONS:
+            for parent, record in parents:
+                relationships = parent.artifact_inventory["extension_relationship_inventory"]
+                relationships["resolution"].append({
+                    **record,
+                    "status": "not_scanned_limit_reached",
+                    "limit": MAX_RELATED_MARKETPLACE_EXTENSIONS,
+                })
+            continue
+        child = scan_marketplace_extension(
+            related_id,
+            known_bad_hashes=known_bad_hashes,
+            artifact_store=artifact_store,
+            dynamic_runtime=dynamic_runtime,
+            runtime_timeout_seconds=runtime_timeout_seconds,
+            runtime_bundle=runtime_bundle,
+        )
+        resolved.append(child)
+        parent_references = []
+        status = "acquisition_failed" if child.source == "marketplace-error" else "scanned"
+        for parent, record in parents:
+            parent_reference = {
+                "extension_id": parent.extension_id,
+                "version": parent.version,
+                "artifact_sha256": parent.artifact_hash,
+                "relationship": record["relationship"],
+                "declared_in": record["declared_in"],
+            }
+            parent_references.append(parent_reference)
+            relationships = parent.artifact_inventory["extension_relationship_inventory"]
+            relationships["resolution"].append({
+                **record,
+                "status": status,
+                "resolved_extension_id": child.extension_id,
+                "resolved_version": child.version,
+                "resolved_artifact_sha256": child.artifact_hash,
+            })
+        child.artifact_inventory["relationship_scan"] = {
+            "mode": "one_hop_marketplace",
+            "parent_references": parent_references,
+            "recursion": "disabled",
+        }
+    return resolved
+
+
 def scan_remote_artifact(
     url: str,
     expected_sha256: str,
@@ -1796,6 +1920,107 @@ def _add_manifest_findings(
             capabilities.setdefault("agentic", {"id": "agentic", "evidence": []})["evidence"].append(key)
             _add_agent_capability_findings(extension_id, version, key, contributes.get(key), findings, capabilities)
     _add_cross_extension_manifest_findings(extension_id, version, contributes, findings, capabilities)
+
+
+def _extension_relationship_inventory(manifest: dict[str, Any], extension_id: str) -> dict[str, Any]:
+    """Capture extension packages that the published manifest can pull in."""
+    entries: list[dict[str, str]] = []
+    invalid_entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for field, relationship in (
+        ("extensionPack", "extension_pack"),
+        ("extensionDependencies", "extension_dependency"),
+    ):
+        value = manifest.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            invalid_entries.append({"field": field, "value": _manifest_value_summary(value), "reason": "expected an array"})
+            continue
+        for item in value:
+            if not isinstance(item, str):
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "expected an extension identifier string"})
+                continue
+            related_extension_id = item.strip()
+            if not _is_extension_identifier(related_extension_id):
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "invalid extension identifier"})
+                continue
+            normalized_id = related_extension_id.casefold()
+            key = (relationship, normalized_id)
+            if normalized_id == extension_id.casefold():
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "self-referential extension relationship"})
+                continue
+            if key in seen:
+                invalid_entries.append({"field": field, "value": _manifest_value_summary(item), "reason": "duplicate extension relationship"})
+                continue
+            seen.add(key)
+            entries.append({
+                "extension_id": normalized_id,
+                "relationship": relationship,
+                "declared_in": field,
+            })
+
+    return {
+        "entries": sorted(entries, key=lambda item: (item["relationship"], item["extension_id"])),
+        "invalid_entries": invalid_entries,
+    }
+
+
+def _add_extension_relationship_findings(
+    extension_id: str,
+    version: str,
+    inventory: dict[str, Any],
+    findings: list[Finding],
+    capabilities: dict[str, dict[str, Any]],
+) -> None:
+    entries = inventory.get("entries") if isinstance(inventory.get("entries"), list) else []
+    invalid_entries = inventory.get("invalid_entries") if isinstance(inventory.get("invalid_entries"), list) else []
+    if entries:
+        identifiers = [str(item["extension_id"]) for item in entries if isinstance(item, dict) and isinstance(item.get("extension_id"), str)]
+        capabilities["extension_install_surface"] = {
+            "id": "extension_install_surface",
+            "evidence": identifiers,
+        }
+        findings.append(_finding(
+            extension_id,
+            version,
+            "extension-install-surface",
+            "supply-chain",
+            "LOW",
+            0.58,
+            "Manifest declares additional extension packages that can expand the installed capability surface.",
+            ["package.json"],
+            "Review each declared extension package at its intended version; this artifact scan does not imply that related packages were scanned.",
+            {"relationships": entries},
+        ))
+    if invalid_entries:
+        findings.append(_finding(
+            extension_id,
+            version,
+            "malformed-extension-relationship",
+            "supply-chain",
+            "MEDIUM",
+            0.76,
+            "Manifest contains malformed extensionPack or extensionDependencies declarations.",
+            ["package.json"],
+            "Do not treat the extension install surface as complete until the manifest declarations are corrected and the referenced packages are reviewed.",
+            {"invalid_relationships": invalid_entries},
+        ))
+
+
+def _is_extension_identifier(value: str) -> bool:
+    if not value or any(character.isspace() for character in value):
+        return False
+    publisher, separator, name = value.partition(".")
+    return bool(separator and publisher and name and "." not in publisher)
+
+
+def _manifest_value_summary(value: Any) -> str:
+    if isinstance(value, str):
+        return value[:200]
+    if value is None:
+        return "null"
+    return type(value).__name__
 
 
 def _add_dependency_source_findings(
