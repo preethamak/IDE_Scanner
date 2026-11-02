@@ -85,13 +85,44 @@ class CliHonestyTests(unittest.TestCase):
             code = cli.main(["scan", "--fixtures", "--profile", "deep", "--runtime", "--format", "json"])
         self.assertEqual(code, 1)
 
+    def test_cli_emits_truthful_sarif_for_scan_findings(self) -> None:
+        report = {
+            "scan_id": "scan_example",
+            "ruleset_version": "rules-1",
+            "policy_version": "policy-1",
+            "extensions": [{
+                "extension_id": "publisher.extension",
+                "version": "1.2.3",
+                "artifact_hash": "a" * 64,
+                "analysis_status": "complete",
+                "decision": "review",
+                "findings": [{
+                    "rule_id": "download-and-execute",
+                    "severity": "HIGH",
+                    "evidence_summary": "Downloads and executes content.",
+                    "file_refs": ["src/download.js"],
+                    "evidence": {"line": 9},
+                }],
+            }],
+        }
+        buffer = io.StringIO()
+        with patch("ide_scanner.cli.scan_targets", return_value=report), redirect_stdout(buffer):
+            code = cli.main(["scan", "--fixtures", "--format", "sarif"])
+
+        self.assertEqual(code, 0)
+        sarif = json.loads(buffer.getvalue())
+        self.assertEqual(sarif["version"], "2.1.0")
+        result = sarif["runs"][0]["results"][0]
+        self.assertEqual(result["level"], "error")
+        self.assertEqual(result["properties"]["artifact_sha256"], "a" * 64)
+        self.assertEqual(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "src/download.js")
+
     def test_cli_rejects_unimplemented_output_formats(self) -> None:
-        for output_format in ("sarif", "sqlite"):
-            error = io.StringIO()
-            with redirect_stderr(error), self.assertRaises(SystemExit) as stopped:
-                cli.main(["scan", "--fixtures", "--format", output_format])
-            self.assertEqual(stopped.exception.code, 2)
-            self.assertIn("invalid choice", error.getvalue())
+        error = io.StringIO()
+        with redirect_stderr(error), self.assertRaises(SystemExit) as stopped:
+            cli.main(["scan", "--fixtures", "--format", "sqlite"])
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertIn("invalid choice", error.getvalue())
 
 
 if __name__ == "__main__":

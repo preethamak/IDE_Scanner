@@ -21,6 +21,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The cache is only a transport optimization. Every restored artifact is
+      # still SHA-256 verified by the acquisition steps below before scanning.
+      - name: Restore exact real-artifact calibration cache
+        uses: actions/cache@v4
+        with:
+          path: benchmarks/external/artifacts
+          key: scanner-production-calibration-artifacts-v1
       - run: python -m pip install -e . pytest
       - name: Acquire exact real-artifact calibration input
         run: |
