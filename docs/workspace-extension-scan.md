@@ -43,6 +43,20 @@ The command refuses incomplete, failed, missing-version, or ambiguous scan
 evidence. Review the generated diff before committing it; generation preserves
 the assessed version and target platform, but it is not an automatic approval.
 
+Compare a proposed update locally or in CI:
+
+```bash
+python -m ide_scanner.cli workspace-lock-diff --before current-lock.json --after proposed-lock.json --fail-on-drift
+```
+
+It reports added, removed, changed, and unchanged exact release pins. A nonzero
+exit from `--fail-on-drift` signals a required human review, not a verdict.
+
+GitHub workflows can use `.github/actions/workspace-lock-diff` to publish the
+same JSON diff and the `drift_detected` / `changed_extension_count` outputs.
+Its default blocks lock changes after writing evidence; use `fail-on-drift:
+false` during a staged rollout.
+
 For publication-grade evidence on a hardened runner, opt into the complete
 provider and bounded runtime path explicitly:
 
