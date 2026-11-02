@@ -8,8 +8,8 @@ from .workspace import load_workspace_lock
 
 
 def compare_workspace_locks(before: str | Path, after: str | Path) -> dict[str, Any]:
-    before_entries = load_workspace_lock(Path(before))
-    after_entries = load_workspace_lock(Path(after))
+    before_entries = load_workspace_lock(Path(before), required=True)
+    after_entries = load_workspace_lock(Path(after), required=True)
     before_names, after_names = set(before_entries), set(after_entries)
     changed = [
         {"extension_id": key, "before": before_entries[key], "after": after_entries[key]}

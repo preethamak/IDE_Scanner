@@ -29,12 +29,21 @@ For repository-level review, use the [workspace extension scan
 workflow](docs/workspace-extension-scan.md) to discover VS Code and Dev
 Container recommendations and inspect their published Marketplace artifacts.
 
+Use the [GitHub workspace extension scan action](docs/github-workspace-scan-action.md)
+to preserve that evidence as a pull-request artifact and optionally gate on the
+highest recorded decision.
+
 Examples:
 
 ```bash
 guardrails scan --file extension.vsix --runtime --format json --output report.json
 guardrails scan --file extension.vsix --profile deep --runtime --format zip --output report.zip
+guardrails scan --file extension.vsix --format sarif --output guardrails.sarif.json
 ```
+
+SARIF export is for code-scanning integrations. It includes only scanner-recorded
+locations and preserves exact artifact identity in each result; a clean SARIF
+log is evidence of completed checks, not a guarantee that an extension is safe.
 
 Website: [abscissa.dev](https://abscissa.dev)
 
@@ -48,15 +57,29 @@ by the package dependencies. Without those providers the report keeps the
 affected metrics unavailable instead of converting missing evidence into a
 passing result.
 
+Use `GET /health` as a liveness probe. Use unauthenticated `GET /readyz` as a
+readiness probe: it verifies that the persistent job store accepts atomic
+writes and that every configured scan worker is alive. A non-ready service
+returns `503` and a bounded JSON reason; it never includes queued job data or
+report content.
+
 The free production fallback is `.github/workflows/mcp-scan.yml`. It executes
 the same Python pipeline on a GitHub-hosted runner, verifies the native SCA
 providers, and publishes a short-lived encrypted report artifact. Configure
 `MCP_SCAN_ENCRYPTION_KEY` as a repository Actions secret; the web Worker uses
 the same secret when dispatching and reading MCP assessments.
 
+For VS Code workspace governance, use the reusable [GitHub extension policy
+action](docs/github-extension-policy-action.md). It resolves the exact
+published VSIX for repository-recommended extensions and enforces
+version-and-SHA-256 approvals in CI.
+
 ```bash
 PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 8787
 ```
+
+For the authenticated service contract, polling workflow, exact-artifact
+checks, and production limits, see [the scanner service API guide](docs/scanner-service-api.md).
 
 ## License
 

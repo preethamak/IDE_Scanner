@@ -34,8 +34,10 @@ def discover_workspace_extensions(root: Path) -> dict[str, Any]:
     return {"workspace": str(root), "extensions": sorted(sources), "sources": {key: sorted(value) for key, value in sorted(sources.items())}}
 
 
-def load_workspace_lock(path: Path | None) -> dict[str, dict[str, str]]:
+def load_workspace_lock(path: Path | None, *, required: bool = False) -> dict[str, dict[str, str]]:
     if path is None or not path.exists():
+        if required:
+            raise ValueError(f"Required workspace lock does not exist: {path}")
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))

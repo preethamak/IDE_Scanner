@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
+    scan.add_argument("--scan-related", action="store_true", help="Also acquire and scan declared Marketplace extensionPack and extensionDependencies targets, one hop only.")
     scan.add_argument("--artifact-store", help="Preserve downloaded Marketplace VSIX files in this private vault.")
     scan.add_argument("--artifact-url", help="Final public HTTPS URL for a non-registry VSIX; requires --artifact-sha256.")
     scan.add_argument("--artifact-sha256", help="Required SHA-256 for --artifact-url acquisition.")
@@ -42,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
-    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "sarif"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, and report.zip when --output ends in .zip.")
     scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -182,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     agent.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks (on by default).")
     agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
+    agent.add_argument("--scan-related", action="store_true", help="Also scan one declared extensionPack or extensionDependencies hop before uploading the workspace report.")
     agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
     agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
     agent.add_argument(
@@ -246,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             marketplace_scan_ids=args.extension_id,
             marketplace_version=args.version,
             marketplace_target_platform=args.target_platform,
+            scan_related_marketplace_extensions=args.scan_related,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=not args.offline,
@@ -298,6 +301,10 @@ def main(argv: list[str] | None = None) -> int:
         if output_format == "bundle.json":
             from .report_bundle import build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
+            return scan_exit_code
+        if output_format == "sarif":
+            from .sarif import report_to_sarif
+            _emit(report_to_sarif(report), args.output)
             return scan_exit_code
         if output_format == "terminal":
             if args.output:
@@ -388,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             online=not args.offline,
             previous_report_file=args.previous_report,
             include_source=args.include_source,
+            scan_related_marketplace_extensions=args.scan_related,
         )
         if args.out:
             _emit(payload, args.out)
