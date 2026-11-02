@@ -81,6 +81,10 @@ PYTHONPATH=src .venv/bin/python -m ide_scanner.service --host 0.0.0.0 --port 878
 For the authenticated service contract, polling workflow, exact-artifact
 checks, and production limits, see [the scanner service API guide](docs/scanner-service-api.md).
 
+For repository-local descriptor reviews, use the [GitHub MCP assessment
+action](docs/github-mcp-assessment-action.md). It produces the same
+machine-readable evidence contract without installing or executing the server.
+
 ## License
 
 Proprietary. Copyright © 2026 Preetham AK. All rights reserved.
