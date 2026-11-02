@@ -7,9 +7,23 @@ from pathlib import Path
 
 from ide_scanner.cli import main
 from ide_scanner.workspace import build_workspace_lock, discover_workspace_extensions, load_workspace_lock, scan_workspace_extensions, workspace_lock_coverage
+from ide_scanner.workspace_lock_diff import compare_workspace_locks
 
 
 class WorkspaceExtensionScanTests(unittest.TestCase):
+    def test_lock_diff_reports_exact_release_drift_and_can_gate_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            before, after = root / "before.json", root / "after.json"
+            before.write_text(json.dumps({"extensions": {"publisher.keep": {"version": "1.0.0"}, "publisher.change": {"version": "1.0.0"}, "publisher.remove": {"version": "1.0.0"}}}))
+            after.write_text(json.dumps({"extensions": {"publisher.keep": {"version": "1.0.0"}, "publisher.change": {"version": "1.1.0"}, "publisher.add": {"version": "2.0.0"}}}))
+            result = compare_workspace_locks(before, after)
+            code = main(["workspace-lock-diff", "--before", str(before), "--after", str(after), "--fail-on-drift"])
+        self.assertEqual(result["added"], ["publisher.add"])
+        self.assertEqual(result["removed"], ["publisher.remove"])
+        self.assertEqual(result["changed"][0]["extension_id"], "publisher.change")
+        self.assertEqual(result["unchanged"], ["publisher.keep"])
+        self.assertEqual(code, 1)
     def test_discovers_vscode_devcontainer_and_workspace_recommendations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
