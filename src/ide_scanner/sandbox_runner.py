@@ -295,7 +295,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
             for directory in (root, root / "target", home, workspace):
                 directory.chmod(0o755)
         canaries = _write_canaries(home)
-        _seed_runtime_workspace(workspace, manifest)
+        workspace_fixture = _seed_runtime_workspace(workspace, manifest)
         _write_node_hook(hook_file, trace_file, home)
         _write_entrypoint_runner(entrypoint_runner, manifest)
         observations: list[dict[str, Any]] = []
@@ -313,6 +313,7 @@ def run_sandbox(path: Path, allow_execute: bool = False, timeout_seconds: int = 
             },
             "sandbox_home": str(home),
             "sandbox_workspace": str(workspace),
+            "workspace_fixture": workspace_fixture,
             "trace_file": None,
             "runtime_event_transport": "authenticated-stderr-v1",
             "instrumentation": {
@@ -408,7 +409,7 @@ def _write_canaries(home: Path) -> list[str]:
     return written
 
 
-def _seed_runtime_workspace(workspace: Path, manifest: dict[str, Any]) -> None:
+def _seed_runtime_workspace(workspace: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     """Provide a minimal, non-secret project for language-aware extensions.
 
     A VS Code extension is normally activated with the user's workspace open.
@@ -423,21 +424,53 @@ def _seed_runtime_workspace(workspace: Path, manifest: dict[str, Any]) -> None:
             language_id = contribution.get("id")
             if isinstance(language_id, str):
                 languages.add(language_id.lower())
-    if "rust" not in languages:
-        return
-    source = workspace / "src" / "lib.rs"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    (workspace / "Cargo.toml").write_text(
-        "[package]\n"
-        "name = \"guardrails_runtime_fixture\"\n"
-        "version = \"0.1.0\"\n"
-        "edition = \"2021\"\n",
-        encoding="utf-8",
-    )
-    source.write_text(
-        "pub fn guardrails_runtime_fixture() -> u32 { 42 }\n",
-        encoding="utf-8",
-    )
+    fixtures: list[dict[str, Any]] = []
+
+    def write_fixture(ecosystem: str, files: dict[str, str]) -> None:
+        written: list[str] = []
+        for relative_path, contents in files.items():
+            target = workspace / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(contents, encoding="utf-8")
+            written.append(relative_path)
+        fixtures.append({"ecosystem": ecosystem, "files": written})
+
+    if "rust" in languages:
+        write_fixture("rust", {
+            "Cargo.toml": "[package]\nname = \"guardrails_runtime_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            "src/lib.rs": "pub fn guardrails_runtime_fixture() -> u32 { 42 }\n",
+        })
+    if languages & {"javascript", "javascriptreact", "typescript", "typescriptreact"}:
+        write_fixture("node", {
+            "package.json": "{\n  \"name\": \"guardrails-runtime-fixture\",\n  \"private\": true,\n  \"version\": \"0.0.0\"\n}\n",
+            "src/index.ts": "export const guardrailsRuntimeFixture = 42;\n",
+        })
+    if "python" in languages:
+        write_fixture("python", {
+            "pyproject.toml": "[project]\nname = \"guardrails-runtime-fixture\"\nversion = \"0.0.0\"\nrequires-python = \">=3.10\"\n",
+            "src/guardrails_runtime_fixture/__init__.py": "VALUE = 42\n",
+        })
+    if "go" in languages:
+        write_fixture("go", {
+            "go.mod": "module example.invalid/guardrails-runtime-fixture\n\ngo 1.22\n",
+            "main.go": "package main\n\nfunc main() {}\n",
+        })
+    if "java" in languages:
+        write_fixture("java", {
+            "pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>invalid</groupId><artifactId>guardrails-runtime-fixture</artifactId><version>0.0.0</version></project>\n",
+            "src/main/java/GuardrailsRuntimeFixture.java": "class GuardrailsRuntimeFixture {}\n",
+        })
+    if languages & {"csharp", "cs"}:
+        write_fixture("dotnet", {
+            "GuardrailsRuntimeFixture.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n",
+            "Program.cs": "Console.WriteLine(42);\n",
+        })
+    return {
+        "schema_version": "guardrails.runtime-workspace-fixture.v1",
+        "declared_language_ids": sorted(languages),
+        "fixtures": fixtures,
+        "status": "seeded" if fixtures else "not-applicable",
+    }
 
 
 def _planned_commands(manifest: dict[str, Any]) -> list[dict[str, str]]:

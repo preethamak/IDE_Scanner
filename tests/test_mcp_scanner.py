@@ -1,10 +1,17 @@
 import asyncio
 
 from ide_scanner.mcp import scan_mcp_payload
+from ide_scanner.mcp.scanner import _normalize_input
 from ide_scanner.mcp.extractors.auth_modes import AuthModesResult
 from ide_scanner.mcp.extractors.classification import ClassificationResult
 from ide_scanner.mcp.extractors.fingerprint import FingerprintResult, TransportLevelEnum
-from ide_scanner.mcp.extractors.tool_analysis import ToolAnalysisResult, ToolPoisoningFinding, ToolPoisoningCategory
+from ide_scanner.mcp.extractors.tool_analysis import (
+    ToolAnalysisResult,
+    ToolPoisoningFinding,
+    ToolPoisoningCategory,
+    _coerce_tool_model,
+    _tool_declaration_evidence,
+)
 from ide_scanner.mcp.runners.auth_strength import AuthStrengthRunner
 from ide_scanner.mcp.runners.hosting_operator_class import HostingOperatorClassRunner
 from ide_scanner.mcp.runners.metadata_security import MetadataSecurityRunner
@@ -29,6 +36,25 @@ def test_mcp_metric_contract_has_twelve_weighted_leaves():
     assert {item["name"] for item in leaves} >= {"auth-strength", "metadata-security", "secrets-risk"}
     assert report["schema_version"] == "guardrails.mcp-risk-report.v1"
     assert report["scanner"]["mode"] == "full"
+
+
+def test_descriptor_validation_requires_an_identity_and_explicit_local_or_remote_transport():
+    import pytest
+
+    with pytest.raises(ValueError, match="requires a non-empty name"):
+        scan_mcp_payload({"transport": "stdio"})
+    with pytest.raises(ValueError, match="requires mcp_url/url"):
+        scan_mcp_payload({"name": "ambiguous"})
+    with pytest.raises(ValueError, match="must not include credentials"):
+        scan_mcp_payload({"name": "unsafe-url", "url": "https://secret@example.test/mcp"})
+    with pytest.raises(ValueError, match="tools must be an array"):
+        scan_mcp_payload({"name": "bad-tools", "transport": "stdio", "tools": ["not-an-object"]})
+
+
+def test_descriptor_validation_allows_insecure_http_to_be_assessed_as_transport_risk():
+    normalized = _normalize_input({"name": "http-server", "url": "http://server.invalid/mcp", "tools": []})
+    assert normalized["mcp_url"] == "http://server.invalid/mcp"
+    assert normalized["is_local"] is False
 
 
 def test_reference_auth_and_hosting_scores_are_preserved():
@@ -72,3 +98,59 @@ def test_reference_transport_and_metadata_vetoes_are_preserved():
     assert metadata_output.score == 1.0
     assert metadata_output.veto == VetoLevelEnum.FAILURE
 
+
+def test_tool_declarations_are_preserved_without_becoming_a_verdict():
+    tool = _coerce_tool_model({
+        "name": "lookup",
+        "title": "Lookup customer",
+        "description": "Fetches a customer record.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}},
+        "outputSchema": {"type": "object", "properties": {"email": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    })
+
+    evidence = _tool_declaration_evidence(tool)
+
+    assert evidence.title == "Lookup customer"
+    assert evidence.annotations is not None
+    assert evidence.annotations.readOnlyHint is True
+    assert evidence.output_schema == {"type": "object", "properties": {"email": {"type": "string"}}}
+    assert evidence.sha256 is not None
+    assert len(evidence.sha256) == 64
+    assert evidence.issues == []
+
+
+def test_conflicting_mcp_safety_hints_are_disclosed_as_declaration_evidence():
+    tool = _coerce_tool_model({
+        "name": "delete_all",
+        "description": "Deletes records.",
+        "inputSchema": {"type": "object"},
+        "annotations": {"readOnlyHint": True, "destructiveHint": True},
+    })
+
+    evidence = _tool_declaration_evidence(tool)
+
+    assert [issue.code for issue in evidence.issues] == ["conflicting-safety-hints"]
+
+
+def test_tool_declaration_fingerprint_is_order_independent_and_detects_interface_drift():
+    base = {
+        "name": "lookup",
+        "description": "Fetches a customer record.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "region": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
+    }
+    reordered = {
+        "annotations": {"idempotentHint": True, "readOnlyHint": True},
+        "inputSchema": {"properties": {"region": {"type": "string"}, "id": {"type": "string"}}, "type": "object"},
+        "description": "Fetches a customer record.",
+        "name": "lookup",
+    }
+    changed = {**base, "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}}}
+
+    base_fingerprint = _tool_declaration_evidence(_coerce_tool_model(base)).sha256
+    reordered_fingerprint = _tool_declaration_evidence(_coerce_tool_model(reordered)).sha256
+    changed_fingerprint = _tool_declaration_evidence(_coerce_tool_model(changed)).sha256
+
+    assert base_fingerprint == reordered_fingerprint
+    assert base_fingerprint != changed_fingerprint

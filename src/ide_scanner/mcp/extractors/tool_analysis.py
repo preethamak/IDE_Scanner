@@ -1,5 +1,6 @@
 """ToolAnalysisExtractor — tool metadata security + source code taint flow analysis."""
 
+import hashlib
 import json
 import logging
 from enum import Enum
@@ -25,6 +26,48 @@ def _coerce_tool_model(value: dict[str, Any]) -> ToolModel:
     data = dict(value)
     data.setdefault("inputSchema", {"type": "object", "properties": {}})
     return ToolModel(**data)
+
+
+def _tool_declaration_evidence(tool: Any) -> "ToolDeclarationEvidence":
+    """Preserve MCP declarations without treating them as behavioral proof."""
+    raw_annotations = getattr(tool, "annotations", None)
+    if isinstance(raw_annotations, BaseModel):
+        raw_annotations = raw_annotations.model_dump(by_alias=True)
+    annotations = ToolAnnotationsObject.model_validate(raw_annotations) if isinstance(raw_annotations, dict) else None
+    raw_output_schema = getattr(tool, "outputSchema", getattr(tool, "output_schema", None))
+    if isinstance(raw_output_schema, BaseModel):
+        raw_output_schema = raw_output_schema.model_dump()
+    output_schema = dict(raw_output_schema) if isinstance(raw_output_schema, dict) else None
+    issues: list[ToolDeclarationIssue] = []
+    if annotations and annotations.readOnlyHint is True and annotations.destructiveHint is True:
+        issues.append(ToolDeclarationIssue(
+            code="conflicting-safety-hints",
+            message="The tool declares both readOnlyHint and destructiveHint as true.",
+        ))
+    evidence = ToolDeclarationEvidence(
+        title=getattr(tool, "title", None) or (annotations.title if annotations else None),
+        annotations=annotations,
+        output_schema=output_schema,
+        issues=issues,
+    )
+    fingerprint_payload = {
+        "annotations": annotations.model_dump(exclude_none=True) if annotations else None,
+        "description": getattr(tool, "description", None),
+        "input_schema": _schema_as_dict(getattr(tool, "inputSchema", getattr(tool, "input_schema", None))),
+        "name": getattr(tool, "name", None),
+        "output_schema": output_schema,
+        "title": evidence.title,
+    }
+    evidence.sha256 = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8"),
+    ).hexdigest()
+    return evidence
+
+
+def _schema_as_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, BaseModel):
+        value = value.model_dump()
+    return dict(value) if isinstance(value, dict) else None
 
 
 # --- Metadata security enums ---
@@ -424,15 +467,31 @@ class SourceConstructedToolModel(ToolSrcCodeTagLLMResponseFormat):
         description="JSON Schema object for the tool's input parameters",
     )
 
-# TODO: uncomment this when okay
-# class ToolAnnotationsObject(BaseModel):
-#     """Tool annotation hints exposed to clients."""
-#
-#     title: Optional[str] = None
-#     readOnlyHint: Optional[bool] = None
-#     destructiveHint: Optional[bool] = None
-#     idempotentHint: Optional[bool] = None
-#     openWorldHint: Optional[bool] = None
+class ToolAnnotationsObject(BaseModel):
+    """MCP tool annotations, retained as untrusted server declarations."""
+
+    title: Optional[str] = None
+    readOnlyHint: Optional[bool] = None
+    destructiveHint: Optional[bool] = None
+    idempotentHint: Optional[bool] = None
+    openWorldHint: Optional[bool] = None
+
+
+class ToolDeclarationIssue(BaseModel):
+    """An objectively inconsistent declaration, not a behavioral verdict."""
+
+    code: str
+    message: str
+
+
+class ToolDeclarationEvidence(BaseModel):
+    """Exact tool declarations retained for review alongside scan evidence."""
+
+    title: Optional[str] = None
+    annotations: Optional[ToolAnnotationsObject] = None
+    output_schema: Optional[dict[str, Any]] = None
+    sha256: Optional[str] = None
+    issues: list[ToolDeclarationIssue] = Field(default_factory=list)
 
 
 # class IconObject(BaseModel):
@@ -453,6 +512,10 @@ class DeepToolModel(ExtraToolDetailsLLMResponseFormat, ToolSrcCodeTagLLMResponse
     description: Optional[str] = Field(default=None)
     inputSchema: JSONSchemaObject = Field(
         description="JSON Schema object for the tool's input parameters",
+    )
+    declaration: ToolDeclarationEvidence = Field(
+        default_factory=ToolDeclarationEvidence,
+        description="Server-declared metadata retained as non-authoritative review evidence.",
     )
     # outputSchema: Optional[JSONSchemaObject] = Field(
     #     default=None,
@@ -991,7 +1054,7 @@ class ToolAnalysisExtractor(BaseExtractor):
         enriched = []
         for tool in tools:
             deep = results.get(tool.name)
-            raw_schema = getattr(tool, "inputSchema", {}) or {}
+            raw_schema = getattr(tool, "inputSchema", getattr(tool, "input_schema", {})) or {}
             if isinstance(raw_schema, BaseModel):
                 raw_schema = raw_schema.model_dump()
             enriched.append(DeepToolModel(
@@ -1003,6 +1066,7 @@ class ToolAnalysisExtractor(BaseExtractor):
                     properties=raw_schema.get("properties", {}),
                     required=raw_schema.get("required"),
                 ),
+                declaration=_tool_declaration_evidence(tool),
                 # icons=[
                 #     IconObject(
                 #         src=getattr(icon, "src", None),

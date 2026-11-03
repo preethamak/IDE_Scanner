@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import hmac
 import json
 import os
@@ -14,16 +16,31 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlsplit
 
 from .artifact_store import TARGET_PLATFORM_RE
 from .report_bundle import build_report_bundle
 from .rule_registry import RULESET_VERSION, rules_json
 from .mcp import scan_mcp_payload
 from .scanner import scan_targets
+from .webhooks import configured_webhook, deliver_terminal_webhook
 
 SERVICE_VERSION = "0.1.0"
 DEFAULT_DATA_DIR = Path(os.environ.get("IDE_SCANNER_DATA_DIR", ".ide-scanner-data"))
 MARKETPLACE_ID = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$")
+IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def configured_api_tokens() -> tuple[str, ...]:
+    """Return active bearer credentials without exposing their values.
+
+    ``IDE_SCANNER_API_TOKEN`` remains the backwards-compatible single-token
+    setting. ``IDE_SCANNER_API_TOKENS`` is a comma-separated overlap set for a
+    controlled rotation. Empty entries, whitespace, and duplicates are ignored.
+    """
+    values = (os.environ.get("IDE_SCANNER_API_TOKEN", ""), *os.environ.get("IDE_SCANNER_API_TOKENS", "").split(","))
+    return tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -41,6 +58,10 @@ MAX_SCAN_WORKERS = _bounded_env_int("IDE_SCANNER_MAX_WORKERS", 2, 1, 16)
 MAX_SCAN_QUEUE = _bounded_env_int("IDE_SCANNER_MAX_QUEUE", 32, 1, 1024)
 JOB_TIMEOUT_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_TIMEOUT", 600, 30, 3600)
 MCP_REQUEST_MAX_BYTES = _bounded_env_int("IDE_SCANNER_MCP_MAX_BYTES", 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
+MCP_BATCH_MAX_ITEMS = 10
+WEBHOOK_MAX_TOTAL_ATTEMPTS = 9
+JOB_RETENTION_SECONDS = _bounded_env_int("IDE_SCANNER_JOB_RETENTION_SECONDS", 7 * 24 * 3600, 3600, 90 * 24 * 3600)
+MAINTENANCE_INTERVAL_SECONDS = _bounded_env_int("IDE_SCANNER_MAINTENANCE_INTERVAL_SECONDS", 3600, 60, 24 * 3600)
 
 
 class JobStore:
@@ -48,25 +69,87 @@ class JobStore:
         self.root = root
         self.jobs_dir = root / "jobs"
         self.reports_dir = root / "reports"
+        self.audit_dir = root / "audit"
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.audit_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
-        now = _now()
-        job = {
-            "id": f"job_{uuid.uuid4().hex}",
-            "status": "queued",
-            "extension_id": extension_id,
-            "version": version,
-            "target_platform": target_platform,
-            "created_at": now,
-            "updated_at": now,
-            "error": None,
-            "report_ref": None,
+    def readiness(self) -> dict[str, Any]:
+        """Return a non-mutating check of durable local state availability."""
+        directories = {"jobs": self.jobs_dir, "reports": self.reports_dir, "audit": self.audit_dir}
+        available = all(path.is_dir() and os.access(path, os.R_OK | os.W_OK) for path in directories.values())
+        return {"ready": available, "storage": "available" if available else "unavailable"}
+
+    def write_audit(self, event: dict[str, Any]) -> bool:
+        """Append a privacy-minimized authenticated API receipt.
+
+        Audit entries intentionally have no request body, authorization header,
+        query string, or client network metadata. The local operator can match
+        an entry to a caller through the returned request ID.
+        """
+        record = {
+            "timestamp": _now(),
+            "request_id": str(event.get("request_id") or ""),
+            "method": str(event.get("method") or ""),
+            "path": str(event.get("path") or ""),
+            "status": int(event.get("status") or 0),
         }
-        self.write(job)
+        if not record["request_id"] or not record["method"] or not record["path"]:
+            return False
+        destination = self.audit_dir / f"service-{datetime.now(UTC).strftime('%Y-%m-%d')}.jsonl"
+        try:
+            with self._lock, destination.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+            return True
+        except OSError:
+            return False
+
+    def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
+        job, _, _ = self.create_or_reuse(extension_id, version=version, target_platform=target_platform)
         return job
+
+    def create_or_reuse(
+        self,
+        extension_id: str,
+        *,
+        version: str | None = None,
+        target_platform: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> tuple[dict[str, Any], bool, bool]:
+        """Atomically reserve a job for a client request.
+
+        A retry with the same key and exact release request returns the original
+        job. A key bound to different request data is a client conflict instead
+        of a potentially surprising scan of another artifact.
+        """
+        fingerprint = _request_fingerprint(extension_id, version, target_platform)
+        with self._lock:
+            if idempotency_key:
+                for path in self.jobs_dir.glob("job_*.json"):
+                    current = self._read_json_locked(path)
+                    if not isinstance(current, dict) or current.get("idempotency_key") != idempotency_key:
+                        continue
+                    if current.get("request_fingerprint") == fingerprint:
+                        return current, False, False
+                    return current, False, True
+            now = _now()
+            job = {
+                "id": f"job_{uuid.uuid4().hex}",
+                "status": "queued",
+                "extension_id": extension_id,
+                "version": version,
+                "target_platform": target_platform,
+                "created_at": now,
+                "updated_at": now,
+                "error": None,
+                "report_ref": None,
+                "report_sha256": None,
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": fingerprint if idempotency_key else None,
+            }
+            self._write_json_locked(self.jobs_dir / f"{job['id']}.json", job)
+            return job, True, False
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         if not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
@@ -80,11 +163,96 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
+    def list_summaries(
+        self,
+        *,
+        extension_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List bounded, non-secret job metadata for evidence discovery."""
+        rows, _ = self.list_summary_page(
+            extension_id=extension_id,
+            status=status,
+            limit=limit,
+        )
+        return rows
+
+    def list_summary_page(
+        self,
+        *,
+        extension_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        cursor: tuple[str, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """List one cursor-addressable page of non-secret job metadata."""
+        rows: list[dict[str, Any]] = []
+        for path in self.jobs_dir.glob("job_*.json"):
+            item = self._read_json_locked(path)
+            if not isinstance(item, dict):
+                continue
+            if extension_id and item.get("extension_id") != extension_id:
+                continue
+            if status and item.get("status") != status:
+                continue
+            rows.append({key: item.get(key) for key in (
+                "id", "status", "stage", "extension_id", "version", "target_platform",
+                "created_at", "updated_at", "report_ref", "report_sha256", "error",
+            )})
+        rows.sort(key=lambda item: (str(item.get("updated_at") or ""), str(item.get("id") or "")), reverse=True)
+        if cursor is not None:
+            rows = [item for item in rows if (str(item.get("updated_at") or ""), str(item.get("id") or "")) < cursor]
+        page = rows[:max(1, min(limit, 100))]
+        next_cursor = None
+        if len(rows) > len(page) and page:
+            next_cursor = _encode_job_cursor(str(page[-1]["updated_at"]), str(page[-1]["id"]))
+        return page, next_cursor
+
     def write(self, job: dict[str, Any]) -> None:
         job["updated_at"] = _now()
         path = self.jobs_dir / f"{job['id']}.json"
         with self._lock:
             self._write_json_locked(path, job)
+
+    def try_start(self, job_id: str) -> dict[str, Any] | None:
+        """Atomically claim a queued job for a worker.
+
+        A queued job may be cancelled after it has entered the worker queue.
+        Claiming it through the store, rather than mutating the stale queue
+        copy, keeps cancellation authoritative.
+        """
+        path = self.jobs_dir / f"{job_id}.json"
+        with self._lock:
+            current = self._read_json_locked(path)
+            if not isinstance(current, dict) or current.get("status") != "queued":
+                return None
+            current.update({"status": "running", "stage": "downloading", "updated_at": _now()})
+            self._write_json_locked(path, current)
+            return current
+
+    def cancel(self, job_id: str) -> tuple[dict[str, Any] | None, bool]:
+        """Cancel a queued or running job without deleting its audit record.
+
+        The scanner thread cannot be forcibly stopped safely. A cancellation
+        therefore prevents report publication and terminal webhooks even when
+        a running scan finishes after the request.
+        """
+        path = self.jobs_dir / f"{job_id}.json"
+        with self._lock:
+            current = self._read_json_locked(path)
+            if not isinstance(current, dict):
+                return None, False
+            if current.get("status") not in {"queued", "running"}:
+                return current, False
+            current.update({
+                "status": "cancelled",
+                "stage": "cancelled",
+                "error": "Cancelled by an authorized client.",
+                "updated_at": _now(),
+            })
+            self._write_json_locked(path, current)
+            return current, True
 
     def ready(self) -> tuple[bool, str | None]:
         """Confirm the persistent job store can accept an atomic write.
@@ -106,6 +274,13 @@ class JobStore:
         path = self.reports_dir / f"{job_id}.json"
         with self._lock:
             self._write_json_locked(path, report, separators=(",", ":"))
+            job_path = self.jobs_dir / f"{job_id}.json"
+            job = self._read_json_locked(job_path)
+            if isinstance(job, dict):
+                job["report_sha256"] = _sha256_file(path)
+                job["report_ref"] = f"/v1/reports/{job_id}"
+                job["updated_at"] = _now()
+                self._write_json_locked(job_path, job)
         return f"/v1/reports/{job_id}"
 
     def try_complete(self, job_id: str, summary: dict[str, Any], report: dict[str, Any]) -> bool:
@@ -127,6 +302,7 @@ class JobStore:
                 "stage": "complete",
                 "summary": summary,
                 "report_ref": f"/v1/reports/{job_id}",
+                "report_sha256": _sha256_file(report_path),
                 "updated_at": _now(),
             })
             self._write_json_locked(job_path, current)
@@ -160,6 +336,16 @@ class JobStore:
             return None
         return value if isinstance(value, dict) else None
 
+    def get_report_sha256(self, job_id: str) -> str | None:
+        """Return the SHA-256 of the exact persisted report bytes."""
+        if not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
+            return None
+        path = self.reports_dir / f"{job_id}.json"
+        try:
+            return _sha256_file(path)
+        except OSError:
+            return None
+
     @staticmethod
     def _read_json_locked(path: Path) -> Any:
         try:
@@ -177,6 +363,10 @@ class JobStore:
         temp.replace(path)
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def execute_marketplace_job(
     store: JobStore,
     job: dict[str, Any],
@@ -184,14 +374,14 @@ def execute_marketplace_job(
 ) -> None:
     from .scanner import DEEP_REQUIRED_PROVIDERS
 
-    job["status"] = "running"
-    job["stage"] = "downloading"
-    store.write(job)
+    claimed = store.try_start(str(job.get("id") or ""))
+    if not claimed:
+        return
     try:
         report = scan(
-            marketplace_scan_ids=[job["extension_id"]],
-            marketplace_version=job.get("version"),
-            marketplace_target_platform=job.get("target_platform"),
+            marketplace_scan_ids=[claimed["extension_id"]],
+            marketplace_version=claimed.get("version"),
+            marketplace_target_platform=claimed.get("target_platform"),
             online=True,
             include_posture=False,
             required_providers=DEEP_REQUIRED_PROVIDERS,
@@ -202,9 +392,11 @@ def execute_marketplace_job(
         extension_rows = bundle.get("leaderboard", {}).get("extensions", [])
         if not extension_rows:
             raise RuntimeError("Scanner completed without an extension result.")
-        store.try_complete(job["id"], bundle["summary"], bundle)
+        if store.try_complete(claimed["id"], bundle["summary"], bundle):
+            _notify_terminal_job(store, claimed["id"])
     except Exception as exc:  # noqa: BLE001 - job records must surface scanner/network failures
-        store.try_fail(job["id"], str(exc))
+        if store.try_fail(claimed["id"], str(exc)):
+            _notify_terminal_job(store, claimed["id"])
 
 
 class ScanWorkerPool:
@@ -277,11 +469,12 @@ class ScanWorkerPool:
             # The scan overran its budget. Record the timeout; the orphaned
             # daemon thread cannot be force-killed in CPython, but the bounded
             # pool prevents it from starving new work indefinitely.
-            self.store.try_fail(
+            if self.store.try_fail(
                 job["id"],
                 f"Scan exceeded the {self.job_timeout}s job timeout and was abandoned.",
                 stage="timeout",
-            )
+            ):
+                _notify_terminal_job(self.store, job["id"])
 
 
 def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) -> int:
@@ -290,8 +483,8 @@ def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) ->
     a restart does not leave jobs wedged in a non-terminal state forever."""
     removed = 0
     cutoff = time.time() - max_age_seconds
-    for directory in (store.jobs_dir, store.reports_dir):
-        for path in directory.glob("*.json"):
+    for directory, pattern in ((store.jobs_dir, "*.json"), (store.reports_dir, "*.json"), (store.audit_dir, "*.jsonl")):
+        for path in directory.glob(pattern):
             try:
                 if path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
@@ -308,7 +501,87 @@ def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) ->
             job["stage"] = "interrupted"
             job["error"] = "Service restarted while the job was in progress."
             store.write(job)
+            _notify_terminal_job(store, str(job.get("id") or ""))
     return removed
+
+
+def _notify_terminal_job(store: JobStore, job_id: str) -> None:
+    job = store.get(job_id)
+    if not job:
+        return
+    previous = job.get("webhook_delivery") if isinstance(job.get("webhook_delivery"), dict) else {}
+    if previous.get("status") in {"delivered", "dead_lettered"}:
+        return
+    delivery = deliver_terminal_webhook(job)
+    if delivery is None:
+        return
+    total_attempts = _delivery_attempts(previous) + _delivery_attempts(delivery)
+    delivery["total_attempts"] = total_attempts
+    if delivery.get("status") == "failed" and total_attempts >= WEBHOOK_MAX_TOTAL_ATTEMPTS:
+        delivery["status"] = "dead_lettered"
+        delivery["error"] = str(delivery.get("error") or "Webhook delivery exhausted its retry budget.")
+    job["webhook_delivery"] = delivery
+    store.write(job)
+
+
+def retry_failed_webhook_deliveries(store: JobStore) -> int:
+    """Retry persisted terminal webhook failures once when the service starts.
+
+    The job record is the durable outbox. Delivery IDs remain per attempt, so
+    recipients must deduplicate them; the bounded total prevents restart loops
+    from creating an unbounded retry stream.
+    """
+    retried = 0
+    for path in sorted(store.jobs_dir.glob("job_*.json")):
+        job_id = path.stem
+        job = store.get(job_id)
+        if not job or job.get("status") not in {"complete", "failed"}:
+            continue
+        delivery = job.get("webhook_delivery")
+        if not isinstance(delivery, dict) or delivery.get("status") != "failed":
+            continue
+        if _delivery_attempts(delivery) >= WEBHOOK_MAX_TOTAL_ATTEMPTS:
+            delivery["status"] = "dead_lettered"
+            job["webhook_delivery"] = delivery
+            store.write(job)
+            continue
+        _notify_terminal_job(store, job_id)
+        retried += 1
+    return retried
+
+
+def _delivery_attempts(delivery: dict[str, Any]) -> int:
+    try:
+        return max(0, int(delivery.get("total_attempts", delivery.get("attempts", 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def maintain_store(store: JobStore, *, retention_seconds: int = JOB_RETENTION_SECONDS) -> dict[str, int]:
+    """Run bounded service maintenance without changing completed scan evidence."""
+    return {
+        "removed": cleanup_stale_jobs(store, max_age_seconds=retention_seconds),
+        "webhooks_retried": retry_failed_webhook_deliveries(store),
+    }
+
+
+def start_maintenance_loop(
+    store: JobStore,
+    *,
+    interval_seconds: int = MAINTENANCE_INTERVAL_SECONDS,
+    retention_seconds: int = JOB_RETENTION_SECONDS,
+    stop_event: threading.Event | None = None,
+) -> threading.Thread:
+    """Maintain local durable state on a daemon interval for long-lived service processes."""
+    stop_event = stop_event or threading.Event()
+
+    def run() -> None:
+        while not stop_event.wait(interval_seconds):
+            maintain_store(store, retention_seconds=retention_seconds)
+
+    thread = threading.Thread(target=run, name="scanner-maintenance", daemon=True)
+    thread.start()
+    return thread
 
 
 class ScannerServiceHandler(BaseHTTPRequestHandler):
@@ -328,7 +601,8 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
+        parsed = urlsplit(self.path)
+        path = parsed.path
         if path == "/health":
             self._json(200, health_payload())
             return
@@ -345,13 +619,62 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"error": "Scanner service authorization failed."})
             return
+        self._begin_audit(path)
+        if path == "/v1/jobs":
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            extension_id = _one_query_value(query, "extension_id")
+            status = _one_query_value(query, "status")
+            limit_value = _one_query_value(query, "limit")
+            cursor_value = _one_query_value(query, "cursor")
+            if extension_id and not MARKETPLACE_ID.fullmatch(extension_id):
+                self._json(400, {"error": "extension_id must use publisher.extension format."})
+                return
+            if status and status not in {"queued", "running", "complete", "failed", "cancelled"}:
+                self._json(400, {"error": "status is invalid."})
+                return
+            try:
+                limit = int(limit_value or "100")
+            except ValueError:
+                self._json(400, {"error": "limit must be an integer from 1 through 100."})
+                return
+            if not 1 <= limit <= 100:
+                self._json(400, {"error": "limit must be an integer from 1 through 100."})
+                return
+            try:
+                cursor = _decode_job_cursor(cursor_value) if cursor_value else None
+            except ValueError:
+                self._json(400, {"error": "cursor is invalid."})
+                return
+            jobs, next_cursor = self.store.list_summary_page(
+                extension_id=extension_id or None,
+                status=status or None,
+                limit=limit,
+                cursor=cursor,
+            )
+            self._json(200, {"jobs": jobs, "next_cursor": next_cursor})
+            return
         if path.startswith("/v1/jobs/"):
             job = self.store.get(path.rsplit("/", 1)[-1])
             self._json(200, job) if job else self._json(404, {"error": "Scan job not found."})
             return
         if path.startswith("/v1/reports/"):
-            report = self.store.get_report(path.rsplit("/", 1)[-1])
-            self._json(200, report) if report else self._json(404, {"error": "Scan report not found."})
+            job_id = path.rsplit("/", 1)[-1]
+            report = self.store.get_report(job_id)
+            digest = self.store.get_report_sha256(job_id)
+            if not report or not digest:
+                self._json(404, {"error": "Scan report not found."})
+                return
+            etag = f'"sha256-{digest}"'
+            if self.headers.get("if-none-match", "") == etag:
+                self._write_audit(304)
+                self.send_response(304)
+                self._cors_headers()
+                self.send_header("ETag", etag)
+                self.send_header("X-Request-ID", self._audit_request_id)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self._json(200, report, headers={"ETag": etag})
             return
         self._json(404, {"error": "Route not found."})
 
@@ -360,6 +683,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Scanner service authorization failed."})
             return
         path = self.path.split("?", 1)[0]
+        self._begin_audit(path)
         if path == "/v1/scans/mcp":
             payload = self._read_json(max_bytes=MCP_REQUEST_MAX_BYTES)
             if not payload:
@@ -369,6 +693,28 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
                 self._json(200, scan_mcp_payload(payload))
             except Exception as exc:  # noqa: BLE001 - service returns bounded client-safe errors
                 self._json(422, {"error": str(exc) or "MCP assessment failed."})
+            return
+        if path == "/v1/scans/mcp/batch":
+            payload = self._read_json(max_bytes=MCP_REQUEST_MAX_BYTES)
+            servers = payload.get("servers") if isinstance(payload, dict) else None
+            if not isinstance(servers, list) or not servers:
+                self._json(400, {"error": "servers must be a non-empty list of MCP descriptor objects."})
+                return
+            if len(servers) > MCP_BATCH_MAX_ITEMS:
+                self._json(400, {"error": f"servers may contain at most {MCP_BATCH_MAX_ITEMS} descriptors."})
+                return
+            results: list[dict[str, Any]] = []
+            completed = 0
+            for index, descriptor in enumerate(servers):
+                if not isinstance(descriptor, dict):
+                    results.append({"index": index, "status": "failed", "error": "MCP descriptor must be a JSON object."})
+                    continue
+                try:
+                    results.append({"index": index, "status": "complete", "assessment": scan_mcp_payload(descriptor)})
+                    completed += 1
+                except Exception:  # noqa: BLE001 - one malformed descriptor must not hide peer results
+                    results.append({"index": index, "status": "failed", "error": "MCP assessment failed."})
+            self._json(200, {"results": results, "summary": {"total": len(servers), "complete": completed, "failed": len(servers) - completed}})
             return
         if path != "/v1/scans/marketplace":
             self._json(404, {"error": "Route not found."})
@@ -383,15 +729,55 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
             self._json(400, {"error": "target_platform is invalid."})
             return
-        job = self.store.create(extension_id, version=version, target_platform=target_platform)
+        idempotency_key = self.headers.get("idempotency-key", "").strip() or None
+        if idempotency_key and not IDEMPOTENCY_KEY.fullmatch(idempotency_key):
+            self._json(400, {"error": "Idempotency-Key must be 1-128 URL-safe characters."})
+            return
+        job, created, conflict = self.store.create_or_reuse(
+            extension_id,
+            version=version,
+            target_platform=target_platform,
+            idempotency_key=idempotency_key,
+        )
+        if conflict:
+            self._json(409, {"error": "Idempotency-Key is already bound to a different scan request.", "job": job})
+            return
+        if not created:
+            if job.get("stage") == "rejected":
+                self._json(
+                    429,
+                    {"error": "Scanner is at capacity; retry later.", "job": job},
+                    headers={"Idempotent-Replayed": "true", "Retry-After": "30"},
+                )
+                return
+            self._json(202, job, headers={"Idempotent-Replayed": "true"})
+            return
         if not self.pool.submit(job):
             job["status"] = "failed"
             job["stage"] = "rejected"
             job["error"] = "Scanner is at capacity; retry later."
             self.store.write(job)
-            self._json(429, {"error": "Scanner is at capacity; retry later.", "job": job})
+            self._json(429, {"error": "Scanner is at capacity; retry later.", "job": job}, headers={"Retry-After": "30"})
             return
         self._json(202, job)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._authorized():
+            self._json(401, {"error": "Scanner service authorization failed."})
+            return
+        path = self.path.split("?", 1)[0]
+        self._begin_audit(path)
+        if not path.startswith("/v1/jobs/"):
+            self._json(404, {"error": "Route not found."})
+            return
+        job, cancelled = self.store.cancel(path.rsplit("/", 1)[-1])
+        if not job:
+            self._json(404, {"error": "Scan job not found."})
+            return
+        if not cancelled:
+            self._json(409, {"error": "Only queued or running scan jobs can be cancelled.", "job": job})
+            return
+        self._json(200, job)
 
     def log_message(self, format: str, *args: object) -> None:
         if os.environ.get("IDE_SCANNER_QUIET") != "1":
@@ -409,27 +795,50 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         return value if isinstance(value, dict) else {}
 
     def _authorized(self) -> bool:
-        token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
-        if not token:
+        tokens = configured_api_tokens()
+        if not tokens:
             return True
         supplied = self.headers.get("authorization", "")
-        return hmac.compare_digest(supplied, f"Bearer {token}")
+        # Evaluate every candidate to avoid revealing a matching token's
+        # position within a short rotation-overlap set.
+        matched = False
+        for token in tokens:
+            matched = hmac.compare_digest(supplied, f"Bearer {token}") or matched
+        return matched
 
-    def _json(self, status: int, payload: Any) -> None:
+    def _begin_audit(self, path: str) -> None:
+        supplied = self.headers.get("x-request-id", "").strip()
+        self._audit_request_id = supplied if REQUEST_ID.fullmatch(supplied) else f"req_{uuid.uuid4().hex}"
+        self._audit_path = path
+
+    def _write_audit(self, status: int) -> None:
+        path = getattr(self, "_audit_path", "")
+        request_id = getattr(self, "_audit_request_id", "")
+        if path and request_id:
+            self.store.write_audit({"request_id": request_id, "method": self.command, "path": path, "status": status})
+
+    def _json(self, status: int, payload: Any, *, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self._write_audit(status)
         self.send_response(status)
         self._cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        request_id = getattr(self, "_audit_request_id", "")
+        if request_id:
+            self.send_header("X-Request-ID", request_id)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
     def _cors_headers(self) -> None:
         origin = os.environ.get("IDE_SCANNER_ALLOWED_ORIGIN", "http://127.0.0.1:8765")
         self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Headers", "content-type, authorization")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "content-type, authorization, idempotency-key, x-request-id")
+        self.send_header("Access-Control-Expose-Headers", "ETag, X-Request-ID")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 
 
 def health_payload() -> dict[str, Any]:
@@ -444,6 +853,11 @@ def health_payload() -> dict[str, Any]:
             "yara": "optional",
             "dependency_intelligence": "online",
         },
+        "operations": {
+            "job_retention_seconds": JOB_RETENTION_SECONDS,
+            "maintenance_interval_seconds": MAINTENANCE_INTERVAL_SECONDS,
+            "webhook_max_total_attempts": WEBHOOK_MAX_TOTAL_ATTEMPTS,
+        },
     }
 
 
@@ -451,7 +865,7 @@ def readiness_payload(store: JobStore, pool: ScanWorkerPool) -> tuple[bool, dict
     """Build the authenticated-scan service readiness contract for probes."""
     store_ready, store_error = store.ready()
     capacity = pool.readiness()
-    ready = store_ready and bool(capacity["workers_healthy"])
+    ready = store_ready and bool(store.readiness()["ready"]) and bool(capacity["workers_healthy"]) and int(capacity["queue_depth"]) < int(capacity["queue_capacity"])
     payload: dict[str, Any] = {
         "status": "ready" if ready else "not_ready",
         "service_version": SERVICE_VERSION,
@@ -479,15 +893,18 @@ def openapi_payload() -> dict[str, Any]:
         "required": ["id", "status", "extension_id", "created_at", "updated_at"],
         "properties": {
             "id": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"},
-            "status": {"type": "string", "enum": ["queued", "running", "complete", "failed"]},
+            "status": {"type": "string", "enum": ["queued", "running", "complete", "failed", "cancelled"]},
             "stage": {"type": "string", "description": "Terminal failures use rejected, timeout, or interrupted when applicable."},
             "extension_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"},
             "version": {"type": ["string", "null"]},
             "target_platform": {"type": ["string", "null"]},
+            "idempotency_key": {"type": ["string", "null"], "description": "Accepted request key; never use this field as an authorization secret."},
             "created_at": {"type": "string", "format": "date-time"},
             "updated_at": {"type": "string", "format": "date-time"},
             "report_ref": {"type": ["string", "null"], "description": "Present only after a complete job; fetch with the same bearer token."},
+            "report_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of the exact persisted report bytes when a report is available."},
             "error": {"type": ["string", "null"]},
+            "webhook_delivery": {"type": "object", "description": "Bounded webhook delivery receipt when configured; it contains no webhook secret."},
         },
     }
     return {
@@ -502,6 +919,13 @@ def openapi_payload() -> dict[str, Any]:
                 "get": {
                     "summary": "Read service health and provider availability",
                     "responses": {"200": {"description": "Service health", "content": {"application/json": {"schema": {"type": "object"}}}}},
+                },
+            },
+            "/readyz": {
+                "get": {
+                    "summary": "Read scanner service admission readiness",
+                    "description": "Returns 503 when durable state or bounded worker capacity cannot accept another scan. It exposes no job identities or secrets.",
+                    "responses": {"200": {"description": "Service can accept work", "content": {"application/json": {"schema": {"type": "object"}}}}, "503": {"description": "Service is alive but cannot accept work", "content": {"application/json": {"schema": {"type": "object"}}}}},
                 },
             },
             "/v1/openapi.json": {
@@ -536,7 +960,8 @@ def openapi_payload() -> dict[str, Any]:
                             },
                         },
                     },
-                    "responses": {"202": {"description": "Job accepted; it is not an approval result.", "content": {"application/json": {"schema": job}}}, "400": {"description": "Invalid request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "429": {"description": "Queue capacity exhausted; retry later.", "content": {"application/json": {"schema": error}}}},
+                    "parameters": [{"in": "header", "name": "Idempotency-Key", "required": False, "schema": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "description": "Reuse a prior job only for an identical extension/version/platform request."}],
+                    "responses": {"202": {"description": "Job accepted or replayed; it is not an approval result.", "headers": {"Idempotent-Replayed": {"schema": {"type": "string", "enum": ["true"]}, "description": "Present when the key returned an existing job."}}, "content": {"application/json": {"schema": job}}}, "400": {"description": "Invalid request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "409": {"description": "Idempotency key belongs to a different request", "content": {"application/json": {"schema": error}}}, "429": {"description": "Queue capacity exhausted; retry later.", "headers": {"Retry-After": {"schema": {"type": "integer"}, "description": "Seconds before a new-key retry is appropriate."}}, "content": {"application/json": {"schema": error}}}},
                 },
             },
             "/v1/scans/mcp": {
@@ -547,6 +972,29 @@ def openapi_payload() -> dict[str, Any]:
                     "responses": {"200": {"description": "Assessment result", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed or oversized input", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "422": {"description": "Assessment could not complete", "content": {"application/json": {"schema": error}}}},
                 },
             },
+            "/v1/scans/mcp/batch": {
+                "post": {
+                    "summary": "Assess a bounded MCP server catalog synchronously",
+                    "description": "Processes up to 10 descriptors in request order. A failed descriptor is reported per item and does not suppress independent results.",
+                    "security": [{"bearerAuth": []}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["servers"], "properties": {"servers": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object"}}}}}}},
+                    "responses": {"200": {"description": "Per-descriptor assessment outcomes", "content": {"application/json": {"schema": {"type": "object"}}}}, "400": {"description": "Malformed, oversized, or over-limit request", "content": {"application/json": {"schema": error}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
+                },
+            },
+            "/v1/jobs": {
+                "get": {
+                    "summary": "List retained Marketplace scan job metadata",
+                    "description": "Returns at most 100 newest job summaries. Report bodies and request idempotency data are not included.",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [
+                        {"in": "query", "name": "extension_id", "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_.-]+$"}},
+                        {"in": "query", "name": "status", "schema": {"type": "string", "enum": ["queued", "running", "complete", "failed", "cancelled"]}},
+                        {"in": "query", "name": "limit", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100}},
+                        {"in": "query", "name": "cursor", "schema": {"type": "string", "maxLength": 256}, "description": "Opaque cursor from a prior job-history response."},
+                    ],
+                    "responses": {"200": {"description": "Bounded job history", "content": {"application/json": {"schema": {"type": "object"}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}},
+                },
+            },
             "/v1/jobs/{job_id}": {
                 "get": {
                     "summary": "Poll a Marketplace scan job",
@@ -554,13 +1002,21 @@ def openapi_payload() -> dict[str, Any]:
                     "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
                     "responses": {"200": {"description": "Job record", "content": {"application/json": {"schema": job}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Job not found", "content": {"application/json": {"schema": error}}}},
                 },
+                "delete": {
+                    "summary": "Cancel a queued or running Marketplace scan job",
+                    "description": "Cancellation preserves the job audit record and prevents a late worker from publishing a report or terminal webhook.",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
+                    "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": job}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Job not found", "content": {"application/json": {"schema": error}}}, "409": {"description": "Job is already terminal", "content": {"application/json": {"schema": error}}}},
+                },
             },
             "/v1/reports/{job_id}": {
                 "get": {
                     "summary": "Fetch the canonical bundle for a completed job",
+                    "description": "The ETag is the SHA-256 identity of the exact returned report bytes. Record it with any review decision; a matching If-None-Match returns 304.",
                     "security": [{"bearerAuth": []}],
                     "parameters": [{"in": "path", "name": "job_id", "required": True, "schema": {"type": "string", "pattern": "^job_[a-f0-9]{32}$"}}],
-                    "responses": {"200": {"description": "Versioned canonical report bundle", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": True}}}}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Report not found", "content": {"application/json": {"schema": error}}}},
+                    "responses": {"200": {"description": "Versioned canonical report bundle", "headers": {"ETag": {"schema": {"type": "string"}, "description": "Quoted sha256 identity of exact response bytes."}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": True}}}}, "304": {"description": "The supplied ETag still identifies the current report."}, "401": {"description": "Authorization failed", "content": {"application/json": {"schema": error}}}, "404": {"description": "Report not found", "content": {"application/json": {"schema": error}}}},
                 },
             },
         },
@@ -569,12 +1025,13 @@ def openapi_payload() -> dict[str, Any]:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DATA_DIR) -> None:
-    token = os.environ.get("IDE_SCANNER_API_TOKEN", "")
+    configured_webhook()
+    tokens = configured_api_tokens()
     non_loopback = host not in {"127.0.0.1", "::1", "localhost"}
-    if non_loopback and not token:
+    if non_loopback and not tokens:
         if os.environ.get("IDE_SCANNER_ALLOW_INSECURE_BIND") != "1":
             raise SystemExit(
-                f"Refusing to bind {host}:{port} without IDE_SCANNER_API_TOKEN. "
+                f"Refusing to bind {host}:{port} without IDE_SCANNER_API_TOKEN or IDE_SCANNER_API_TOKENS. "
                 "Set a token, bind to 127.0.0.1, or explicitly set "
                 "IDE_SCANNER_ALLOW_INSECURE_BIND=1 for a trusted local network only."
             )
@@ -583,7 +1040,8 @@ def serve(host: str = "127.0.0.1", port: int = 8787, data_dir: Path = DEFAULT_DA
             file=sys.stderr,
         )
     store = JobStore(data_dir)
-    cleanup_stale_jobs(store)
+    maintain_store(store)
+    start_maintenance_loop(store)
     server = ThreadingHTTPServer((host, port), ScannerServiceHandler)
     server.job_store = store  # type: ignore[attr-defined]
     server.scan_pool = ScanWorkerPool(store)  # type: ignore[attr-defined]
@@ -602,6 +1060,41 @@ def main(argv: list[str] | None = None) -> int:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _encode_job_cursor(updated_at: str, job_id: str) -> str:
+    payload = json.dumps({"updated_at": updated_at, "id": job_id}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_job_cursor(value: str) -> tuple[str, str]:
+    if not value or len(value) > 256:
+        raise ValueError("invalid cursor")
+    try:
+        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        payload = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("invalid cursor")
+    updated_at = payload.get("updated_at")
+    job_id = payload.get("id")
+    if not isinstance(updated_at, str) or not updated_at or len(updated_at) > 64 or not isinstance(job_id, str) or not re.fullmatch(r"job_[a-f0-9]{32}", job_id):
+        raise ValueError("invalid cursor")
+    return updated_at, job_id
+
+
+def _one_query_value(query: dict[str, list[str]], name: str) -> str:
+    values = query.get(name) or []
+    return values[0].strip() if len(values) == 1 else ""
+
+
+def _request_fingerprint(extension_id: str, version: str | None, target_platform: str | None) -> str:
+    return json.dumps(
+        {"extension_id": extension_id, "target_platform": target_platform, "version": version},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,9 @@ class ScanRequest:
     marketplace_version: str | None = None
     marketplace_target_platform: str | None = None
     scan_related_marketplace_extensions: bool = False
+
+    expand_extension_relationships: bool = False
+    max_related_extensions: int = 20
     include_fixtures: bool = False
     all_local: bool = False
     online: bool = False
@@ -43,6 +46,9 @@ class ScanRequest:
         marketplace_version: str | None = None,
         marketplace_target_platform: str | None = None,
         scan_related_marketplace_extensions: bool = False,
+
+        expand_extension_relationships: bool = False,
+        max_related_extensions: int = 20,
         include_fixtures: bool = False,
         all_local: bool = False,
         online: bool = False,
@@ -67,6 +73,9 @@ class ScanRequest:
             marketplace_version=marketplace_version,
             marketplace_target_platform=marketplace_target_platform,
             scan_related_marketplace_extensions=scan_related_marketplace_extensions,
+
+            expand_extension_relationships=expand_extension_relationships,
+            max_related_extensions=max_related_extensions,
             include_fixtures=include_fixtures,
             all_local=all_local,
             online=online,

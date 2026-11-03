@@ -34,6 +34,7 @@ from ide_scanner.sandbox_runner import (
     _run_bounded_capture,
     _run_isolated,
     _prepare_target,
+    _seed_runtime_workspace,
     _verified_runtime_events,
     _write_entrypoint_runner,
     run_sandbox,
@@ -72,6 +73,30 @@ from ide_scanner.artifact_store import ArtifactStoreError, StoredArtifact
 
 
 class ScannerTests(unittest.TestCase):
+    def test_runtime_workspace_seeds_only_declared_language_fixtures(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            fixture = _seed_runtime_workspace(workspace, {
+                "contributes": {"languages": [
+                    {"id": "typescript"}, {"id": "python"}, {"id": "go"}, {"id": "rust"},
+                ]},
+            })
+
+            self.assertEqual(fixture["status"], "seeded")
+            self.assertEqual([item["ecosystem"] for item in fixture["fixtures"]], ["rust", "node", "python", "go"])
+            self.assertTrue((workspace / "Cargo.toml").exists())
+            self.assertTrue((workspace / "package.json").exists())
+            self.assertTrue((workspace / "pyproject.toml").exists())
+            self.assertTrue((workspace / "go.mod").exists())
+            self.assertFalse((workspace / "pom.xml").exists())
+
+    def test_runtime_workspace_fixture_is_not_applicable_without_languages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            fixture = _seed_runtime_workspace(Path(tmp), {"contributes": {}})
+
+        self.assertEqual(fixture["status"], "not-applicable")
+        self.assertEqual(fixture["fixtures"], [])
+
     def test_related_marketplace_scan_deduplicates_children_and_records_exact_parent_links(self) -> None:
         def report(extension_id: str, entries: list[dict[str, str]], *, source: str = "vs-marketplace") -> MagicMock:
             item = MagicMock()
@@ -3777,6 +3802,33 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("dependencies", report["version_deltas"][0]["changes"])
         self.assertTrue(report["human_summary"])
 
+    def test_previous_report_reports_declared_extension_relationship_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extension = root / "current"
+            extension.mkdir()
+            (extension / "package.json").write_text(
+                '{"publisher":"example","name":"relationships","version":"2.0.0",'
+                '"extensionPack":["vendor.added"],"extensionDependencies":["vendor.same"]}',
+                encoding="utf-8",
+            )
+            previous = root / "previous.json"
+            previous.write_text(
+                '{"extensions":[{"extension_id":"example.relationships","version":"1.0.0",'
+                '"verdict":"clean","risk_score":0,"malware_score":0,"dependencies":{},'
+                '"artifact_inventory":{"risky_artifacts":[],"declared_extension_relationships":['
+                '{"extension_id":"vendor.same","relationship":"extension_dependency"},'
+                '{"extension_id":"vendor.removed","relationship":"extension_pack"}]}}]}',
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[extension], previous_report_file=previous)
+
+        delta = report["version_deltas"][0]
+        self.assertIn("extension_relationships", delta["changes"])
+        self.assertEqual(delta["added_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.added"}])
+        self.assertEqual(delta["removed_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.removed"}])
+
     def test_sandbox_runner_plan_does_not_execute_by_default(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3791,7 +3843,22 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(observations["mode"], "plan-only")
         self.assertEqual(observations["plan"]["extension_id"], "example.sandboxed")
         self.assertEqual(len(observations["plan"]["commands"]), 1)
+        self.assertEqual(observations["plan"]["workspace_fixture"]["status"], "not-applicable")
         self.assertEqual(observations["extensions"]["example.sandboxed"], [])
+
+    def test_sandbox_plan_records_declared_language_workspace_fixture(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                '{"publisher":"example","name":"language-aware","version":"1.0.0",'
+                '"contributes":{"languages":[{"id":"python"},{"id":"typescript"}]}}',
+                encoding="utf-8",
+            )
+            observations = run_sandbox(root)
+
+        fixture = observations["plan"]["workspace_fixture"]
+        self.assertEqual(fixture["declared_language_ids"], ["python", "typescript"])
+        self.assertEqual([item["ecosystem"] for item in fixture["fixtures"]], ["node", "python"])
 
     def test_sandbox_preflight_requires_the_same_isolation_boundary_as_runtime(self) -> None:
         completed = MagicMock(returncode=0, stdout="", stderr="")

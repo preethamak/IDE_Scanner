@@ -1,22 +1,33 @@
 from __future__ import annotations
 
 import datetime as dt
+import base64
 import hashlib
 import json
+import os
 import re
 import zipfile
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from .build_identity import scanner_build
 from .classification_policy import effective_finding_severity, finding_actionability, finding_evidence_class
+from .cyclonedx import build_cyclonedx_bom
 from .evidence import location_from_finding
 from .jsonc import loads_jsonc
 from .models import ExtensionDetail, ExtensionReport, ExtensionSummary, Recommendation, ReportMetadata
 from .rule_registry import rules_json
 
 SCHEMA_VERSION = "2.3"
+MAX_REPORT_BUNDLE_MEMBERS = 20_000
+MAX_REPORT_BUNDLE_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_REPORT_BUNDLE_TOTAL_BYTES = 256 * 1024 * 1024
 
 
 def build_report_bundle(
@@ -46,6 +57,7 @@ def build_report_bundle(
             "posture": report.get("posture") or [],
         },
         "rules": rules_json(),
+        "cyclonedx": build_cyclonedx_bom(report, profile=profile, source=source),
         "extensions": {
             summary.detail_ref: detail.to_dict()
             for summary, detail in zip(summaries, details, strict=True)
@@ -60,6 +72,8 @@ def write_report_bundle(
     profile: str = "smart",
     source: str = "unknown",
     include_raw_evidence: bool = False,
+    signing_key: Path | str | None = None,
+    signing_key_id: str | None = None,
 ) -> dict[str, Any]:
     bundle = build_report_bundle(
         report,
@@ -69,18 +83,71 @@ def write_report_bundle(
     )
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    members = _bundle_members(bundle)
+    integrity = _json_bytes(_integrity_manifest(members))
+    provenance = _signed_provenance(integrity, signing_key, signing_key_id) if signing_key else None
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        _write_json(archive, "metadata.json", bundle["metadata"])
-        _write_json(archive, "summary.json", bundle["summary"])
-        _write_json(archive, "leaderboard.json", bundle["leaderboard"])
-        _write_json(archive, "posture.json", bundle["posture"])
-        _write_json(archive, "rules.json", bundle["rules"])
-        for ref, detail in sorted(bundle["extensions"].items()):
-            _write_json(archive, ref, detail)
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+        archive.writestr("integrity.json", integrity)
+        if provenance:
+            archive.writestr("provenance.json", _json_bytes(provenance))
     return {
         "output": str(output_path),
         "metadata": bundle["metadata"],
         "summary": bundle["summary"]["summary"],
+        "provenance": {"signed": bool(provenance), "key_id": provenance.get("key_id") if provenance else None},
+    }
+
+
+def verify_report_bundle(path: Path | str, *, public_key: Path | str | None = None, expected_key_id: str | None = None, require_signature: bool = False) -> dict[str, Any]:
+    """Verify report ZIP member hashes without claiming publisher identity."""
+    bundle_path = Path(path)
+    try:
+        with zipfile.ZipFile(bundle_path) as archive:
+            infos = archive.infolist()
+            if len(infos) > MAX_REPORT_BUNDLE_MEMBERS:
+                raise ValueError("Report bundle exceeds the member limit.")
+            if any(info.file_size > MAX_REPORT_BUNDLE_MEMBER_BYTES for info in infos):
+                raise ValueError("Report bundle exceeds the per-member size limit.")
+            if sum(info.file_size for info in infos) > MAX_REPORT_BUNDLE_TOTAL_BYTES:
+                raise ValueError("Report bundle exceeds the total uncompressed size limit.")
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise ValueError("Report bundle contains duplicate member names.")
+            if "integrity.json" not in names:
+                raise ValueError("Report bundle has no integrity manifest.")
+            if any(not _safe_report_member(name) for name in names):
+                raise ValueError("Report bundle contains an unsafe member name.")
+            try:
+                manifest = json.loads(archive.read("integrity.json"))
+            except (KeyError, json.JSONDecodeError) as exc:
+                raise ValueError("Report bundle integrity manifest is invalid.") from exc
+            if not isinstance(manifest, dict) or manifest.get("schema_version") != "guardrails.report-integrity.v1":
+                raise ValueError("Report bundle integrity schema is unsupported.")
+            files = manifest.get("files")
+            if not isinstance(files, dict) or not files:
+                raise ValueError("Report bundle integrity manifest has no files.")
+            expected = set(files)
+            actual = set(names) - {"integrity.json", "provenance.json"}
+            if actual != expected:
+                raise ValueError("Report bundle members do not match its integrity manifest.")
+            for name, claim in files.items():
+                if not isinstance(name, str) or not _safe_report_member(name) or not isinstance(claim, dict):
+                    raise ValueError("Report bundle integrity entry is invalid.")
+                payload = archive.read(name)
+                if claim.get("sha256") != hashlib.sha256(payload).hexdigest() or claim.get("size_bytes") != len(payload):
+                    raise ValueError(f"Report bundle integrity check failed for {name}.")
+            provenance = _verify_provenance(archive, names, archive.read("integrity.json"), public_key, expected_key_id, require_signature)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"Report bundle could not be read: {exc}") from exc
+    return {
+        "valid": True,
+        "bundle": str(bundle_path),
+        "integrity_schema": "guardrails.report-integrity.v1",
+        "authenticated": provenance["authenticated"],
+        "provenance": provenance,
+        "note": "Internal member hashes match. Publisher authentication requires a trusted public key.",
     }
 
 
@@ -707,3 +774,149 @@ def _scanner_build() -> str:
 
 def _write_json(archive: zipfile.ZipFile, name: str, data: Any) -> None:
     archive.writestr(name, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def _bundle_members(bundle: dict[str, Any]) -> dict[str, bytes]:
+    members = {
+        "metadata.json": _json_bytes(bundle["metadata"]),
+        "summary.json": _json_bytes(bundle["summary"]),
+        "leaderboard.json": _json_bytes(bundle["leaderboard"]),
+        "posture.json": _json_bytes(bundle["posture"]),
+        "rules.json": _json_bytes(bundle["rules"]),
+        "cyclonedx.json": _json_bytes(bundle["cyclonedx"]),
+    }
+    members.update({ref: _json_bytes(detail) for ref, detail in sorted(bundle["extensions"].items())})
+    return members
+
+
+def _integrity_manifest(members: dict[str, bytes]) -> dict[str, Any]:
+    return {
+        "schema_version": "guardrails.report-integrity.v1",
+        "algorithm": "sha256",
+        "files": {
+            name: {"sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload)}
+            for name, payload in sorted(members.items())
+        },
+        "authentication": "none",
+        "note": "Hashes detect altered bundle members but do not authenticate the publisher.",
+    }
+
+
+def _safe_report_member(name: str) -> bool:
+    path = PurePosixPath(name)
+    return bool(name) and not path.is_absolute() and ".." not in path.parts and not name.endswith("/")
+
+
+def _json_bytes(data: Any) -> bytes:
+    return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _signed_provenance(integrity: bytes, key_path: Path | str, key_id: str | None) -> dict[str, str]:
+    try:
+        key = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError("Report signing key is invalid.") from exc
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError("Report signing key must be Ed25519.")
+    public = key.public_key()
+    fingerprint = _public_key_fingerprint(public)
+    return {"schema_version": "guardrails.report-provenance.v1", "algorithm": "ed25519", "key_id": key_id or fingerprint, "public_key_fingerprint": fingerprint, "signature_base64": base64.b64encode(key.sign(integrity)).decode("ascii")}
+
+
+def _verify_provenance(archive: zipfile.ZipFile, names: list[str], integrity: bytes, public_key_path: Path | str | None, expected_key_id: str | None, require: bool) -> dict[str, Any]:
+    if "provenance.json" not in names:
+        if require:
+            raise ValueError("Report bundle has no signed provenance.")
+        return {"status": "absent", "authenticated": False}
+    try:
+        record = json.loads(archive.read("provenance.json"))
+        signature = base64.b64decode(record["signature_base64"], validate=True)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Report bundle provenance is invalid.") from exc
+    key_id = record.get("key_id")
+    if expected_key_id and key_id != expected_key_id:
+        raise ValueError("Report bundle signer id does not match the expected key.")
+    if public_key_path is None:
+        if require:
+            raise ValueError("A trusted public key is required for signed provenance.")
+        return {"status": "unverified", "authenticated": False, "key_id": key_id}
+    try:
+        public = serialization.load_pem_public_key(Path(public_key_path).read_bytes())
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError("Trusted report public key is invalid.") from exc
+    if not isinstance(public, Ed25519PublicKey) or record.get("public_key_fingerprint") != _public_key_fingerprint(public):
+        raise ValueError("Report bundle signer does not match the trusted key.")
+    try:
+        public.verify(signature, integrity)
+    except InvalidSignature as exc:
+        raise ValueError("Report bundle provenance signature is invalid.") from exc
+    return {"status": "verified", "authenticated": True, "key_id": key_id}
+
+
+def _public_key_fingerprint(public: Ed25519PublicKey) -> str:
+    raw = public.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    return f"sha256:{hashlib.sha256(raw).hexdigest()}"
+
+
+def generate_report_signing_keypair(
+    private_key_path: Path | str,
+    public_key_path: Path | str,
+    *,
+    signing_key_id: str | None = None,
+) -> dict[str, str]:
+    """Create a non-overwritable Ed25519 keypair for report provenance.
+
+    The private key is deliberately unencrypted because the scanner's signing
+    interface accepts CI-injected PEM material without an interactive prompt.
+    It must be moved to an access-controlled secret store before use in CI.
+    """
+    private_path = Path(private_key_path)
+    public_path = Path(public_key_path)
+    if private_path.resolve() == public_path.resolve():
+        raise ValueError("Private and public signing key paths must be different.")
+    if private_path.exists() or public_path.exists():
+        raise ValueError("Refusing to overwrite an existing signing key file.")
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    public_path.parent.mkdir(parents=True, exist_ok=True)
+    private_key = Ed25519PrivateKey.generate()
+    private_payload = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public_payload = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    _write_new_key_file(private_path, private_payload, mode=0o600)
+    try:
+        _write_new_key_file(public_path, public_payload, mode=0o644)
+    except Exception:
+        private_path.unlink(missing_ok=True)
+        raise
+    fingerprint = _public_key_fingerprint(private_key.public_key())
+    return {
+        "algorithm": "ed25519",
+        "private_key": str(private_path),
+        "public_key": str(public_path),
+        "public_key_fingerprint": fingerprint,
+        "signing_key_id": signing_key_id or fingerprint,
+    }
+
+
+def _public_key_fingerprint(public_key: Ed25519PublicKey) -> str:
+    encoded = public_key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _write_new_key_file(path: Path, payload: bytes, *, mode: int) -> None:
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    except FileExistsError as exc:
+        raise ValueError("Refusing to overwrite an existing signing key file.") from exc
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(path, mode)
+

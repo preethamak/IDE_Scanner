@@ -1,0 +1,64 @@
+name: GuardRails MCP declaration drift
+description: Compare two fingerprinted MCP tool assessments and optionally fail when the declared interface changes.
+inputs:
+  before:
+    description: Earlier GuardRails MCP assessment JSON with declaration fingerprints.
+    required: true
+  after:
+    description: Later GuardRails MCP assessment JSON with declaration fingerprints.
+    required: true
+  output:
+    description: Machine-readable declaration-diff JSON written by the action.
+    required: false
+    default: guardrails-mcp-declaration-diff.json
+  fail-on-drift:
+    description: Fail the step when a declared tool is added, removed, or changed.
+    required: false
+    default: "true"
+outputs:
+  report_file:
+    description: Path to the declaration-diff JSON report.
+    value: ${{ steps.compare.outputs.report_file }}
+  drift_detected:
+    description: Whether the declared MCP tool interface changed.
+    value: ${{ steps.compare.outputs.drift_detected }}
+  changed_tool_count:
+    description: Count of added, removed, or changed declared tools.
+    value: ${{ steps.compare.outputs.changed_tool_count }}
+runs:
+  using: composite
+  steps:
+    - id: compare
+      shell: bash
+      env:
+        INPUT_BEFORE: ${{ inputs.before }}
+        INPUT_AFTER: ${{ inputs.after }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_FAIL_ON_DRIFT" in true|false) ;; *) echo "fail-on-drift must be true or false" >&2; exit 2 ;; esac
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --disable-pip-version-check --no-cache-dir "$action_root"
+        args=(mcp-declarations --before "$INPUT_BEFORE" --after "$INPUT_AFTER" --output "$INPUT_OUTPUT")
+        if [ "$INPUT_FAIL_ON_DRIFT" = "true" ]; then args+=(--fail-on-drift); fi
+        set +e
+        python -m ide_scanner.cli "${args[@]}"
+        status=$?
+        set -e
+        if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then exit "$status"; fi
+        test -s "$INPUT_OUTPUT"
+        python - "$INPUT_OUTPUT" "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import sys
+
+        report_path, github_output = sys.argv[1:]
+        report = json.load(open(report_path, encoding="utf-8"))
+        changed_count = sum(len(report.get(key) or []) for key in ("added", "removed", "changed"))
+        with open(github_output, "a", encoding="utf-8") as output:
+            output.write(f"report_file={report_path}\n")
+            output.write(f"drift_detected={str(bool(report.get('drift_detected'))).lower()}\n")
+            output.write(f"changed_tool_count={changed_count}\n")
+        PY
+        cat "$INPUT_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"
