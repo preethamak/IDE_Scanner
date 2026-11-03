@@ -4,10 +4,20 @@ from .classification_policy import POLICY_VERSION
 from .models import RuleMetadata
 from .rules import CODE_RULES
 
-RULESET_VERSION = "2026.09.24-policy-v3-calibration.43-runtime-local-ipc"
+RULESET_VERSION = "2026.10.22-policy-v3-extension-relationships"
 
 
 _RULE_OVERRIDES: dict[str, dict[str, object]] = {
+    "declared-extension-relationships": {
+        "title": "Declared extension installation relationships",
+        "category": "supply-chain",
+        "evidence_class": "capability",
+        "default_severity": "INFO",
+        "description": "The published manifest declares extension packs or dependencies that the IDE can install alongside the reviewed artifact.",
+        "recommendation": "Review each declared related extension as its own release. Manifest references are identifiers, not version-pinned evidence of a reviewed artifact.",
+        "false_positive_notes": "A declared relationship does not establish malicious behavior or a vulnerability; it identifies an install-time trust boundary that needs separate release evidence.",
+        "benchmark_tags": ["supply-chain", "extension-pack", "manifest"],
+    },
     "untrusted-workspace-input-to-process": {
         "title": "Workspace input reaches process execution",
         "category": "execution",
@@ -523,6 +533,7 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "dangerous-github-workflow": ("repository-posture", "posture", "MEDIUM", "A packaged GitHub Actions workflow has a dangerous trigger or write permission."),
     "destructive-transfer-chain": ("destructive-activity", "correlated", "HIGH", "Forceful recursive deletion appears near encoding/archive and network behavior."),
     "entrypoint-ast-unparsed": ("coverage", "posture", "LOW", "A declared entrypoint was not fully covered by the AST layer, so structural evasion detection did not run on the primary code path."),
+    "extension-install-surface": ("supply-chain", "capability", "LOW", "The manifest declares extension packages that can expand the effective install surface."),
     "install-download-execute": ("install-time", "correlated", "HIGH", "A lifecycle script combines download and command execution."),
     "install-network-telemetry": ("install-time", "weak", "MEDIUM", "A lifecycle script appears to send install-time telemetry."),
     "install-secret-access": ("install-time", "correlated", "HIGH", "A lifecycle script references credential material."),
@@ -536,6 +547,7 @@ _NATIVE_RULE_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
     "marketplace-stale-extension": ("reputation", "reputation", "LOW", "Marketplace metadata indicates that the extension has not been updated recently."),
     "marketplace-unverified-publisher": ("reputation", "reputation", "LOW", "The marketplace publisher is not independently verified."),
     "marketplace-verified-publisher": ("reputation", "reputation", "INFO", "The marketplace publisher has a verified publisher signal."),
+    "malformed-extension-relationship": ("supply-chain", "posture", "MEDIUM", "The manifest has malformed extensionPack or extensionDependencies declarations."),
     "install-rating-mismatch": ("reputation", "reputation", "LOW", "Marketplace install and rating metadata are inconsistent with the expected range."),
     "mcp-server-command": ("agentic", "capability", "MEDIUM", "The extension contributes an MCP server command or definition."),
     "mutable-dependency-source": ("dependency", "dependency", "MEDIUM", "A runtime dependency uses a mutable or non-registry source."),

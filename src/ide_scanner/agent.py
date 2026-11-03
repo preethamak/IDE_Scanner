@@ -51,6 +51,7 @@ def build_agent_report(
     online: bool,
     previous_report_file: str | None = None,
     include_source: bool = False,
+    scan_related_marketplace_extensions: bool = False,
 ) -> dict[str, Any]:
     report = run_scan(
         ScanRequest(
@@ -58,6 +59,7 @@ def build_agent_report(
             all_local=all_local,
             online=online,
             previous_report_file=previous_report_file,
+            scan_related_marketplace_extensions=scan_related_marketplace_extensions,
         )
     )
     source_redacted = 0
@@ -74,6 +76,7 @@ def build_agent_report(
             "python": platform.python_version(),
             "source_included": bool(include_source),
             "source_previews_redacted": source_redacted,
+            "related_extension_scan_requested": bool(scan_related_marketplace_extensions),
         },
         "summary": summarize_report(report, top_limit=50),
         "report": report,

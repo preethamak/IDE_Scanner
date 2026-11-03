@@ -32,9 +32,9 @@ def _tool_declaration_evidence(tool: Any) -> "ToolDeclarationEvidence":
     """Preserve MCP declarations without treating them as behavioral proof."""
     raw_annotations = getattr(tool, "annotations", None)
     if isinstance(raw_annotations, BaseModel):
-        raw_annotations = raw_annotations.model_dump()
+        raw_annotations = raw_annotations.model_dump(by_alias=True)
     annotations = ToolAnnotationsObject.model_validate(raw_annotations) if isinstance(raw_annotations, dict) else None
-    raw_output_schema = getattr(tool, "outputSchema", None)
+    raw_output_schema = getattr(tool, "outputSchema", getattr(tool, "output_schema", None))
     if isinstance(raw_output_schema, BaseModel):
         raw_output_schema = raw_output_schema.model_dump()
     output_schema = dict(raw_output_schema) if isinstance(raw_output_schema, dict) else None
@@ -53,7 +53,7 @@ def _tool_declaration_evidence(tool: Any) -> "ToolDeclarationEvidence":
     fingerprint_payload = {
         "annotations": annotations.model_dump(exclude_none=True) if annotations else None,
         "description": getattr(tool, "description", None),
-        "input_schema": _schema_as_dict(getattr(tool, "inputSchema", None)),
+        "input_schema": _schema_as_dict(getattr(tool, "inputSchema", getattr(tool, "input_schema", None))),
         "name": getattr(tool, "name", None),
         "output_schema": output_schema,
         "title": evidence.title,
@@ -1054,7 +1054,7 @@ class ToolAnalysisExtractor(BaseExtractor):
         enriched = []
         for tool in tools:
             deep = results.get(tool.name)
-            raw_schema = getattr(tool, "inputSchema", {}) or {}
+            raw_schema = getattr(tool, "inputSchema", getattr(tool, "input_schema", {})) or {}
             if isinstance(raw_schema, BaseModel):
                 raw_schema = raw_schema.model_dump()
             enriched.append(DeepToolModel(

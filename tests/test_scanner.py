@@ -64,6 +64,7 @@ from ide_scanner.scanner import (
     _runtime_execution_failure,
     _merge_dynamic_runtime_bundle,
     _runtime_unexpected_capability_finding,
+    _scan_declared_marketplace_relationships,
     scan_extension,
     scan_marketplace_extension,
     scan_targets,
@@ -95,6 +96,85 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(fixture["status"], "not-applicable")
         self.assertEqual(fixture["fixtures"], [])
+
+    def test_related_marketplace_scan_deduplicates_children_and_records_exact_parent_links(self) -> None:
+        def report(extension_id: str, entries: list[dict[str, str]], *, source: str = "vs-marketplace") -> MagicMock:
+            item = MagicMock()
+            item.extension_id = extension_id
+            item.version = "1.2.3"
+            item.artifact_hash = "a" * 64
+            item.source = source
+            item.artifact_inventory = {"extension_relationship_inventory": {"entries": entries, "invalid_entries": []}}
+            return item
+
+        first = report("publisher.first", [
+            {"extension_id": "vendor.shared", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+            {"extension_id": "publisher.first", "relationship": "extension_pack", "declared_in": "extensionPack"},
+        ])
+        second = report("publisher.second", [
+            {"extension_id": "vendor.shared", "relationship": "extension_pack", "declared_in": "extensionPack"},
+        ])
+        child = report("vendor.shared", [], source="vs-marketplace")
+        child.version = "4.5.6"
+        child.artifact_hash = "b" * 64
+
+        with patch("ide_scanner.scanner.scan_marketplace_extension", return_value=child) as scan:
+            resolved = _scan_declared_marketplace_relationships(
+                [first, second],
+                known_bad_hashes=None,
+                artifact_store=None,
+                dynamic_runtime=False,
+                runtime_timeout_seconds=15,
+                runtime_bundle=None,
+            )
+
+        scan.assert_called_once_with(
+            "vendor.shared",
+            known_bad_hashes=None,
+            artifact_store=None,
+            dynamic_runtime=False,
+            runtime_timeout_seconds=15,
+            runtime_bundle=None,
+        )
+        self.assertEqual(resolved, [child])
+        self.assertEqual(
+            first.artifact_inventory["extension_relationship_inventory"]["resolution"],
+            [
+                {"extension_id": "publisher.first", "relationship": "extension_pack", "declared_in": "extensionPack", "status": "skipped_self_reference"},
+                {"extension_id": "vendor.shared", "relationship": "extension_dependency", "declared_in": "extensionDependencies", "status": "scanned", "resolved_extension_id": "vendor.shared", "resolved_version": "4.5.6", "resolved_artifact_sha256": "b" * 64},
+            ],
+        )
+        self.assertEqual(len(child.artifact_inventory["relationship_scan"]["parent_references"]), 2)
+        self.assertEqual(child.artifact_inventory["relationship_scan"]["recursion"], "disabled")
+
+    def test_related_marketplace_scan_discloses_when_the_bounded_fanout_limit_is_reached(self) -> None:
+        parent = MagicMock()
+        parent.extension_id = "publisher.parent"
+        parent.version = "1.0.0"
+        parent.artifact_hash = "a" * 64
+        parent.source = "vs-marketplace"
+        parent.artifact_inventory = {"extension_relationship_inventory": {"entries": [
+            {"extension_id": "vendor.first", "relationship": "extension_pack", "declared_in": "extensionPack"},
+            {"extension_id": "vendor.second", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+        ], "invalid_entries": []}}
+        child = MagicMock()
+        child.extension_id = "vendor.first"
+        child.version = "1.0.0"
+        child.artifact_hash = "b" * 64
+        child.source = "vs-marketplace"
+        child.artifact_inventory = {}
+
+        with patch("ide_scanner.scanner.MAX_RELATED_MARKETPLACE_EXTENSIONS", 1), patch(
+            "ide_scanner.scanner.scan_marketplace_extension", return_value=child
+        ) as scan:
+            _scan_declared_marketplace_relationships(
+                [parent], known_bad_hashes=None, artifact_store=None,
+                dynamic_runtime=False, runtime_timeout_seconds=15, runtime_bundle=None,
+            )
+
+        scan.assert_called_once_with("vendor.first", known_bad_hashes=None, artifact_store=None, dynamic_runtime=False, runtime_timeout_seconds=15, runtime_bundle=None)
+        resolution = parent.artifact_inventory["extension_relationship_inventory"]["resolution"]
+        self.assertIn({"extension_id": "vendor.second", "relationship": "extension_dependency", "declared_in": "extensionDependencies", "status": "not_scanned_limit_reached", "limit": 1}, resolution)
 
     def test_repeated_contextual_capability_notes_are_aggregated_with_paths(self) -> None:
         def finding(path: str) -> Finding:
@@ -2088,6 +2168,63 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("unpinned-dependency", {finding.rule_id for finding in report.findings})
         self.assertIn("mutable-dependency-source", {finding.rule_id for finding in report.findings})
 
+    def test_extension_relationships_are_release_evidence_and_malformed_values_require_review(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "relationships",
+                    "version": "1.0.0",
+                    "extensionPack": ["Vendor.Theme", "vendor.theme"],
+                    "extensionDependencies": ["vendor.helper", "bad id", 7],
+                }),
+                encoding="utf-8",
+            )
+
+            report = scan_extension(root)
+
+        inventory = report.artifact_inventory["extension_relationship_inventory"]
+        self.assertEqual(
+            inventory["entries"],
+            [
+                {"extension_id": "vendor.helper", "relationship": "extension_dependency", "declared_in": "extensionDependencies"},
+                {"extension_id": "vendor.theme", "relationship": "extension_pack", "declared_in": "extensionPack"},
+            ],
+        )
+        self.assertEqual(len(inventory["invalid_entries"]), 3)
+        self.assertIn(
+            {"field": "extensionPack", "value": "vendor.theme", "reason": "duplicate extension relationship"},
+            inventory["invalid_entries"],
+        )
+        findings = {finding.rule_id: finding for finding in report.findings}
+        self.assertEqual(findings["extension-install-surface"].evidence["evidence_class"], "capability")
+        self.assertEqual(findings["malformed-extension-relationship"].severity, "MEDIUM")
+        self.assertEqual(report.decision, "review")
+
+    def test_self_referential_extension_relationship_is_withheld_from_acquisition(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({
+                    "publisher": "example",
+                    "name": "self-reference",
+                    "version": "1.0.0",
+                    "extensionDependencies": ["Example.Self-Reference"],
+                }),
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+
+        inventory = report.artifact_inventory["extension_relationship_inventory"]
+        self.assertEqual(inventory["entries"], [])
+        self.assertEqual(
+            inventory["invalid_entries"],
+            [{"field": "extensionDependencies", "value": "Example.Self-Reference", "reason": "self-referential extension relationship"}],
+        )
+        self.assertIn("malformed-extension-relationship", {finding.rule_id for finding in report.findings})
+        self.assertEqual(report.decision, "review")
+
     def test_install_time_chains_are_suspicious(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3664,6 +3801,33 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("version", report["version_deltas"][0]["changes"])
         self.assertIn("dependencies", report["version_deltas"][0]["changes"])
         self.assertTrue(report["human_summary"])
+
+    def test_previous_report_reports_declared_extension_relationship_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extension = root / "current"
+            extension.mkdir()
+            (extension / "package.json").write_text(
+                '{"publisher":"example","name":"relationships","version":"2.0.0",'
+                '"extensionPack":["vendor.added"],"extensionDependencies":["vendor.same"]}',
+                encoding="utf-8",
+            )
+            previous = root / "previous.json"
+            previous.write_text(
+                '{"extensions":[{"extension_id":"example.relationships","version":"1.0.0",'
+                '"verdict":"clean","risk_score":0,"malware_score":0,"dependencies":{},'
+                '"artifact_inventory":{"risky_artifacts":[],"declared_extension_relationships":['
+                '{"extension_id":"vendor.same","relationship":"extension_dependency"},'
+                '{"extension_id":"vendor.removed","relationship":"extension_pack"}]}}]}',
+                encoding="utf-8",
+            )
+
+            report = scan_targets(paths=[extension], previous_report_file=previous)
+
+        delta = report["version_deltas"][0]
+        self.assertIn("extension_relationships", delta["changes"])
+        self.assertEqual(delta["added_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.added"}])
+        self.assertEqual(delta["removed_extension_relationships"], [{"relationship": "extension_pack", "extension_id": "vendor.removed"}])
 
     def test_sandbox_runner_plan_does_not_execute_by_default(self) -> None:
         with TemporaryDirectory() as tmp:

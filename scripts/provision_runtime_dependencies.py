@@ -35,7 +35,7 @@ def _sha256(path: Path) -> str:
 def _download(entry: dict[str, str], cache: Path) -> dict[str, str]:
     destination = cache / entry["cache_subpath"]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="guardrails-runtime-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="guardrails-runtime-", dir=destination.parent) as temp_dir:
         compressed = Path(temp_dir) / entry["asset_name"]
         urllib.request.urlretrieve(entry["download_url"], compressed)
         asset_hash = _sha256(compressed)

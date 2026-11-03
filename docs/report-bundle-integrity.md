@@ -30,3 +30,8 @@ guardrails report verify --bundle report.zip --public-key guardrails-prod.pub.pe
 The signature covers the exact `integrity.json` bytes. `--require-signature`
 fails closed for unsigned reports, an unexpected signer ID, an invalid
 signature, or a public key that does not match the recorded signer.
+
+
+## Generate a signing key
+
+`python -m ide_scanner keys generate-report-signing-key --private-key signing.pem --public-key signing.pub.pem` creates a non-overwriting Ed25519 keypair. The private key has owner-only permissions.

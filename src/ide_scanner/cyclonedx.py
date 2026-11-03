@@ -16,6 +16,7 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
     components: dict[str, dict[str, Any]] = {}
     relationships: list[dict[str, Any]] = []
     vulnerabilities: list[dict[str, Any]] = []
+    extension_refs = _extension_refs(extensions)
 
     for extension in extensions:
         extension_id = _text(extension.get("extension_id"), 240) or "unknown.extension"
@@ -32,6 +33,7 @@ def build_cyclonedx_bom(report: dict[str, Any], *, profile: str = "smart", sourc
             dependency_ref = _npm_ref(name, dependency_version)
             components.setdefault(dependency_ref, _dependency_component(dependency, dependency_ref))
             dependency_refs.append(dependency_ref)
+        dependency_refs.extend(_scanned_extension_relationship_refs(extension, extension_ref, extension_refs))
         relationships.append({"ref": extension_ref, "dependsOn": sorted(set(dependency_refs))})
 
     namespace = uuid.UUID("c62e2a1c-66dc-4e14-a1eb-76c4d46fcc33")
@@ -75,6 +77,7 @@ def _extension_component(extension: dict[str, Any], extension_id: str, version: 
         "type": "application", "bom-ref": bom_ref, "name": name or extension_id, "group": publisher or None,
         "version": version, "purl": bom_ref, "hashes": [{"alg": "SHA-256", "content": sha256}] if sha256 else [],
         "properties": [
+            *_relationship_scan_properties(extension),
             _property("guardrails:extension-id", extension_id),
             _property("guardrails:decision", _text(extension.get("decision"), 80) or "incomplete"),
             _property("guardrails:analysis-status", _text(extension.get("analysis_status"), 80) or "incomplete"),
@@ -162,7 +165,7 @@ def _timestamp(value: Any) -> str:
 
 
 def _sha256(value: Any) -> str | None:
-    candidate = _text(value, 64).lower()
+    candidate = value.strip().lower() if isinstance(value, str) else ""
     return candidate if len(candidate) == 64 and all(character in "0123456789abcdef" for character in candidate) else None
 
 
@@ -177,3 +180,55 @@ def _text(value: Any, limit: int) -> str:
 
 def _property(name: str, value: str) -> dict[str, str]:
     return {"name": name, "value": value}
+
+
+def _extension_refs(extensions: list[dict[str, Any]]) -> dict[str, list[str]]:
+    refs: dict[str, list[str]] = {}
+    for extension in extensions:
+        extension_id = _text(extension.get("extension_id"), 240)
+        version = _text(extension.get("version"), 160)
+        if extension_id and version:
+            refs.setdefault(extension_id.lower(), []).append(_extension_ref(extension_id, version))
+    return refs
+
+
+def _scanned_extension_relationship_refs(
+    extension: dict[str, Any],
+    extension_ref: str,
+    extension_refs: dict[str, list[str]],
+) -> list[str]:
+    inventory = extension.get("artifact_inventory")
+    declared = inventory.get("declared_extension_relationships") if isinstance(inventory, dict) else None
+    if not isinstance(declared, list):
+        return []
+    related_refs: list[str] = []
+    for relationship in declared:
+        if not isinstance(relationship, dict):
+            continue
+        related_id = _text(relationship.get("extension_id"), 240).lower()
+        candidates = extension_refs.get(related_id, [])
+        # A declaration has no version. Link it only when this scan output
+        # contains exactly one concrete related artifact; otherwise retaining
+        # the manifest evidence without a guessed SBOM component is safer.
+        if len(candidates) == 1 and candidates[0] != extension_ref:
+            related_refs.append(candidates[0])
+    return related_refs
+
+
+def _relationship_scan_properties(extension: dict[str, Any]) -> list[dict[str, str]]:
+    identity = extension.get("artifact_identity")
+    relationship_scan = identity.get("relationship_scan") if isinstance(identity, dict) else None
+    if not isinstance(relationship_scan, dict):
+        return []
+    properties = [
+        _property("guardrails:relationship-selection", _text(relationship_scan.get("selection"), 80) or "unknown"),
+        _property("guardrails:relationship-version-pinned", str(bool(relationship_scan.get("version_pinned"))).lower()),
+    ]
+    parent = _text(relationship_scan.get("parent_extension_id"), 240)
+    relationship = _text(relationship_scan.get("relationship"), 80)
+    if parent:
+        properties.append(_property("guardrails:relationship-parent", parent))
+    if relationship:
+        properties.append(_property("guardrails:relationship-type", relationship))
+    return properties
+

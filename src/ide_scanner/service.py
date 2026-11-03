@@ -29,6 +29,7 @@ SERVICE_VERSION = "0.1.0"
 DEFAULT_DATA_DIR = Path(os.environ.get("IDE_SCANNER_DATA_DIR", ".ide-scanner-data"))
 MARKETPLACE_ID = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+$")
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 def configured_api_tokens() -> tuple[str, ...]:
@@ -68,15 +69,41 @@ class JobStore:
         self.root = root
         self.jobs_dir = root / "jobs"
         self.reports_dir = root / "reports"
+        self.audit_dir = root / "audit"
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.audit_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
     def readiness(self) -> dict[str, Any]:
         """Return a non-mutating check of durable local state availability."""
-        directories = {"jobs": self.jobs_dir, "reports": self.reports_dir}
+        directories = {"jobs": self.jobs_dir, "reports": self.reports_dir, "audit": self.audit_dir}
         available = all(path.is_dir() and os.access(path, os.R_OK | os.W_OK) for path in directories.values())
         return {"ready": available, "storage": "available" if available else "unavailable"}
+
+    def write_audit(self, event: dict[str, Any]) -> bool:
+        """Append a privacy-minimized authenticated API receipt.
+
+        Audit entries intentionally have no request body, authorization header,
+        query string, or client network metadata. The local operator can match
+        an entry to a caller through the returned request ID.
+        """
+        record = {
+            "timestamp": _now(),
+            "request_id": str(event.get("request_id") or ""),
+            "method": str(event.get("method") or ""),
+            "path": str(event.get("path") or ""),
+            "status": int(event.get("status") or 0),
+        }
+        if not record["request_id"] or not record["method"] or not record["path"]:
+            return False
+        destination = self.audit_dir / f"service-{datetime.now(UTC).strftime('%Y-%m-%d')}.jsonl"
+        try:
+            with self._lock, destination.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+            return True
+        except OSError:
+            return False
 
     def create(self, extension_id: str, *, version: str | None = None, target_platform: str | None = None) -> dict[str, Any]:
         job, _, _ = self.create_or_reuse(extension_id, version=version, target_platform=target_platform)
@@ -226,6 +253,22 @@ class JobStore:
             })
             self._write_json_locked(path, current)
             return current, True
+
+    def ready(self) -> tuple[bool, str | None]:
+        """Confirm the persistent job store can accept an atomic write.
+
+        A service can be alive while an attached volume is read-only or has
+        disappeared. Readiness checks this dependency without inspecting or
+        modifying any job or report data.
+        """
+        probe = self.root / f".readiness-{uuid.uuid4().hex}.tmp"
+        try:
+            with self._lock:
+                probe.write_text("ready\n", encoding="utf-8")
+                probe.unlink()
+        except OSError as exc:
+            return False, f"job_store_unavailable: {exc.__class__.__name__}"
+        return True, None
 
     def write_report(self, job_id: str, report: dict[str, Any]) -> str:
         path = self.reports_dir / f"{job_id}.json"
@@ -390,15 +433,15 @@ class ScanWorkerPool:
         except queue.Full:
             return False
 
-    def readiness(self) -> dict[str, Any]:
-        """Describe capacity without exposing queued job identities."""
+    def readiness(self) -> dict[str, int | bool]:
+        """Return bounded capacity state without exposing queued job data."""
         workers_alive = sum(thread.is_alive() for thread in self._threads)
-        queued = self._queue.qsize()
-        capacity = self._queue.maxsize
         return {
-            "ready": workers_alive == len(self._threads) and queued < capacity,
-            "workers": {"configured": len(self._threads), "alive": workers_alive},
-            "queue": {"queued": queued, "capacity": capacity},
+            "workers_alive": workers_alive,
+            "workers_expected": len(self._threads),
+            "queue_depth": self._queue.qsize(),
+            "queue_capacity": self._queue.maxsize,
+            "workers_healthy": workers_alive == len(self._threads),
         }
 
     def _worker(self) -> None:
@@ -440,8 +483,8 @@ def cleanup_stale_jobs(store: JobStore, max_age_seconds: int = 7 * 24 * 3600) ->
     a restart does not leave jobs wedged in a non-terminal state forever."""
     removed = 0
     cutoff = time.time() - max_age_seconds
-    for directory in (store.jobs_dir, store.reports_dir):
-        for path in directory.glob("*.json"):
+    for directory, pattern in ((store.jobs_dir, "*.json"), (store.reports_dir, "*.json"), (store.audit_dir, "*.jsonl")):
+        for path in directory.glob(pattern):
             try:
                 if path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
@@ -564,8 +607,8 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(200, health_payload())
             return
         if path == "/readyz":
-            payload = readiness_payload(self.store, self.pool)
-            self._json(200 if payload["status"] == "ready" else 503, payload)
+            ready, payload = readiness_payload(self.store, self.pool)
+            self._json(200 if ready else 503, payload)
             return
         if path == "/v1/openapi.json":
             self._json(200, openapi_payload())
@@ -576,6 +619,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"error": "Scanner service authorization failed."})
             return
+        self._begin_audit(path)
         if path == "/v1/jobs":
             query = parse_qs(parsed.query, keep_blank_values=True)
             extension_id = _one_query_value(query, "extension_id")
@@ -622,9 +666,11 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
                 return
             etag = f'"sha256-{digest}"'
             if self.headers.get("if-none-match", "") == etag:
+                self._write_audit(304)
                 self.send_response(304)
                 self._cors_headers()
                 self.send_header("ETag", etag)
+                self.send_header("X-Request-ID", self._audit_request_id)
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
@@ -637,6 +683,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Scanner service authorization failed."})
             return
         path = self.path.split("?", 1)[0]
+        self._begin_audit(path)
         if path == "/v1/scans/mcp":
             payload = self._read_json(max_bytes=MCP_REQUEST_MAX_BYTES)
             if not payload:
@@ -719,6 +766,7 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Scanner service authorization failed."})
             return
         path = self.path.split("?", 1)[0]
+        self._begin_audit(path)
         if not path.startswith("/v1/jobs/"):
             self._json(404, {"error": "Route not found."})
             return
@@ -758,13 +806,28 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
             matched = hmac.compare_digest(supplied, f"Bearer {token}") or matched
         return matched
 
+    def _begin_audit(self, path: str) -> None:
+        supplied = self.headers.get("x-request-id", "").strip()
+        self._audit_request_id = supplied if REQUEST_ID.fullmatch(supplied) else f"req_{uuid.uuid4().hex}"
+        self._audit_path = path
+
+    def _write_audit(self, status: int) -> None:
+        path = getattr(self, "_audit_path", "")
+        request_id = getattr(self, "_audit_request_id", "")
+        if path and request_id:
+            self.store.write_audit({"request_id": request_id, "method": self.command, "path": path, "status": status})
+
     def _json(self, status: int, payload: Any, *, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self._write_audit(status)
         self.send_response(status)
         self._cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        request_id = getattr(self, "_audit_request_id", "")
+        if request_id:
+            self.send_header("X-Request-ID", request_id)
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
@@ -773,7 +836,8 @@ class ScannerServiceHandler(BaseHTTPRequestHandler):
     def _cors_headers(self) -> None:
         origin = os.environ.get("IDE_SCANNER_ALLOWED_ORIGIN", "http://127.0.0.1:8765")
         self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Headers", "content-type, authorization, idempotency-key")
+        self.send_header("Access-Control-Allow-Headers", "content-type, authorization, idempotency-key, x-request-id")
+        self.send_header("Access-Control-Expose-Headers", "ETag, X-Request-ID")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 
 
@@ -797,23 +861,23 @@ def health_payload() -> dict[str, Any]:
     }
 
 
-def readiness_payload(store: JobStore, pool: ScanWorkerPool) -> dict[str, Any]:
-    """Return safe admission readiness, separate from process liveness.
-
-    Readiness is intentionally false when the bounded queue is full. This
-    allows a platform to stop sending more requests to an overloaded instance;
-    callers that already reach it still receive the explicit `429` contract.
-    """
-    storage = store.readiness()
-    workers = pool.readiness()
-    ready = bool(storage["ready"] and workers["ready"])
-    return {
+def readiness_payload(store: JobStore, pool: ScanWorkerPool) -> tuple[bool, dict[str, Any]]:
+    """Build the authenticated-scan service readiness contract for probes."""
+    store_ready, store_error = store.ready()
+    capacity = pool.readiness()
+    ready = store_ready and bool(store.readiness()["ready"]) and bool(capacity["workers_healthy"]) and int(capacity["queue_depth"]) < int(capacity["queue_capacity"])
+    payload: dict[str, Any] = {
         "status": "ready" if ready else "not_ready",
         "service_version": SERVICE_VERSION,
-        "storage": storage["storage"],
-        "workers": workers["workers"],
-        "queue": workers["queue"],
+        "ruleset_version": RULESET_VERSION,
+        "storage": "ready" if store_ready else "unavailable",
+        "workers": capacity,
     }
+    if store_error:
+        payload["reason"] = store_error
+    elif not capacity["workers_healthy"]:
+        payload["reason"] = "worker_pool_unavailable"
+    return ready, payload
 
 
 def openapi_payload() -> dict[str, Any]:

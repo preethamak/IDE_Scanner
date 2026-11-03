@@ -13,12 +13,14 @@ from .artifact_store import FilesystemArtifactStore
 from .agent import build_agent_report, upload_agent_report
 from .cyclonedx import build_cyclonedx_bom
 from .mcp.declaration_diff import compare_declaration_reports
+from .alternatives import DEFAULT_REPUTATION_FLOOR, find_alternatives
+
 from .benchmarks.adapters.protect_your_secrets import write_normalized_dataset
 from .benchmarks.runner import run_credential_exposure_benchmark, write_benchmark_bundle
 from .benchmarks.production import evaluate_holdout_corpus, evaluate_production_corpus
 from .discovery import discover_from_path, discover_local_installations
 from .evidence import location_from_finding
-from .report_bundle import iter_report_events, verify_report_bundle, write_report_bundle
+from .report_bundle import generate_report_signing_keypair, iter_report_events, verify_report_bundle, write_report_bundle
 from .source_provenance import compare_source_to_vsix
 from .sandbox_runner import run_sandbox, sandbox_preflight
 from .scanner import DEEP_REQUIRED_PROVIDERS, scan_targets
@@ -36,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--extension-id", "--marketplace", dest="extension_id", action="append", default=[], help="Extension identifier to check against online registries.")
     scan.add_argument("--version", help="Pin one Marketplace extension scan to an exact published version.")
     scan.add_argument("--target-platform", help="Pin a Marketplace artifact variant, for example darwin-x64.")
+    scan.add_argument("--scan-related", action="store_true", help="Also acquire and scan declared Marketplace extensionPack and extensionDependencies targets, one hop only.")
+
+    scan.add_argument("--expand-extension-relationships", action="store_true", help="Also scan declared extension packs and extension dependencies as bounded latest-release evidence; declarations are not version-pinned.")
+    scan.add_argument("--max-related-extensions", type=int, default=20, help="Maximum related Marketplace releases to scan with --expand-extension-relationships (1-100).")
     scan.add_argument("--artifact-store", help="Preserve downloaded Marketplace VSIX files in this private vault.")
     scan.add_argument("--artifact-url", help="Final public HTTPS URL for a non-registry VSIX; requires --artifact-sha256.")
     scan.add_argument("--artifact-sha256", help="Required SHA-256 for --artifact-url acquisition.")
@@ -45,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Provenance label for --path inputs; never implies that a source snapshot equals a published VSIX.",
     )
     scan.add_argument("--profile", choices=["quick", "standard", "deep", "smart", "benchmark"], default="smart", help="Report label recorded in the bundle. Analysis depth is identical across profiles.")
-    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "cyclonedx.json"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, report.zip when --output ends in .zip, and CycloneDX JSON when --output ends in .cdx.json.")
+    scan.add_argument("--format", choices=["terminal", "json", "bundle.json", "report.zip", "cyclonedx.json", "sarif"], default=None, help="Output format. Defaults to a readable terminal brief interactively, JSON when piped, report.zip when --output ends in .zip, and CycloneDX JSON when --output ends in .cdx.json.")
     scan.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     scan.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks. Online checks (Marketplace removal list, OSV) are on by default because they are the only path to a confirmed-malware verdict.")
     scan.add_argument("--known-bad-hashes", help="JSON or line-based SHA-256 feed for known malicious artifacts.")
@@ -62,6 +68,29 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--signing-key-id", help="Stable signer id recorded in report provenance.")
     scan.add_argument("--include-raw-evidence", action="store_true", help="Include raw evidence payloads in dashboard detail files.")
     scan.add_argument("--stream", action="store_true", help="Emit newline-delimited JSON scan events instead of a monolithic JSON report.")
+
+    workspace = subparsers.add_parser("workspace", help="Scan extensions recommended by a VS Code workspace.")
+    workspace.add_argument("--root", default=".", help="Workspace root containing VS Code, Dev Container, or .code-workspace configuration.")
+    workspace.add_argument("--lock", help="Optional reviewed extension lock JSON; pins Marketplace version and target platform per extension.")
+    workspace.add_argument("--require-lock", action="store_true", help="Fail when any declared workspace extension lacks a reviewed version pin in --lock.")
+    workspace.add_argument("--profile", choices=["standard", "deep"], default="standard", help="standard performs static analysis; deep requires --runtime and complete required providers.")
+    workspace.add_argument("--runtime", action="store_true", help="Run each eligible extension in the bounded runtime pass. Required for --profile deep.")
+    workspace.add_argument("--runtime-timeout", type=int, default=15, help="Maximum seconds per controlled runtime action (1-300).")
+    workspace.add_argument("--out", "--output", dest="output", help="Write the workspace scan report to this file.")
+
+    workspace_lock = subparsers.add_parser("workspace-lock", help="Generate a reviewed workspace lock from completed workspace scan evidence.")
+    workspace_lock.add_argument("--report", required=True, help="Workspace scan JSON produced by the workspace command.")
+    workspace_lock.add_argument("--out", "--output", dest="output", required=True, help="Write the reviewed workspace lock JSON.")
+
+    workspace_lock_diff = subparsers.add_parser("workspace-lock-diff", help="Compare two reviewed workspace extension locks.")
+    workspace_lock_diff.add_argument("--before", required=True)
+    workspace_lock_diff.add_argument("--after", required=True)
+    workspace_lock_diff.add_argument("--out", "--output", dest="output")
+    workspace_lock_diff.add_argument("--fail-on-drift", action="store_true")
+
+    mcp = subparsers.add_parser("mcp", help="Assess an MCP server descriptor.")
+    mcp.add_argument("--input", required=True, help="JSON MCP server descriptor to assess.")
+    mcp.add_argument("--out", "--output", dest="output", help="Write the machine-readable assessment report to this file.")
 
     inventory = subparsers.add_parser("inventory", help="List discovered extension paths without scanning.")
     inventory.add_argument("--all", action="store_true", help="List local VS Code-compatible extension installs.")
@@ -96,6 +125,13 @@ def main(argv: list[str] | None = None) -> int:
     provenance.add_argument("--source", required=True, help="Source snapshot directory to compare.")
     provenance.add_argument("--vsix", required=True, help="Exact published VSIX artifact to compare.")
     provenance.add_argument("--out", "--output", dest="output", help="Write the comparison JSON to this file.")
+
+    keys = subparsers.add_parser("keys", help="Create report-provenance signing key material.")
+    keys_subparsers = keys.add_subparsers(dest="keys_command", required=True)
+    report_key = keys_subparsers.add_parser("generate-report-signing-key", help="Generate a non-overwritable Ed25519 report signing keypair.")
+    report_key.add_argument("--private-key", required=True, help="New private PEM path; written with owner-only permissions.")
+    report_key.add_argument("--public-key", required=True, help="New public PEM path to distribute through the trust channel.")
+    report_key.add_argument("--key-id", help="Optional stable key id recorded in provenance; defaults to the public-key fingerprint.")
 
     sandbox = subparsers.add_parser("sandbox", help="Create or run a disposable sandbox observation plan.")
     sandbox.add_argument("--path", required=True, help="Extension folder or VSIX file to sandbox.")
@@ -182,6 +218,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Require the report scanner build to equal this immutable revision.",
     )
 
+    alternatives = subparsers.add_parser(
+        "alternatives",
+        help="Rank extensions for a need by publisher reputation before recommending one.",
+    )
+    alternatives.add_argument("query", help="What the extension needs to do, for example 'plist'.")
+    alternatives.add_argument("--limit", type=int, default=10, help="Maximum candidates to assess.")
+    alternatives.add_argument(
+        "--floor",
+        type=int,
+        default=DEFAULT_REPUTATION_FLOOR,
+        help="Reputation score a candidate must reach to be recommendable.",
+    )
+    alternatives.add_argument("--offline", action="store_true", help="Skip source-repository and withdrawal lookups.")
+    alternatives.add_argument("--output", help="Write the result to this path instead of stdout.")
+
     agent = subparsers.add_parser("agent", help="Run a local scan and upload the report to ide-scanner-web.")
     agent.add_argument("--server", required=True, help="Base URL of the web app, for example http://127.0.0.1:8765.")
     agent.add_argument("--token", help="Bearer token for the web app. Defaults to IDE_SCANNER_AGENT_TOKEN.")
@@ -190,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--online", action="store_true", help=argparse.SUPPRESS)
     agent.add_argument("--offline", action="store_true", help="Disable registry and dependency vulnerability checks (on by default).")
     agent.add_argument("--previous-report", help="Previous ide-scanner JSON report to compare versions, dependencies, scores, and artifacts.")
+    agent.add_argument("--scan-related", action="store_true", help="Also scan one declared extensionPack or extensionDependencies hop before uploading the workspace report.")
     agent.add_argument("--out", help="Also write the upload payload to this local JSON file.")
     agent.add_argument("--timeout", type=int, default=30, help="HTTP upload timeout in seconds.")
     agent.add_argument(
@@ -199,6 +251,57 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "workspace-lock":
+        from .workspace import write_workspace_lock
+
+        try:
+            report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("Workspace report must be a JSON object")
+            write_workspace_lock(report, Path(args.output))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        return 0
+    if args.command == "workspace-lock-diff":
+        from .workspace_lock_diff import compare_workspace_locks
+        try:
+            result = compare_workspace_locks(args.before, args.after)
+        except ValueError as exc:
+            parser.error(str(exc))
+        _emit(result, args.output)
+        return 1 if args.fail_on_drift and result["drift_detected"] else 0
+    if args.command == "workspace":
+        from .workspace import scan_workspace_extensions
+
+        if args.profile == "deep" and not args.runtime:
+            parser.error("workspace --profile deep requires --runtime")
+        if not 1 <= args.runtime_timeout <= 300:
+            parser.error("workspace --runtime-timeout must be between 1 and 300 seconds")
+        try:
+            report = scan_workspace_extensions(
+                Path(args.root),
+                lock_path=Path(args.lock) if args.lock else None,
+                profile=args.profile,
+                require_lock=args.require_lock,
+                dynamic_runtime=args.runtime,
+                runtime_timeout_seconds=args.runtime_timeout,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        _emit(report, args.output)
+        return 0
+
+    if args.command == "mcp":
+        try:
+            payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"mcp --input must be a readable JSON object: {exc}")
+        if not isinstance(payload, dict):
+            parser.error("mcp --input must contain a JSON object")
+        from .mcp import scan_mcp_payload
+
+        _emit(scan_mcp_payload(payload), args.output)
+        return 0
     if args.command == "scan":
         if args.version and len(args.extension_id) != 1:
             parser.error("scan --version requires exactly one --extension-id")
@@ -208,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("scan --artifact-url and --artifact-sha256 must be provided together")
         if not 1 <= args.runtime_timeout <= 300:
             parser.error("scan --runtime-timeout must be between 1 and 300 seconds")
+        if not 1 <= args.max_related_extensions <= 100:
+            parser.error("scan --max-related-extensions must be between 1 and 100")
         if args.profile == "deep" and not args.runtime:
             parser.error("scan --profile deep requires --runtime; use standard for static-only scans")
         if args.signing_key and (args.stream or _scan_output_format(args.output, args.format) != "report.zip"):
@@ -217,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
             marketplace_scan_ids=args.extension_id,
             marketplace_version=args.version,
             marketplace_target_platform=args.target_platform,
+            scan_related_marketplace_extensions=args.scan_related,
+
+            expand_extension_relationships=args.expand_extension_relationships,
+            max_related_extensions=args.max_related_extensions,
             include_fixtures=args.fixtures,
             all_local=args.installed,
             online=not args.offline,
@@ -271,12 +380,17 @@ def main(argv: list[str] | None = None) -> int:
             _emit(receipt, None)
             return scan_exit_code
         if output_format == "bundle.json":
-            from .report_bundle import build_report_bundle
+            from .report_bundle import generate_report_signing_keypair, build_report_bundle
             _emit(build_report_bundle(report, profile=args.profile, source=source, include_raw_evidence=args.include_raw_evidence), args.output)
             return scan_exit_code
         if output_format == "cyclonedx.json":
             _emit(build_cyclonedx_bom(report, profile=args.profile, source=source), args.output)
             return scan_exit_code
+        if output_format == "sarif":
+            from .sarif import report_to_sarif
+            _emit(report_to_sarif(report), args.output)
+            return scan_exit_code
+
         if output_format == "terminal":
             if args.output:
                 parser.error("scan --format terminal cannot write an output file; use --format report.zip or json.")
@@ -298,6 +412,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(error))
         _emit(result, args.output)
         return 0
+    if args.command == "keys":
+        try:
+            _emit(generate_report_signing_keypair(
+                args.private_key,
+                args.public_key,
+                signing_key_id=args.key_id,
+            ), None)
+            return 0
+        except ValueError as exc:
+            _emit({"created": False, "error": str(exc)}, None)
+            return 2
+
     if args.command == "report":
         try:
             _emit(verify_report_bundle(args.bundle, public_key=args.public_key, expected_key_id=args.expected_key_id, require_signature=args.require_signature), None)
@@ -378,6 +504,16 @@ def main(argv: list[str] | None = None) -> int:
         result = _run_benchmark()
         _emit(result, args.out)
         return 0
+    if args.command == "alternatives":
+        result = find_alternatives(
+            args.query,
+            limit=args.limit,
+            reputation_floor=args.floor,
+            online=not args.offline,
+        )
+        _emit(result, args.output)
+        # Exit 3 lets a caller gate on the result without parsing JSON.
+        return 0 if result["recommendation_allowed"] else 3
     if args.command == "agent":
         if not args.all and not args.path:
             parser.error("agent requires --all or at least one --path")
@@ -387,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
             online=not args.offline,
             previous_report_file=args.previous_report,
             include_source=args.include_source,
+            scan_related_marketplace_extensions=args.scan_related,
         )
         if args.out:
             _emit(payload, args.out)

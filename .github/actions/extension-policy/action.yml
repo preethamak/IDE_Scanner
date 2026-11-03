@@ -1,0 +1,67 @@
+name: GuardRails extension policy
+description: Enforce exact-artifact approval policy for VS Code extensions recommended by a repository.
+inputs:
+  root:
+    description: Repository directory containing VS Code extension recommendations.
+    required: false
+    default: .
+  policy:
+    description: Policy file relative to root.
+    required: false
+    default: .ide-scanner/policy.json
+  lock:
+    description: Reviewed extension lock file relative to root.
+    required: false
+    default: .ide-scanner/extensions.lock.json
+  output:
+    description: Machine-readable policy result written by the action.
+    required: false
+    default: ide-scanner-policy-result.json
+  write_lock:
+    description: Resolve and write a lock file instead of only enforcing the existing policy.
+    required: false
+    default: "false"
+outputs:
+  result_file:
+    description: Path to the policy result JSON.
+    value: ${{ steps.policy.outputs.result_file }}
+  total:
+    description: Number of repository-declared extensions evaluated.
+    value: ${{ steps.policy.outputs.total }}
+  failed:
+    description: Number of extensions rejected by the policy.
+    value: ${{ steps.policy.outputs.failed }}
+runs:
+  using: composite
+  steps:
+    - id: policy
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_LOCK: ${{ inputs.lock }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_WRITE_LOCK: ${{ inputs.write_lock }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_WRITE_LOCK" in true|false) ;; *) echo "write_lock must be true or false" >&2; exit 2 ;; esac
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --disable-pip-version-check --no-cache-dir "$action_root"
+        args=(python "$action_root/scripts/policy_gate.py" --root "$INPUT_ROOT" --policy "$INPUT_POLICY" --lock "$INPUT_LOCK" --output "$INPUT_OUTPUT")
+        if [[ "$INPUT_WRITE_LOCK" == "true" ]]; then args+=(--write-lock); fi
+        "${args[@]}"
+        test -s "$INPUT_OUTPUT"
+        read -r total failed < <(python - "$INPUT_OUTPUT" <<'PY'
+        import json
+        import sys
+
+        payload = json.load(open(sys.argv[1], encoding="utf-8"))
+        summary = payload.get("summary") or {}
+        print(f"{int(summary.get('total') or 0)} {int(summary.get('failed') or 0)}")
+        PY
+        )
+        {
+          echo "result_file=$INPUT_OUTPUT"
+          echo "total=$total"
+          echo "failed=$failed"
+        } >> "$GITHUB_OUTPUT"

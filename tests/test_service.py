@@ -1,6 +1,7 @@
-import os
 import json
 import hashlib
+
+import os
 import tempfile
 import threading
 import time
@@ -9,6 +10,9 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from urllib.request import urlopen
+
 from http.server import ThreadingHTTPServer
 
 from ide_scanner.service import (
@@ -23,6 +27,7 @@ from ide_scanner.service import (
     health_payload,
     readiness_payload,
     maintain_store,
+
     openapi_payload,
     _decode_job_cursor,
     retry_failed_webhook_deliveries,
@@ -141,12 +146,55 @@ class ScannerServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))
             pool = ScanWorkerPool(store, max_workers=1, max_queue=1)
-            ready = readiness_payload(store, pool)
+            is_ready, ready = readiness_payload(store, pool)
 
             self.assertEqual(ready["status"], "ready")
-            self.assertEqual(ready["storage"], "available")
-            self.assertEqual(ready["workers"], {"configured": 1, "alive": 1})
-            self.assertEqual(ready["queue"], {"queued": 0, "capacity": 1})
+            self.assertEqual(ready["storage"], "ready")
+            self.assertEqual(ready["workers"]["workers_alive"], 1)
+            self.assertEqual(ready["workers"]["queue_depth"], 0)
+            self.assertEqual(ready["workers"]["queue_capacity"], 1)
+
+    def test_readiness_reports_persistent_store_and_worker_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            pool = ScanWorkerPool(store, max_workers=1, max_queue=3)
+            ready, payload = readiness_payload(store, pool)
+
+            self.assertTrue(ready)
+            self.assertEqual(payload["status"], "ready")
+            self.assertEqual(payload["storage"], "ready")
+            self.assertEqual(payload["workers"]["workers_alive"], 1)
+            self.assertEqual(payload["workers"]["queue_capacity"], 3)
+
+    def test_readiness_reports_storage_failure_without_job_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            pool = ScanWorkerPool(store, max_workers=1)
+            with patch.object(store, "ready", return_value=(False, "job_store_unavailable: OSError")):
+                ready, payload = readiness_payload(store, pool)
+
+            self.assertFalse(ready)
+            self.assertEqual(payload["status"], "not_ready")
+            self.assertEqual(payload["storage"], "unavailable")
+            self.assertNotIn("jobs", payload)
+
+    def test_readyz_is_an_unauthenticated_http_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/readyz", timeout=2) as response:
+                    payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["status"], "ready")
+            finally:
+                server.shutdown()
+                server.server_close()
+
 
     def test_openapi_contract_covers_public_and_authenticated_routes(self) -> None:
         contract = openapi_payload()
@@ -206,6 +254,7 @@ class ScannerServiceTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+
     def test_openapi_contract_is_served_over_http_without_a_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = JobStore(Path(temp))
@@ -253,6 +302,40 @@ class ScannerServiceTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_authenticated_requests_write_retained_privacy_minimized_audit_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ScannerServiceHandler)
+            server.job_store = store  # type: ignore[attr-defined]
+            server.scan_pool = ScanWorkerPool(store, max_workers=1, max_queue=1)  # type: ignore[attr-defined]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            endpoint = f"http://127.0.0.1:{server.server_port}/v1/jobs"
+            try:
+                with patch.dict(os.environ, {"IDE_SCANNER_API_TOKEN": "service-token"}):
+                    request = Request(endpoint, headers={"Authorization": "Bearer service-token", "X-Request-ID": "support-case-42"})
+                    with urlopen(request, timeout=2) as response:
+                        self.assertEqual(response.headers["X-Request-ID"], "support-case-42")
+                entries = [json.loads(line) for path in store.audit_dir.glob("*.jsonl") for line in path.read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(entries, [{"method": "GET", "path": "/v1/jobs", "request_id": "support-case-42", "status": 200, "timestamp": entries[0]["timestamp"]}])
+                self.assertNotIn("service-token", json.dumps(entries))
+                self.assertNotIn("authorization", json.dumps(entries).lower())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_audit_receipts_follow_the_same_retention_lifecycle_as_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = JobStore(Path(temp))
+            self.assertTrue(store.write_audit({"request_id": "support-case-42", "method": "GET", "path": "/v1/jobs", "status": 200}))
+            receipt = next(store.audit_dir.glob("*.jsonl"))
+            old = time.time() - 120
+            os.utime(receipt, (old, old))
+
+            self.assertEqual(cleanup_stale_jobs(store, max_age_seconds=60), 1)
+            self.assertFalse(receipt.exists())
 
     def test_http_report_exposes_a_stable_exact_byte_etag(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -412,6 +495,7 @@ class ScannerServiceTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
 
 
 class ScanWorkerPoolTests(unittest.TestCase):

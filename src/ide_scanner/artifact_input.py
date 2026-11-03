@@ -94,20 +94,29 @@ def acquire_https_archive_member(
                 info = archive.getinfo(member_name)
                 if info.is_dir() or info.file_size > MAX_REMOTE_ARTIFACT_BYTES:
                     raise ArtifactInputError("Archive member is empty or exceeds the 512 MiB acquisition limit")
-                payload = archive.read(info)
+                if info.flag_bits & 0x1:
+                    raise ArtifactInputError("Encrypted archive members are not supported")
+                fd, name = tempfile.mkstemp(prefix="ide-scanner-member-", suffix=".vsix", dir=str(destination))
+                output = Path(name)
+                digest = hashlib.sha256()
+                copied = 0
+                try:
+                    with os.fdopen(fd, "wb") as target, archive.open(info) as source:
+                        while chunk := source.read(1024 * 1024):
+                            copied += len(chunk)
+                            if copied > MAX_REMOTE_ARTIFACT_BYTES:
+                                raise ArtifactInputError("Archive member exceeds the 512 MiB acquisition limit")
+                            target.write(chunk)
+                            digest.update(chunk)
+                except (OSError, RuntimeError, ArtifactInputError):
+                    output.unlink(missing_ok=True)
+                    raise
         except (BadZipFile, KeyError, OSError, RuntimeError) as exc:
             raise ArtifactInputError(f"Remote archive member could not be read: {exc}") from exc
-        if hashlib.sha256(payload).hexdigest() != member_hash:
-            raise ArtifactInputError("Remote archive member SHA-256 does not match the required digest")
-        fd, name = tempfile.mkstemp(prefix="ide-scanner-member-", suffix=".vsix", dir=str(destination))
-        output = Path(name)
-        try:
-            with os.fdopen(fd, "wb") as target:
-                target.write(payload)
-            return output
-        except OSError as exc:
+        if digest.hexdigest() != member_hash:
             output.unlink(missing_ok=True)
-            raise ArtifactInputError(f"Remote archive member could not be stored: {exc}") from exc
+            raise ArtifactInputError("Remote archive member SHA-256 does not match the required digest")
+        return output
 
 
 def _validated_sha256(value: str, label: str) -> str:

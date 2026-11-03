@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import gzip
 import json
+import sys
 import shutil
 import subprocess
 import unittest
@@ -382,7 +383,7 @@ class ScanCorpusTests(unittest.TestCase):
 
     def test_worker_timeout_reaps_stuck_process(self) -> None:
         process = subprocess.Popen(
-            ["/usr/bin/python", "-c", "import time; time.sleep(60)"],
+            [sys.executable, "-c", "import time; time.sleep(60)"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
