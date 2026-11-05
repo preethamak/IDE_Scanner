@@ -309,6 +309,7 @@ class RegistryTests(unittest.TestCase):
             "extension_name": "extension",
             "version": "2.0.0",
             "registry": "vs-marketplace",
+            "download_url": "https://publisher.gallery.vsassets.io/latest/2.0.0/package.vsix",
             "vsix_sha256": "0" * 64,
             "signature_asset_declared": True,
         }, None)
@@ -321,8 +322,38 @@ class RegistryTests(unittest.TestCase):
             self.assertTrue(result.exists())
 
         self.assertEqual(source["integrity_metadata_matches_artifact"], "false")
+        self.assertIn("/extension/1.0.0/vspackage", download.call_args.args[0])
+        self.assertNotIn("2.0.0", download.call_args.args[0])
         self.assertNotIn("expected_sha256", source)
         self.assertEqual(source["signature_asset_declared"], "false")
+
+    @patch("ide_scanner.registry._http_get_text")
+    def test_openvsx_metadata_requests_the_exact_version(self, get_text) -> None:
+        get_text.return_value = json.dumps(OPENVSX_EXTENSION)
+        metadata, error = _fetch_openvsx_metadata("tintinweb.vscode-vyper", "0.1.0")
+        self.assertIsNone(error)
+        self.assertEqual(metadata["version"], "0.1.0")
+        self.assertEqual(get_text.call_args.args[0], "https://open-vsx.org/api/tintinweb/vscode-vyper/0.1.0")
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata")
+    @patch("ide_scanner.registry._fetch_marketplace_metadata", return_value=({"found": False}, None))
+    def test_openvsx_only_pinned_download_rejects_wrong_version(self, _marketplace, openvsx) -> None:
+        openvsx.return_value = ({"found": True, "version": "2.0.0", "registry": "openvsx", "download_url": "https://open-vsx.org/latest.vsix"}, None)
+        with patch("ide_scanner.registry._download_to_file") as download:
+            with self.assertRaisesRegex(MarketplaceDownloadError, "requested release"):
+                download_marketplace_vsix("publisher.extension", version="1.0.0")
+        openvsx.assert_called_once_with("publisher.extension", "1.0.0")
+        download.assert_not_called()
+
+    @patch("ide_scanner.registry._fetch_openvsx_metadata", return_value=({"found": False}, None))
+    @patch("ide_scanner.registry._fetch_marketplace_metadata")
+    def test_matching_version_keeps_the_gallery_selected_variant(self, marketplace, _openvsx) -> None:
+        asset = "https://publisher.gallery.vsassets.io/version/1.0.0/package.vsix"
+        marketplace.return_value = ({"found": True, "version": "1.0.0", "registry": "vs-marketplace", "download_url": asset}, None)
+        with tempfile.TemporaryDirectory() as temp, patch("ide_scanner.registry._download_to_file") as download:
+            download.side_effect = lambda _url, handle, **_kwargs: handle.write(b"PK\x03\x04selected")
+            download_marketplace_vsix("publisher.extension", version="1.0.0", destination_dir=Path(temp))
+        self.assertEqual(download.call_args.args[0], asset)
 
     def test_target_platform_rejects_untrusted_url_input(self) -> None:
         with self.assertRaisesRegex(MarketplaceDownloadError, "target platform"):

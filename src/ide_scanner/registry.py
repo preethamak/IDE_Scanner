@@ -188,7 +188,7 @@ def download_marketplace_vsix(
         raise MarketplaceDownloadError("Marketplace target platform is invalid.")
     metadata, error = _fetch_marketplace_metadata(resolved_id)
     if error or not metadata or not metadata.get("found"):
-        metadata, openvsx_error = _fetch_openvsx_metadata(resolved_id)
+        metadata, openvsx_error = _fetch_openvsx_metadata(resolved_id, version)
         if openvsx_error:
             reasons = "; ".join(item for item in (error, openvsx_error) if item)
             raise MarketplaceDownloadError(f"Registry lookup failed for {resolved_id}: {reasons}")
@@ -202,6 +202,9 @@ def download_marketplace_vsix(
     target_version = version or metadata.get("version") or ""
     if not target_version:
         raise MarketplaceDownloadError(f"Could not resolve a version to download for {resolved_id}.")
+    metadata_version_matches = str(metadata.get("version") or "") == str(target_version)
+    if metadata.get("registry") == "openvsx" and not metadata_version_matches:
+        raise MarketplaceDownloadError(f"Open VSX did not resolve the requested release {resolved_id}@{target_version}.")
 
     # The gallery query can return several platform variants with the same
     # semantic version.  For an unqualified scan, use the exact VSIXPackage
@@ -209,7 +212,9 @@ def download_marketplace_vsix(
     # endpoint, which may resolve to a different variant than the digest in
     # the response.  Target-platform scans intentionally keep the generic
     # endpoint so the targetPlatform selector remains authoritative.
-    metadata_download_url = str(metadata.get("download_url") or "")
+    # Gallery metadata describes its selected (usually latest) release. Its
+    # asset URL must never override a user-pinned older version.
+    metadata_download_url = str(metadata.get("download_url") or "") if metadata_version_matches else ""
     download_url = (metadata_download_url if metadata_download_url and not target_platform else "") or (
         f"https://marketplace.visualstudio.com/_apis/public/gallery/publishers/{publisher}/"
         f"vsextensions/{name}/{target_version}/vspackage"
@@ -219,7 +224,7 @@ def download_marketplace_vsix(
         download_url = f"{download_url}{separator}targetPlatform={quote(target_platform, safe='')}"
     download_urls = [download_url]
     if metadata.get("registry") != "openvsx" and not target_platform:
-        openvsx_metadata, _ = _fetch_openvsx_metadata(resolved_id)
+        openvsx_metadata, _ = _fetch_openvsx_metadata(resolved_id, version)
         openvsx_url = str((openvsx_metadata or {}).get("download_url") or "")
         # Never satisfy an exact-version request with Open VSX's latest
         # artifact. If the registries do not expose the same version, fail
@@ -793,10 +798,11 @@ def _fetch_marketplace_metadata(extension_id: str) -> tuple[dict[str, Any] | Non
     return _normalize_marketplace_extension(extension_id, extensions[0]), None
 
 
-def _fetch_openvsx_metadata(extension_id: str) -> tuple[dict[str, Any] | None, str | None]:
+def _fetch_openvsx_metadata(extension_id: str, version: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
     publisher, name = extension_id.split(".", 1)
+    version_path = f"/{quote(version, safe='')}" if version else ""
     try:
-        raw = json.loads(_http_get_text(f"{OPENVSX_API_URL}/{publisher}/{name}", timeout=15))
+        raw = json.loads(_http_get_text(f"{OPENVSX_API_URL}/{publisher}/{name}{version_path}", timeout=15))
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return {"extension_id": extension_id, "found": False}, None
